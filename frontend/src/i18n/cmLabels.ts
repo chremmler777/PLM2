@@ -3157,7 +3157,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'achk.reopenWhy': { de: 'Warum? (5+ Zeichen)', en: 'Why? (5+ characters)' },
   'achk.question': { de: 'Ihre Frage an: {who}', en: 'Your question to: {who}' },
   'achk.answer': { de: 'Antwort', en: 'Answer' },
-  'achk.waiting': { de: 'Wartet auf Antwort. Hält nur Ihre Abgabe.', en: 'Waiting for the answer. It holds only your submit.' },
+  'achk.waiting': { de: 'Offen: hält nur Ihre Abgabe.', en: 'Open: it holds only your submit.' },
   'achk.waitingOther': { de: 'Wartet auf Antwort.', en: 'Waiting for the answer.' },
   'achk.asksYou': { de: '{d} fragt Sie', en: '{d} asks you' },
   'achk.questionTo.customer': { de: 'Frage an den Kunden', en: 'Question for the customer' },
@@ -3172,8 +3172,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'achk.closeQuestion': { de: 'Frage schließen', en: 'Close question' },
   'achk.ask': { de: 'Blockiert? Frage stellen', en: 'Blocked? Ask a question' },
   'achk.askHint': {
-    de: 'Die Frage hält nur Ihre eigene Abgabe. Kunde oder Lieferant: Vertrieb bekommt die Aufgabe mit Mailtext; unser Team: der Leiter.',
-    en: 'The question holds only your own submit. Customer or supplier: Sales gets the task with the mail text; our team: the lead.' },
+    de: 'Sie holen die Antwort selbst (Telefon, Teams, Mail; Kunde über Vertrieb/PM) und tragen sie hier ein. Die Frage hält nur Ihre eigene Abgabe.',
+    en: 'You get the answer yourself (phone, Teams, mail; the customer through Sales/PM) and record it here. It holds only your own submit.' },
+  'achk.answerToClose': { de: 'Antwort eintragen: das schließt die Frage.', en: 'Record the answer: that closes the question.' },
+  'achk.settledByAnswer': { de: 'Durch die Antwort geklärt', en: 'Settled by the answer' },
   'achk.askPlaceholder': { de: 'Was genau fehlt Ihnen? Eine Zeile', en: 'What exactly do you need? One line' },
   'achk.cancel': { de: 'Abbrechen', en: 'Cancel' },
   'verdict.yesNeeds': {

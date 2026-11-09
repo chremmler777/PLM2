@@ -287,7 +287,8 @@ describe('ConcernStrip in the assessment phase', () => {
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[4]} />)
     const note = await screen.findByText('Tool cannot hold tolerance')
     expect(screen.getByText(t('risk.title'))).toBeTruthy()
-    expect(screen.getByText(t('risk.hint'))).toBeTruthy()
+    // the explanation sits in a tooltip now (2026-11-08)
+    expect(screen.getByTestId('risk-hint').getAttribute('title')).toBe(t('risk.hint'))
     // The kind reads as a risk, not as "would reject".
     expect(note.closest('li')?.textContent).toContain(t('risk.kind'))
     expect(screen.getByTestId('concern-close-1').textContent).toBe(t('risk.resolved'))

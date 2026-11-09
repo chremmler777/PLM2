@@ -358,6 +358,7 @@ def _q(dept, **extra):
             "answer_from": "customer", **extra}
 
 
+@pytest.mark.usefixtures("old_question_routing")
 async def test_question_holds_only_own_submit_and_reaches_sales_owner(
         client, assess, session_factory):
     a = assess
@@ -409,6 +410,7 @@ async def test_question_holds_only_own_submit_and_reaches_sales_owner(
     await _submit(client, a["te"], a, a["tool"], ok=True)
 
 
+@pytest.mark.usefixtures("old_question_routing")
 async def test_question_for_our_team_goes_to_the_lead(client, assess, session_factory):
     a = assess
     res = await client.post(_url(a, "/concerns"),
@@ -424,6 +426,7 @@ async def test_question_for_our_team_goes_to_the_lead(client, assess, session_fa
                for t in tasks)
 
 
+@pytest.mark.usefixtures("old_question_routing")
 async def test_our_team_question_on_an_internal_change_is_the_leads_to_answer(
         client, assess, session_factory):
     """R5/R18: P3 makes the engineering raiser the lead of an internal
@@ -460,6 +463,7 @@ async def test_our_team_question_on_an_internal_change_is_the_leads_to_answer(
     assert rows[qid]["can_answer"] is False
 
 
+@pytest.mark.usefixtures("old_question_routing")
 async def test_sales_is_not_tasked_with_an_our_team_question(client, assess):
     """R13: Sales' row counts customer and supplier questions only; a newer
     our-team question neither adds to it nor hides the mail text."""
@@ -487,6 +491,7 @@ async def test_sales_is_not_tasked_with_an_our_team_question(client, assess):
     assert "our change" in rows[0]["customer_copy"]
 
 
+@pytest.mark.usefixtures("old_question_routing")
 async def test_project_management_sees_a_customer_question_as_support(
         client, assess, session_factory, seed):
     """Christoph 2026-10-30: a customer/supplier question from the
@@ -646,6 +651,7 @@ async def test_answered_by_a_file_counts_only_the_departments_own_file(
     assert res.status_code == 200, res.text
 
 
+@pytest.mark.usefixtures("old_question_routing")
 async def test_an_assumed_answer_the_asker_confirms_is_one_action(
         client, assess, session_factory):
     """A3-13: the asker named to confirm an Assumed answer gets ONE row,

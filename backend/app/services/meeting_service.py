@@ -640,7 +640,9 @@ class MeetingService:
                        **({"flag_type": flag_type, "check_what": check_what,
                            "part_id": part_id} if structured else {})},
             notes=concern.note)
-        if assess_question or (kind != "risk" and concern.answer_from == "customer"):
+        if (assess_question and not cm_switches.ASKER_OWNS_QUESTION) or (
+                not assess_question and kind != "risk"
+                and concern.answer_from == "customer"):
             # F8: a customer question at scoping is the Sales contact's task
             # too: told once when raised
             await MeetingService._tell_question_asked(session, change, concern, user)

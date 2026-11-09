@@ -905,7 +905,10 @@ class ChangeService:
             await session.refresh(change, ["concerns"])
         rows = [q for q in change.concerns
                 if q.answer_kind == "assumed" and q.confirmed_at is None
-                and q.retracted_at is None and q.withdrawn_at is None]
+                and q.retracted_at is None]
+        # 2026-11-08: a closed question keeps its Assumed answer (the asker
+        # answers and closes in one step); the confirm item stays open, as
+        # the offer already reads it (offer_service).
         out: dict[str, list[str]] = {"customer": [], "other": []}
         if not rows:
             return out
@@ -4832,6 +4835,10 @@ class ChangeService:
             # without a pick), never one for our team (R13)
             theirs = [q for q in questions if q.answer_from != "our_team"]
             live = c.status not in ("captured", "scoping")
+            if live and cm_switches.ASKER_OWNS_QUESTION:
+                # 2026-11-08: from the assessment on the asker gets the
+                # answer; nobody else carries the question as a task
+                ours, theirs = [], []
             if live and ours and (
                     holds_lead(c, user) or (is_pm_member and c.lead_id is None)):
                 newest = ours[-1]
@@ -6887,6 +6894,8 @@ class ChangeService:
             return f"#{c.id} cancel vote '{c.note}': its raiser or PM withdraws it"
         if c.answered_at is not None:
             return f"#{c.id} question '{c.note}': answered, settle it (Close question)"
+        if cm_switches.ASKER_OWNS_QUESTION and change.status not in ("captured", "scoping"):
+            return f"#{c.id} question '{c.note}': get the answer, record it and close it"
         who = ("Sales" if c.answer_from in ("customer", "supplier")
                else (change.lead_name or "the lead") if c.answer_from == "our_team"
                else "Sales or Project Management")

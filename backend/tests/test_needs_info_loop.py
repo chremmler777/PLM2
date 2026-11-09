@@ -628,6 +628,7 @@ async def test_objections_are_not_questions(client, admin_auth, seed,
             if t["kind"] == "obtain_info" and t["change_id"] == cid] == []
 
 
+@pytest.mark.usefixtures("old_question_routing")
 async def test_a_question_in_assessment_still_reaches_sales(
         client, admin_auth, seed, session_factory):
     """Questions do not stop at scoping — the row follows the change."""

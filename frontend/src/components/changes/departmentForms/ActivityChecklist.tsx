@@ -445,8 +445,8 @@ export default function ActivityChecklist({
 
   return (
     <div className="space-y-1">
-      <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('check.title', lang)}</p>
-      <p className="text-[11px] text-slate-500">{t('check.hint', lang)}</p>
+      <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('check.title', lang)}
+        {' '}<span className="normal-case cursor-help" title={t('check.hint', lang)}>ⓘ</span></p>
       {items.length === 0 && freeLines.length === 0 && legacy.length === 0 && earlier.length === 0 ? (
         <p className="text-xs text-slate-600">{t('check.empty', lang)}</p>
       ) : (

@@ -20,10 +20,9 @@ import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import { formatCalendarDate } from '../../../lib/format'
-import CustomerCopy from '../scoping/CustomerCopy'
 import AnswerForm from '../scoping/AnswerForm'
 import {
-  CHECK_WHAT, type AnswerFrom, type Attachment, type ChangeConcern, type CheckWhat,
+  type AnswerFrom, type Attachment, type ChangeConcern,
 } from '../../../types/change'
 
 const input = 'bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100'
@@ -60,6 +59,9 @@ export default function AssessmentChecks({
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['change', changeId, 'concerns'] })
     qc.invalidateQueries({ queryKey: ['change', changeId] })
+    // the header (blockers, your actions) reads these, not ['change', id]
+    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+    qc.invalidateQueries({ queryKey: ['change-routing', changeId] })
     onChanged?.()
   }
   const checks = concerns.filter((c) => ownsCheck(c, departmentId))
@@ -292,65 +294,45 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
   changeId: number; q: ChangeConcern; editable: boolean; onDone: () => void
   attachments: Attachment[]; confirmerName: string | null
 }) {
-  const [note, setNote] = useState('')
+  // Christoph 2026-11-08: the asker owns the question: gets the answer, records
+  // it, and that closes it (one step). No mail text, nobody else's task.
   const close = useMutation({
-    mutationFn: () => changesApi.withdrawConcern(changeId, q.id, note.trim()),
-    onSuccess: () => { setNote(''); onDone() },
-    onError: (e: unknown) => { toastError(e, t('achk.saveFailed')) },
+    mutationFn: (note: string) => changesApi.withdrawConcern(changeId, q.id, note),
+    onSuccess: () => onDone(),
+    onError: (e: unknown) => { toastError(e, t('achk.saveFailed')); onDone() },
   })
   const answer = q.answer_kind === 'assumed'
     ? `${t('answer.assumed')}: ${q.assumed_value ?? ''} ${q.assumed_unit ?? ''}`.trim()
     : q.answer_kind === 'confirmed' ? `${t('answer.confirmed')}: ${q.answer_ref ?? ''}`
       : q.answer_note
-  const outside = q.answer_from === 'customer' || q.answer_from === 'supplier'
-  const passOn = outside && !!q.can_answer && !q.answered_at && !editable
+  const settle = () => close.mutate(t('achk.settledByAnswer'))
   return (
     <div className="rounded border border-sky-800/60 bg-sky-950/20 p-2 space-y-1" data-testid={`achk-q-${q.id}`}>
-      {/* A3-13: worded by viewer: the asker reads its own question, the
-          answerer who asks it, anybody else both */}
       <p className="text-xs text-sky-200 font-semibold" data-testid={`achk-qhead-${q.id}`}>
         {editable
           ? t('achk.question').replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))
-          : q.can_answer && !q.answered_at
-            // a customer/supplier question: the heading names who is asked,
-            // the step line below what the viewer does (Christoph 2026-10-30)
-            ? (outside ? t(`achk.questionTo.${q.answer_from}`)
-              : t('achk.asksYou').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? ''))
-              + (q.answer_due ? `: ${t('achk.answerBy').replace('{d}', formatCalendarDate(q.answer_due))}` : '')
-            : t('achk.asks').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
-              .replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))}
+          : t('achk.asks').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
+            .replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))}
       </p>
       <Head c={q} />
       {q.answered_at ? (
         <p className="text-xs text-slate-200">{t('achk.answer')}: {answer}
           {q.answered_by_name && <span className="text-slate-500"> ({q.answered_by_name})</span>}</p>
-      ) : passOn ? (
-        <p className="text-xs text-slate-300" data-testid={`achk-qstep-${q.id}`}>
-          {t(`achk.passOn.${q.answer_from}`)
-            .replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')}
-        </p>
       ) : (
-        <p className="text-xs text-slate-400">{t(editable ? 'achk.waiting' : 'achk.waitingOther')}</p>
+        <p className="text-xs text-slate-400">{editable ? t('achk.answerToClose') : t('achk.waitingOther')}</p>
       )}
-      {q.customer_copy && <CustomerCopy text={q.customer_copy} testId={`achk-copy-${q.id}`} />}
-      {/* Sales, PM or the asking department answer here (C8): Confirmed or
-          Assumed, as for any question. */}
-      {q.can_answer && !q.answered_at && (
+      {editable && q.can_answer && !q.answered_at && (
         <div data-testid={`achk-answer-${q.id}`}>
           <AnswerForm changeId={changeId} concern={q} attachments={attachments}
-            confirmerName={confirmerName} onDone={onDone} />
+            confirmerName={confirmerName} onDone={onDone} onSaved={settle} />
         </div>
       )}
-      {editable && (
-        <div className="flex gap-2 items-center">
-          <input className={`${input} flex-1`} value={note} placeholder={t('achk.closeNote')}
-            aria-label={t('achk.closeNote')} data-testid={`achk-qnote-${q.id}`}
-            onChange={(e) => setNote(e.target.value)} />
-          <button type="button" className={btnSm.secondary} disabled={!note.trim() || close.isPending}
-            data-testid={`achk-qclose-${q.id}`} onClick={() => close.mutate()}>
-            {t('achk.closeQuestion')}
-          </button>
-        </div>
+      {/* answered earlier but still open (before 2026-11-08): one click */}
+      {editable && q.answered_at && (
+        <button type="button" className={btnSm.secondary} disabled={close.isPending}
+          data-testid={`achk-qclose-${q.id}`} onClick={settle}>
+          {t('achk.closeQuestion')}
+        </button>
       )}
     </div>
   )
@@ -361,14 +343,13 @@ function AskQuestion({ changeId, departmentId, onDone }: {
 }) {
   const [opened, setOpened] = useState(false)
   const [note, setNote] = useState('')
-  const [what, setWhat] = useState<CheckWhat | ''>('')
   const [from, setFrom] = useState<AnswerFrom | ''>('')
   const ask = useMutation({
     mutationFn: () => changesApi.raiseConcern(changeId, {
       kind: 'needs_info', note: note.trim(), department_id: departmentId,
-      flag_type: 'question', check_what: what as CheckWhat, answer_from: from as AnswerFrom,
+      flag_type: 'question', check_what: 'other', answer_from: from as AnswerFrom,
     }),
-    onSuccess: () => { setOpened(false); setNote(''); setWhat(''); setFrom(''); onDone() },
+    onSuccess: () => { setOpened(false); setNote(''); setFrom(''); onDone() },
     onError: (e: unknown) => { toastError(e, t('achk.saveFailed')) },
   })
   if (!opened) {
@@ -386,12 +367,6 @@ function AskQuestion({ changeId, departmentId, onDone }: {
         aria-label={t('achk.askPlaceholder')} data-testid={`achk-asknote-${departmentId}`}
         onChange={(e) => setNote(e.target.value)} />
       <div className="flex flex-wrap gap-2">
-        <select className={input} value={what} aria-label={t('flag.checkWhat')}
-          data-testid={`achk-askwhat-${departmentId}`}
-          onChange={(e) => setWhat(e.target.value as CheckWhat)}>
-          <option value="">{t('flag.checkWhat')}</option>
-          {CHECK_WHAT.map((w) => <option key={w} value={w}>{t(`flag.what.${w}`)}</option>)}
-        </select>
         <select className={input} value={from} aria-label={t('flag.answerFrom')}
           data-testid={`achk-askfrom-${departmentId}`}
           onChange={(e) => setFrom(e.target.value as AnswerFrom)}>
@@ -401,7 +376,7 @@ function AskQuestion({ changeId, departmentId, onDone }: {
           ))}
         </select>
         <button type="button" className={btnSm.primary}
-          disabled={!note.trim() || !what || !from || ask.isPending}
+          disabled={!note.trim() || !from || ask.isPending}
           data-testid={`achk-asksend-${departmentId}`} onClick={() => ask.mutate()}>
           {t('flag.addQuestion')}
         </button>

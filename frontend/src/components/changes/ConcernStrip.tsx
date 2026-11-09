@@ -351,6 +351,10 @@ export default function ConcernStrip({
       blocking.length > 0 ? 'border-amber-700/60 bg-amber-950/20' : 'border-slate-700 bg-slate-800'}`}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="font-medium text-slate-100">{w.title}</span>
+        {scoped && (
+          <span className="text-[11px] text-slate-500 cursor-help" title={w.hint}
+            data-testid="risk-hint">ⓘ</span>
+        )}
         {blocking.length > 0 && (
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900 text-amber-100">
             {t('concern.blocking').replace('{n}', String(blocking.length))}
@@ -369,7 +373,6 @@ export default function ConcernStrip({
         )}
       </div>
 
-      {scoped && <p className="text-[11px] text-slate-500">{w.hint}</p>}
 
       {open.length === 0 && settled.length === 0 && (
         // Assessment is past the meeting: its empty register says so plainly.

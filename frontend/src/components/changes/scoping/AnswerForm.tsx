@@ -26,7 +26,7 @@ import type { AnswerForm as AnswerBody, Attachment, ChangeConcern } from '../../
 const input = 'bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100'
 
 export default function AnswerForm({
-  changeId, concern: c, attachments, confirmerName, onDone, confirming = false,
+  changeId, concern: c, attachments, confirmerName, onDone, onSaved, confirming = false,
 }: {
   changeId: number
   concern: ChangeConcern
@@ -35,6 +35,8 @@ export default function AnswerForm({
   /** Who confirms an assumption by default (the Sales contact, else the lead). */
   confirmerName?: string | null
   onDone: () => void
+  /** Called after the answer itself is saved (not after a document upload). */
+  onSaved?: () => void
   /** Confirm an open assumption (evidence only) instead of answering. */
   confirming?: boolean
 }) {
@@ -77,7 +79,7 @@ export default function AnswerForm({
     onSuccess: () => {
       setKind(confirming ? 'confirmed' : ''); setRef(''); setMailId(''); setNote('')
       setValue(''); setUnit(''); setRisk('')
-      onDone()
+      if (onSaved) onSaved(); else onDone()
     },
     onError: (e: unknown) => { toastError(e, 'Could not save the answer') },
   })

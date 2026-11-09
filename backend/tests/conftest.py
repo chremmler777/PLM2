@@ -3,6 +3,7 @@ import logging
 import re
 from datetime import datetime, timedelta
 
+import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from jose import jwt as _jwt
@@ -641,3 +642,11 @@ async def impact_confirm_on(monkeypatch):
 # what the answer changes in the scope; tests that raise one spread this.
 QUESTION = {"flag_type": "question", "check_what": "other",
             "answer_from": "our_team", "scope_effect": "Decides which parts are in scope"}
+
+
+@pytest.fixture
+def old_question_routing(monkeypatch):
+    """C8 routing (Sales / the lead get an assessment question) as it was
+    before Christoph's 2026-11-08 'the asker owns the question'."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "ASKER_OWNS_QUESTION", False)

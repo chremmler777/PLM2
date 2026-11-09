@@ -172,6 +172,7 @@ async def test_superseded_department_positions_leave_summation_and_quote(
 
 # ---------------------------------------------------------------- 4
 
+@pytest.mark.usefixtures("old_question_routing")
 async def test_assessment_question_goes_to_sales_not_the_asker(
         client, session_factory, seed, early):
     tool = await _member(client, session_factory, seed, early["tool"], "rv-tool4@test.io")

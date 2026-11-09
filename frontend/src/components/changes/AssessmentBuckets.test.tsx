@@ -38,6 +38,7 @@ const DEPTS = [
   { id: 4, name: 'Tool Engineer', is_active: true },
   { id: 6, name: 'Packaging Engineer', is_active: true },
 ]
+const WITH_PM = [...DEPTS, { id: 8, name: 'Project Manager', is_active: true }]
 
 const assessment = (over: Record<string, unknown> = {}) => ({
   id: 1, department_id: 2, verdict: 'pending', stage_order: 1, rasic_letter: 'R',
@@ -614,16 +615,29 @@ describe('AssessmentBuckets checklist', () => {
   })
 
   it('an internal change has no customer-mail slot in the bucket (R37)', async () => {
-    buckets({ myDepartmentIds: [2], change: change({ customer_relevant: false,
-      assessments: [assessment({ id: 1, department_id: 2 })] }) })
-    expect(await screen.findByTestId('bucket-rfq-2')).toBeTruthy()
-    expect(screen.queryByTestId('bucket-mail-2')).toBeNull()
+    buckets({ departments: WITH_PM, myDepartmentIds: [8], change: change({ customer_relevant: false,
+      assessments: [assessment({ id: 1, department_id: 8 })] }) })
+    await screen.findByTestId('bucket-8')
+    expect(screen.queryByTestId('bucket-mail-8')).toBeNull()
     cleanup()
     // negative: a customer change keeps its mail slot with the drop zone
+    buckets({ departments: WITH_PM, myDepartmentIds: [8], change: change({ customer_relevant: true,
+      assessments: [assessment({ id: 1, department_id: 8 })] }) })
+    const slot = await screen.findByTestId('bucket-mail-8')
+    expect(within(slot).getByTestId('dropzone').dataset.kind).toBe('customer_email')
+  })
+
+  it('only supplier-buying departments get the RFQ slot, only PM/Sales the mails (2026-11-08)', async () => {
     buckets({ myDepartmentIds: [2], change: change({ customer_relevant: true,
       assessments: [assessment({ id: 1, department_id: 2 })] }) })
-    const slot = await screen.findByTestId('bucket-mail-2')
-    expect(within(slot).getByTestId('dropzone').dataset.kind).toBe('customer_email')
+    await screen.findByTestId('bucket-2')
+    expect(screen.queryByTestId('bucket-rfq-2')).toBeNull()
+    expect(screen.queryByTestId('bucket-mail-2')).toBeNull()
+    expect(screen.getByTestId('bucket-evidence-2')).toBeTruthy()
+    cleanup()
+    buckets({ myDepartmentIds: [4], change: change({ customer_relevant: true,
+      assessments: [assessment({ id: 1, department_id: 4 })] }) })
+    expect(await screen.findByTestId('bucket-rfq-4')).toBeTruthy()
   })
 
   it('shows the filed documents under their row and lets the submit through', async () => {
@@ -866,7 +880,8 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
       .filter((z) => z.dataset.kind === k).map((z) => z.dataset.extensions)
     // The bucket's own slots, while no verdict is set.
     expect(kindOf('change_ppt')).toEqual([DOCUMENT_EXTENSIONS.change_ppt.join(',')])
-    expect(kindOf('rfq')).toEqual([DOCUMENT_EXTENSIONS.rfq.join(',')])
+    // Development buys nothing: no RFQ zone in its bucket (2026-11-08)
+    expect(kindOf('rfq')).toEqual([])
     expect(DOCUMENT_EXTENSIONS.rfq).toContain('.doc')
     // The deck zone next to Submit, once the verdict owes it.
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
@@ -1006,9 +1021,9 @@ describe('AssessmentBuckets evidence', () => {
     const zones = screen.getAllByTestId('dropzone')
     const byKind = (k: string) => zones.find((z) => z.getAttribute('data-kind') === k)
     expect(byKind('change_ppt')?.getAttribute('data-assessment')).toBe('1')
-    expect(byKind('rfq')?.getAttribute('data-assessment')).toBe('1')
-    // Customer mail is a change-level document: no assessment container.
-    expect(byKind('customer_email')?.getAttribute('data-assessment')).toBe('')
+    // Development has neither an RFQ nor a customer-mail slot (2026-11-08)
+    expect(byKind('rfq')).toBeUndefined()
+    expect(byKind('customer_email')).toBeUndefined()
   })
 
   it('lets a privileged reader see evidence without an upload slot', async () => {

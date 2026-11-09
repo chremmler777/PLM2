@@ -176,6 +176,11 @@ function sentBackOf(a: { details?: Record<string, unknown> | null } | null | und
   return raw && typeof raw === 'object' ? raw as { at?: string; reason?: string } : null
 }
 
+/** Departments that request supplier quotes (RFQ slot in their bucket). */
+const RFQ_DEPTS = new Set(['Tool Engineer', 'Toolshop', 'Packaging Engineer', 'Logistics'])
+/** Departments that keep the customer mail trail on the assessment. */
+const MAIL_DEPTS = new Set(['Project Manager', 'Sales'])
+
 export default function AssessmentBuckets({
   change, departments, myDepartmentIds, editable, isPm = false, canSeeAll = false,
   canAddDepartment = false, canPullIn = false, routingDeviation = null, declinedIds, round,
@@ -622,6 +627,12 @@ export default function AssessmentBuckets({
                     .filter((att) => att.kind === 'customer_email')
                   const invalidate = () =>
                     qc.invalidateQueries({ queryKey: ['change', changeId] })
+                  // Christoph 2026-11-08: only the departments that buy from a
+                  // supplier get the RFQ slot, only PM/Sales the customer
+                  // mails (a filed file always shows)
+                  const dn = deptName(row.id)
+                  const showRfq = RFQ_DEPTS.has(dn) || ofKind('rfq').length > 0
+                  const showMails = MAIL_DEPTS.has(dn)
                   const slot = (
                     testId: string, title: string, atts: typeof legacy,
                     hint: string, drop: React.ReactNode, isRequired = false,
@@ -667,14 +678,14 @@ export default function AssessmentBuckets({
                               kind="change_ppt" label={t('bucket.changePptSlot')}
                               extensions={DOCUMENT_EXTENSIONS.change_ppt}
                               onUploaded={invalidate} />, required)}
-                      {slot(`bucket-rfq-${row.id}`, t('attach.rfq'),
+                      {showRfq && slot(`bucket-rfq-${row.id}`, t('attach.rfq'),
                         ofKind('rfq'), t('attach.rfqSlot'),
                         <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
                           kind="rfq" label={t('attach.rfqSlot')}
                           extensions={DOCUMENT_EXTENSIONS.rfq}
                           onUploaded={invalidate} />)}
                       {/* R37: an internal change has no customer to mail */}
-                      {(change.customer_relevant !== false || mails.length > 0)
+                      {showMails && (change.customer_relevant !== false || mails.length > 0)
                         && slot(`bucket-mail-${row.id}`, t('mail.title'),
                           mails, t('mail.none'),
                           change.customer_relevant === false ? null

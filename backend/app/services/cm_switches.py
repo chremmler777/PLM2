@@ -51,6 +51,13 @@ CONFIRM_EVIDENCE_REQUIRED = False
 # Off = listed only, as before.
 ASSUMED_CUSTOMER_BLOCKS_RELEASE = True
 
+# Christoph 2026-11-08: a question asked from an assessment is the ASKER's own
+# errand: they get the answer themselves (phone, Teams, mail; a customer
+# question through Sales/PM as usual), record it and close it in one step.
+# No task or notice to Sales, the lead or PM, no mail text. Off = the C8
+# routing (Sales for customer/supplier, the lead for our team).
+ASKER_OWNS_QUESTION = True
+
 # ---------------------------------------------------------------------------
 # ECR-solid switch groups (spec flow-spec rev 6, "Switches"). Every new HARD
 # gate and every new notification of the branch reads one of these at call

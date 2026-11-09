@@ -287,7 +287,11 @@ export default function ChangeDetailPage() {
   // impact, answering, deciding) updates the change, and the list must not
   // keep offering what was just done. The first load is not a change.
   const seenChange = useRef<string | null>(null);
-  const changeStamp = change ? `${change.updated_at}|${change.status}|${change.impact_confirmed_at ?? ''}` : null;
+  // 2026-11-08: closing a question or risk does not touch the change row,
+  // so the concerns' state is part of the stamp (header went stale).
+  const concernStamp = (concerns as { id: number; is_open?: boolean; answered_at?: string | null; confirmed_at?: string | null }[])
+    .map((c) => `${c.id}:${c.is_open ? 1 : 0}:${c.answered_at ?? ''}:${c.confirmed_at ?? ''}`).join(',');
+  const changeStamp = change ? `${change.updated_at}|${change.status}|${change.impact_confirmed_at ?? ''}|${concernStamp}` : null;
   useEffect(() => {
     if (!changeStamp) return;
     if (seenChange.current !== null && seenChange.current !== changeStamp) {

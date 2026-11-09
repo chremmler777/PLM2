@@ -79,32 +79,23 @@ describe('AssessmentChecks (spec §4)', () => {
     expect(screen.queryByTestId('achk-confirm-13')).toBeNull()
   })
 
-  it('words a question by viewer: asker, answerer, reader (A3-13)', () => {
+  it('words a question by viewer: the asker records the answer, others only read (2026-11-08)', () => {
     const q = check({ id: 21, flag_type: 'question', answer_from: 'customer',
       asking_department_name: 'Development', answer_due: '2026-10-20T12:00:00' })
-    render(view([q], true))
+    render(view([{ ...q, can_answer: true }], true))
     expect(screen.getByTestId('achk-qhead-21').textContent)
       .toBe(t('achk.question').replace('{who}', t('flag.from.customer')))
-    expect(screen.getByText(t('achk.waiting'))).toBeTruthy()
+    expect(screen.getByText(t('achk.answerToClose'))).toBeTruthy()
+    expect(screen.getByTestId('achk-answer-21')).toBeTruthy()
+    // no mail text, no separate close note
+    expect(screen.queryByTestId('achk-copy-21')).toBeNull()
+    expect(screen.queryByTestId('achk-qnote-21')).toBeNull()
     cleanup()
+    // Sales (may answer, not the asker): reads it, no task wording, no form
     render(view([{ ...q, can_answer: true }], false))
-    expect(screen.getByTestId('achk-qhead-21').textContent).toBe(
-      `Question for the customer: `
-      + t('achk.answerBy').replace('{d}', formatDate('2026-10-20T12:00:00')))
-    // the step line says what to do; no 'Waiting for the answer.' for the one who gets it
-    expect(screen.getByTestId('achk-qstep-21').textContent)
-      .toBe('Development needs this from the customer. Ask them your way (mail, phone, meeting) and enter the answer here.')
-    expect(screen.queryByText(t('achk.waitingOther'))).toBeNull()
-    cleanup()
-    render(view([{ ...q, can_answer: true, answer_from: 'supplier' }], false))
-    expect(screen.getByTestId('achk-qhead-21').textContent).toContain('Question for the supplier')
-    cleanup()
-    // a question for our team: the answerer is asked directly
-    render(view([{ ...q, can_answer: true, answer_from: 'our_team' }], false))
-    expect(screen.getByTestId('achk-qhead-21').textContent)
-      .toContain(t('achk.asksYou').replace('{d}', 'Development'))
-    // negative: the answerer is not told it holds "your submit"
-    expect(screen.queryByText(t('achk.waiting'))).toBeNull()
+    expect(screen.getByTestId('achk-qhead-21').textContent).toContain('Development')
+    expect(screen.queryByTestId('achk-qstep-21')).toBeNull()
+    expect(screen.queryByTestId('achk-answer-21')).toBeNull()
     expect(screen.getByText(t('achk.waitingOther'))).toBeTruthy()
   })
 
@@ -114,19 +105,19 @@ describe('AssessmentChecks (spec §4)', () => {
     expect(screen.queryByTestId('achk-save-11')).toBeNull()
   })
 
-  it('asks a question only with what it is about and who answers', async () => {
+  it('asks a question with one line and who answers (no topic pick, 2026-11-08)', async () => {
     render(view([]))
     fireEvent.click(screen.getByTestId('achk-ask-3'))
     const send = screen.getByTestId('achk-asksend-3') as HTMLButtonElement
     fireEvent.change(screen.getByTestId('achk-asknote-3'), { target: { value: 'Volume 2027?' } })
     expect(send.disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('achk-askwhat-3'), { target: { value: 'volume' } })
+    expect(screen.queryByTestId('achk-askwhat-3')).toBeNull()
     fireEvent.change(screen.getByTestId('achk-askfrom-3'), { target: { value: 'customer' } })
     expect(send.disabled).toBe(false)
     fireEvent.click(send)
     await waitFor(() => expect(changesApi.raiseConcern).toHaveBeenCalledWith(7, {
       kind: 'needs_info', note: 'Volume 2027?', department_id: 3, flag_type: 'question',
-      check_what: 'volume', answer_from: 'customer' }))
+      check_what: 'other', answer_from: 'customer' }))
   })
 
   it('shows the reopen link only where the backend allows it', () => {
@@ -144,12 +135,12 @@ describe('AssessmentChecks questions (C8)', () => {
     check_what: 'volume', answer_from: 'customer', department_id: 3, ...over,
   })
 
-  it('who may answer gets the answer form in the bucket', () => {
-    render(view([q({ can_answer: true })], false))
+  it('the asker gets the answer form in the bucket', () => {
+    render(view([q({ can_answer: true })], true))
     expect(screen.getByTestId('achk-answer-21')).toBeTruthy()
   })
 
-  it('who may not answer only reads it', () => {
+  it('anybody else only reads it', () => {
     render(view([q({ can_answer: false })], false))
     expect(screen.getByTestId('achk-q-21')).toBeTruthy()
     expect(screen.queryByTestId('achk-answer-21')).toBeNull()
