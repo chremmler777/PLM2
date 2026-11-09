@@ -713,8 +713,12 @@ async def no_cost(session: AsyncSession, change: ChangeRequest, department_id: i
             CostingPosition.kind != "internal_effort",
             ~and_(CostingPosition.kind == "own_time",
                   func.coalesce(CostingPosition.notes, "") == HoursService.FROM_BOOKINGS),
-            ~and_(CostingPosition.kind == "support_effort",
-                  func.coalesce(CostingPosition.hours, 0) == 0))
+            # an empty own line (0 h, no amount) is no cost either: the
+            # same rule as the 'has no cost' button (CostingBuckets
+            # hasCostLines); an external line always counts
+            ~and_(CostingPosition.kind != "external",
+                  func.coalesce(CostingPosition.hours, 0) == 0,
+                  func.coalesce(CostingPosition.est_cost, 0) == 0))
         .order_by(CostingPosition.id).limit(1))).scalar_one_or_none()
     if pos is not None:
         who = await session.get(User, pos.created_by)

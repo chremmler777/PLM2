@@ -134,7 +134,9 @@ async def test_no_cost_with_only_the_standing_rows(client, ec, session_factory):
         for kind, label, hours, notes in (
                 ("internal_effort", "Internal effort: time spent on assessment (h)", 1.0, None),
                 ("own_time", HoursService.COSTING_EFFORT_LABEL, 0.5, HoursService.FROM_BOOKINGS),
-                ("support_effort", "Implementation support, estimated (h)", 0.0, None)):
+                ("support_effort", "Implementation support, estimated (h)", 0.0, None),
+                # an empty line carried from the assessment (CR-34 Packaging)
+                ("own_time", "Packaging layout change", None, None)):
             s.add(CostingPosition(change_id=ec["cid"], department_id=ec["proc"], label=label,
                                   kind=kind, pricing="estimate", hours=hours, notes=notes,
                                   created_by=ec["lead_id"]))
