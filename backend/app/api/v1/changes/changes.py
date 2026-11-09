@@ -2650,12 +2650,15 @@ async def _require_attachment_delete(db: AsyncSession, change, att,
          if att.assessment_id is not None else None)
     if a is not None and a.change_id == change.id:
         # Christoph 2026-11-08: an assessment's document is removed only by
-        # whoever uploaded it, or an admin
-        if not (is_admin or att.uploaded_by == user.id):
+        # the owner of that assessment (assigned / responsible; the uploader
+        # while nobody owns it) or an admin
+        owners = {x for x in (a.owner_id, a.responsible_id) if x is not None}
+        if not (is_admin or user.id in owners
+                or (not owners and att.uploaded_by == user.id)):
             raise HTTPException(
                 status_code=403,
-                detail="Only whoever uploaded it, or an admin, may remove that "
-                       "assessment's document")
+                detail="Only the owner of this assessment, or an admin, may "
+                       "remove its documents")
         submitted = (a.submitted_at is not None
                      or a.effective_status == "submitted")
         # Christoph 2026-11-08: a wrong change PPT / RFQ may be removed while

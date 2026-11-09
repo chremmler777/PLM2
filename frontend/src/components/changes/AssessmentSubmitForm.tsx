@@ -66,7 +66,7 @@ const VERDICTS = ['feasible', 'feasible_with_conditions', 'not_feasible'] as con
 
 export default function AssessmentSubmitForm({
   changeId, departmentId, departmentName, onDone, showEffort = true,
-  changePptCount = 0, onVerdictChange, assessmentId, evidence = [], onUploaded,
+  changePptCount = 0, onVerdictChange, assessmentId, evidence = [], onUploaded, ownerIds = [],
   serverDraft = null, verdictRefs = false,
 }: {
   /** Spec §4 (ASSESSMENT_V2): impact yes owes what + evidence per Yes,
@@ -81,6 +81,8 @@ export default function AssessmentSubmitForm({
   /** Lets the checklist collect the documents a Yes owes against this row;
    *  a missing one holds the submit, the rule the backend enforces. */
   assessmentId?: number
+  /** The assessment's owner / responsible: they and admins delete its documents. */
+  ownerIds?: number[]
   evidence?: Attachment[]
   onUploaded?: () => void
   /** Effort is money's business: the assessment bucket asks feasibility only and
@@ -218,7 +220,7 @@ export default function AssessmentSubmitForm({
       {!notImpacted && !questionnaireOpen && (
         <ActivityChecklist departmentId={departmentId} value={details} onChange={setDetails}
           changeId={changeId} assessmentId={assessmentId}
-          attachments={evidence} onUploaded={onUploaded} highlightOpen={showOpen} />
+          attachments={evidence} onUploaded={onUploaded} highlightOpen={showOpen} ownerIds={ownerIds} />
       )}
       {evidenceNeed && evidenceNeed.missing.length > 0 && (
         <div data-testid="verdict-evidence"

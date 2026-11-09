@@ -643,6 +643,7 @@ export default function AssessmentBuckets({
                       changePptCount={changePptOf(a?.id).length
                         + (a?.has_change_ppt ? 1 : 0)}
                       assessmentId={a?.id} evidence={evidenceOf(a?.id)}
+                      ownerIds={[a?.owner_id, a?.responsible_id].filter((x): x is number => x != null)}
                       onUploaded={() => qc.invalidateQueries({ queryKey: ['change', changeId] })}
                       onVerdictChange={(v) => setVerdictOf((m) => ({ ...m, [row.id]: v }))}
                       onDone={() => setOpenDept(null)} />
@@ -693,7 +694,11 @@ export default function AssessmentBuckets({
                     (att) => att.kind !== 'change_ppt' && att.kind !== 'rfq' && !att.case_ref)
                   const mayDelete = isMine && rowEditable
                   // Christoph 2026-11-08: only the uploader or an admin deletes
-                  const ownsFile = (att: { uploaded_by?: number | null }) => isAdmin || att.uploaded_by === userId
+                  // the assessment's owner (the uploader while nobody owns it)
+                  const owners = [a.owner_id, a.responsible_id].filter((x): x is number => x != null)
+                  const ownsFile = (att: { uploaded_by?: number | null }) => isAdmin
+                    || (userId != null && owners.includes(userId))
+                    || (owners.length === 0 && att.uploaded_by === userId)
                   const delAtt = (att: { id: number }) => {
                     changesApi.deleteAttachment(changeId, att.id)
                       .then(() => qc.invalidateQueries({ queryKey: ['change', changeId] }))

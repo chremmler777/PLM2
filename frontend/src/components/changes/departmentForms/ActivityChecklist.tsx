@@ -271,8 +271,10 @@ const idOf = (i: ImpactItem) => i.key ?? `free:${i.label ?? ''}`
 
 export default function ActivityChecklist({
   departmentId, value, onChange, lang = 'en',
-  changeId, assessmentId, attachments = [], onUploaded, highlightOpen = false,
+  changeId, assessmentId, attachments = [], onUploaded, highlightOpen = false, ownerIds = [],
 }: DepartmentFieldsProps & {
+  /** Who owns the assessment (owner, responsible): they and admins delete its documents. */
+  ownerIds?: number[]
   departmentId: number
   lang?: 'de' | 'en'
   /** Present when the checklist can collect the documents a Yes owes
@@ -468,7 +470,7 @@ export default function ActivityChecklist({
                             {filed.length > 0 && changeId != null && (
                               <ul className="text-sm">
                                 {filed.map((x) => <AttachmentRow key={x.id} changeId={changeId} attachment={x} confirm
-                                  onDelete={!(isAdmin || x.uploaded_by === userId) ? undefined : (att) => { changesApi.deleteAttachment(changeId, att.id)
+                                  onDelete={!(isAdmin || (userId != null && ownerIds.includes(userId)) || (!ownerIds.length && x.uploaded_by === userId)) ? undefined : (att) => { changesApi.deleteAttachment(changeId, att.id)
                                     .then(() => onUploaded?.()).catch((e: unknown) => toastError(e, t('attach.deleteFailed'))) }} />)}
                               </ul>
                             )}
