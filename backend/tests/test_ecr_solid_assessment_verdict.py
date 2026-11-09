@@ -45,7 +45,9 @@ async def _submit(client, tab, impacts, verdict="feasible", **extra):
         "details": {"impacts": impacts}, **extra}, headers=tab["auth"])
 
 
-async def test_impact_no_needs_a_reference_per_row(client, tab):
+async def test_impact_no_needs_a_reference_per_row(client, tab, monkeypatch):
+    # the old rule, pinned to its switch (off since c4eca299)
+    monkeypatch.setattr(cm_switches, "NO_NEEDS_REFERENCE", True)
     # negative: every row No, none with a reference
     res = await _submit(client, tab, answered(DEPT, refs=False))
     assert res.status_code == 400
@@ -59,7 +61,9 @@ async def test_impact_no_needs_a_reference_per_row(client, tab):
     assert res.status_code == 200, res.text
 
 
-async def test_impact_yes_needs_what_and_evidence_per_yes(client, tab):
+async def test_impact_yes_needs_what_and_evidence_per_yes(client, tab, monkeypatch):
+    # the old digit rule, pinned to its switch (off since 6f23cb8f)
+    monkeypatch.setattr(cm_switches, "YES_NEEDS_NUMBER", True)
     rows = answered(DEPT, yes={"tool_modification"}, refs=False)
     res = await _submit(client, tab, rows)
     assert res.status_code == 400
@@ -73,6 +77,20 @@ async def test_impact_yes_needs_what_and_evidence_per_yes(client, tab):
     rows = answered(DEPT, yes={"tool_modification"},
                     remarks={"tool_modification": "insert 3 re-cut, DRW-4471 rev C"},
                     refs=False)
+    res = await _submit(client, tab, rows)
+    assert res.status_code == 200, res.text
+
+
+async def test_all_no_and_a_few_words_are_enough_by_default(client, tab):
+    """Christoph 2026-11-08 (6f23cb8f, c4eca299): an all-No answer needs no
+    reference per row; a Yes says in a few words what changes, no number."""
+    res = await _submit(client, tab, answered(DEPT, refs=False))
+    assert res.status_code == 200, res.text
+
+
+async def test_a_yes_in_a_few_words_is_enough_by_default(client, tab):
+    rows = answered(DEPT, yes={"tool_modification"},
+                    remarks={"tool_modification": "tool change needed"}, refs=False)
     res = await _submit(client, tab, rows)
     assert res.status_code == 200, res.text
 
@@ -91,9 +109,11 @@ async def test_switch_off_takes_the_bare_checklist(client, tab, monkeypatch):
     assert res.status_code == 200, res.text
 
 
-async def test_a_crafted_legacy_draft_buys_no_exemption(client, tab, session_factory):
+async def test_a_crafted_legacy_draft_buys_no_exemption(client, tab, session_factory,
+                                                        monkeypatch):
     """R4: the in-flight exemption reads only what the row already carried;
     a draft with a key only the earlier checklist asked is cleaned of it."""
+    monkeypatch.setattr(cm_switches, "NO_NEEDS_REFERENCE", True)   # the rule it guards
     url = f"/api/v1/changes/{tab['cid']}/assessments"
     from sqlalchemy import select as _select
     async with session_factory() as s:
