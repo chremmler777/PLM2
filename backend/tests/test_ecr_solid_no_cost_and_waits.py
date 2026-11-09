@@ -20,7 +20,7 @@ from app.models.change_cost import DepartmentRate
 from app.models.entities import Project
 from app.models.notification import Notification
 from app.services import cm_switches
-from tests.conftest import login, make_department_member
+from tests.conftest import login, make_department_member, ready_to_finalize
 
 pytestmark = pytest.mark.asyncio
 IMPACTED = {"impacts": [{"key": "cycle_time", "answer": "yes", "impacted": True}]}
@@ -253,6 +253,7 @@ async def test_one_quote_on_a_line_finalizes_and_closes_the_shop_still_out(
     wait for another shop on the same line does not hold the finalize and is
     closed 'not_received' by it."""
     from app.models.change_cost import SupplierWait
+    await ready_to_finalize(session_factory, ec["cid"], ec["shop"])
     pos = await client.post(_u(ec, "/costing/positions"), json={
         "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
         "pricing": "quote", "quantity": 1, "quantity_unit": "pcs"}, headers=ec["dale"])
@@ -282,10 +283,12 @@ async def test_one_quote_on_a_line_finalizes_and_closes_the_shop_still_out(
         assert w.closed_at is not None and w.close_reason == "not_received"
 
 
-async def test_a_quote_without_transport_blocks_finalize_zero_is_allowed(client, ec):
+async def test_a_quote_without_transport_blocks_finalize_zero_is_allowed(
+        client, ec, session_factory):
     """Christoph 2026-11-08: "transport none is not ok, mark red but 0 is
     allowed". A counted offer whose transport is empty (shipping_included,
     no amount) is a transport_missing item and blocks finalize; 0 passes."""
+    await ready_to_finalize(session_factory, ec["cid"], ec["shop"], transport=False)
     pos = await client.post(_u(ec, "/costing/positions"), json={
         "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
         "pricing": "quote", "quantity": 1, "quantity_unit": "job"}, headers=ec["dale"])
@@ -387,10 +390,12 @@ async def test_a_closed_wait_reopens_until_its_shops_quote_is_filed(client, ec):
 
 
 @pytest.mark.hours_required
-async def test_costing_finalize_needs_a_booking_after_the_assessment(client, ec):
+async def test_costing_finalize_needs_a_booking_after_the_assessment(
+        client, ec, session_factory):
     """Christoph 2026-11-08 (8b4735cd, ASSESSMENT_HOURS_REQUIRED): costing is
     work too; without a booking after the assessment submit, finalize is
     refused and finalize-check names it (book_hours)."""
+    await ready_to_finalize(session_factory, ec["cid"], ec["shop"], book_hours=False)
     pos = await client.post(_u(ec, "/costing/positions"), json={
         "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
         "quantity": 1, "quantity_unit": "pcs", "est_cost": 900.0,

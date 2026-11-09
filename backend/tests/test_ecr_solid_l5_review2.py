@@ -17,7 +17,7 @@ from sqlalchemy import select
 from app.models.change import ChangeChangelog, ChangeRequest
 from app.models.entities import Organization, User
 from app.models.notification import Notification
-from tests.conftest import make_department_member
+from tests.conftest import make_department_member, ready_to_finalize
 from tests.test_ecr_solid_l5_review import _position, _set, _u, _user, cc  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
@@ -104,6 +104,7 @@ async def test_costs_raised_after_the_internal_approval_need_it_again(
                             json={"to_status": "approved"}, headers=cc["lead"])
     assert res.status_code in (400, 409) and "Costs rose" in res.text, res.text
     # finalized above the approved total: the approval is withdrawn
+    await ready_to_finalize(session_factory, cc["cid"], cc["shop"])
     res = await client.post(
         _u(cc["cid"], f"/costing/departments/{cc['shop']}/finalize"), headers=cc["dale"])
     assert res.status_code == 200, res.text
@@ -138,6 +139,7 @@ async def test_an_unchanged_total_keeps_the_approval(client, cc, seed, session_f
     res = await client.post(_u(cc["cid"], f"/costing/departments/{cc['shop']}/reopen"),
                             json={"reason": "typo in the label"}, headers=cc["dale"])
     assert res.status_code == 200, res.text
+    await ready_to_finalize(session_factory, cc["cid"], cc["shop"])
     res = await client.post(
         _u(cc["cid"], f"/costing/departments/{cc['shop']}/finalize"), headers=cc["dale"])
     assert res.status_code == 200, res.text

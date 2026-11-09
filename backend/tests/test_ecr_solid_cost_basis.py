@@ -18,7 +18,7 @@ from app.models.change_cost import DepartmentRate
 from app.models.entities import Project
 from app.models.notification import Notification
 from app.services import cm_switches
-from tests.conftest import login, make_department_member
+from tests.conftest import login, make_department_member, ready_to_finalize
 
 pytestmark = pytest.mark.asyncio
 IMPACTED = {"impacts": [{"key": "cycle_time", "answer": "yes", "impacted": True}]}
@@ -62,6 +62,9 @@ async def cb(client, session_factory, seed):
                                submitted_at=datetime.utcnow()))
         await s.commit()
         cid = change.id
+    # support hours 0 and a costing booking: the finalize rules of
+    # 2026-11-08 this file is not about
+    await ready_to_finalize(session_factory, cid, tool)
     return {"cid": cid, "tool": tool, "te": te, "pe": pe, "sa": sa, "sales_id": sales_id}
 
 

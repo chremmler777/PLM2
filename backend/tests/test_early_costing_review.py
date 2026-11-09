@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.models.change import ChangeAssessment, ChangeChangelog, ChangeRequest
 from app.services.cost_service import CostService
-from tests.conftest import insert_legacy_concern, make_department_member
+from tests.conftest import insert_legacy_concern, make_department_member, ready_to_finalize
 from tests.test_costing_cost_sheet import _add, _url as _cs_url, world  # noqa: F401
 from tests.test_costing_review_fixes import _machine_world
 from tests.test_early_costing import (  # noqa: F401
@@ -40,6 +40,7 @@ async def test_later_stage_submit_after_finalize_reopens_the_department(
         client, admin_auth, session_factory, seed, early):
     tool = await _member(client, session_factory, seed, early["tool"], "rv-tool1@test.io")
     assert (await _add_position(client, tool, early, early["tool"])).status_code == 201
+    await ready_to_finalize(session_factory, early["change_id"], early["tool"])
     assert (await client.post(_url(early, early["tool"], "finalize"),
                               headers=tool)).status_code == 200
     # entering costing wakes the Tool Engineer's stage 2, which it submits
@@ -59,6 +60,7 @@ async def test_later_stage_submit_after_finalize_reopens_the_department(
             and t["change_id"] == early["change_id"]] == [early["tool"]]
     # writable again, and finalizable again
     assert (await _add_position(client, tool, early, early["tool"])).status_code == 201
+    await ready_to_finalize(session_factory, early["change_id"], early["tool"])
     assert (await client.post(_url(early, early["tool"], "finalize"),
                               headers=tool)).status_code == 200
 
@@ -107,6 +109,8 @@ async def test_machine_class_change_reopens_finalized_departments_it_reprices(
     await _add(client, admin_auth, world, department_id=world["qa"], label="Q", hours=1)
     fin = lambda d: (f"/api/v1/changes/{world['change_id']}/costing/departments/"
                      f"{d}/finalize")
+    for d in (world["tool"], world["qa"]):
+        await ready_to_finalize(session_factory, world["change_id"], d)
     assert (await client.post(fin(world["tool"]), headers=admin_auth)).status_code == 200
     assert (await client.post(fin(world["qa"]), headers=admin_auth)).status_code == 200
     assert (await client.put(_cs_url(world, "/costing/machine-class"),
@@ -202,6 +206,7 @@ async def test_finalized_tool_department_no_longer_changes_the_weight(
         client, admin_auth, session_factory, seed, early):
     tool = await _member(client, session_factory, seed, early["tool"], "rv-tool5@test.io")
     assert (await _add_position(client, tool, early, early["tool"])).status_code == 201
+    await ready_to_finalize(session_factory, early["change_id"], early["tool"])
     await _status(session_factory, early["change_id"], "costing")
     url = f"/api/v1/changes/{early['change_id']}/weight-estimate"
     assert (await client.put(url, json={"weight_g": 120}, headers=tool)).status_code == 200
