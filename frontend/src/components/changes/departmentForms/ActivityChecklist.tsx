@@ -82,6 +82,8 @@ export interface MissingDocument {
   key: string
   item: ChecklistItemDef
   doc: ChecklistRequiredDocument
+  /** "Case 2 · Re-cut insert LH" when the document is owed per case */
+  caseLabel?: string
 }
 
 /** The file types each document slot takes, mirroring REQUIRED_DOCUMENTS in
@@ -130,10 +132,10 @@ export function missingDocuments(
       ? casesOf(row).filter((c) => c.id && !c.id.startsWith('legacy') && c.text.trim()) : []
     if (cases.length) {
       // 2026-11-08: each case owes its own documents
-      return cases.flatMap((c) => item.case_documents!
+      return cases.flatMap((c, n) => item.case_documents!
         .filter((doc) => !(attachments as Pick<Attachment, 'kind' | 'case_ref'>[])
           .some((a) => a.kind === doc.kind && a.case_ref === c.id))
-        .map((doc) => ({ key: item.key, item, doc })))
+        .map((doc) => ({ key: item.key, item, doc, caseLabel: `Case ${n + 1} · ${c.text.slice(0, 40)}` })))
     }
     return (item.requires_documents ?? [])
       .filter((doc) => !filed.has(doc.kind))

@@ -237,7 +237,7 @@ export default function AssessmentSubmitForm({
     ...(!checklistDone && !questionnaireOpen ? [t('why.rows').replace('{n}', String(progress.total - progress.answered))] : []),
     ...(questionnaireOpen ? [t('why.questionnaire')] : []),
     ...(Fields && !notImpacted && details.impacted === undefined && !questionnaireOpen ? [t('why.questionnaire')] : []),
-    ...missingDocs.map((m) => t('why.doc').replace('{d}', docLabel(m.doc, 'en')).replace('{r}', m.item.label_en)),
+    ...missingDocs.map((m) => t('why.doc').replace('{d}', docLabel(m.doc, 'en')).replace('{r}', m.item.label_en + (m.caseLabel ? `, ${m.caseLabel}` : ''))),
     ...(needsChangePpt ? [t('why.notFeasiblePpt')] : []),
     ...(evidenceNeed && evidenceNeed.missing.length ? [t('why.evidence').replace('{r}', evidenceNeed.missing.join(', '))] : []),
     ...(conditionMissing ? [t('why.condition')] : []),
