@@ -14,6 +14,7 @@
  *   department's submit too.
  */
 import { useState } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { btnSm } from '../../common/buttonStyles'
 import { toastError } from '../../../lib/apiError'
@@ -72,6 +73,7 @@ export default function AssessmentChecks({
   const questions = concerns.filter((c) => asksFrom(c, departmentId))
     .sort((x, y) => Number(!!y.is_open) - Number(!!x.is_open) || x.id - y.id)
   const others = concerns.filter((c) => c.kind === 'needs_info')
+  const [showQs, setShowQs] = useState(true)
   if (!checks.length && !questions.length && !editable) return null
 
   return (
@@ -94,7 +96,17 @@ export default function AssessmentChecks({
           ))}
         </div>
       )}
-      {questions.map((q) => (
+      {questions.length > 0 && (
+        // Christoph 2026-11-08: the assessor folds the question list away
+        <button type="button" data-testid={`achk-qtoggle-${departmentId}`}
+          aria-expanded={showQs} onClick={() => setShowQs(!showQs)}
+          className="flex items-center gap-1 text-xs font-semibold text-slate-300 hover:text-slate-100">
+          {showQs ? <ChevronDown aria-hidden="true" size={14} /> : <ChevronRight aria-hidden="true" size={14} />}
+          {t('achk.questionsHead').replace('{o}', String(questions.filter((q) => q.is_open).length))
+            .replace('{n}', String(questions.length))}
+        </button>
+      )}
+      {showQs && questions.map((q) => (
         <QuestionRow key={q.id} changeId={changeId} q={q} editable={editable} onDone={refresh}
           attachments={attachments} confirmerName={confirmerName} />
       ))}

@@ -632,6 +632,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'bucket.qOpen': { de: 'offen', en: 'open' },
   'bucket.qClosed': { de: 'geschlossen', en: 'closed' },
   'achk.reopenEdit': { de: 'Wieder öffnen und bearbeiten', en: 'Reopen to edit' },
+  'achk.questionsHead': { de: 'Fragen ({o} offen von {n})', en: 'Questions ({o} open of {n})' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },
