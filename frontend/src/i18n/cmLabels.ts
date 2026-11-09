@@ -714,6 +714,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.tag.received': { de: 'ERHALTEN', en: 'RECEIVED' },
   'costing.tag.waiting_info': { de: 'WARTET', en: 'WAITING' },
   'costing.quoteStatus': { de: 'Stand der Angebote', en: 'Quote status' },
+  'costpos.bannerEstimate': { de: 'SCHÄTZUNG', en: 'ESTIMATE' },
+  'costpos.bannerQuotes': { de: 'ANGEBOTE', en: 'QUOTES' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

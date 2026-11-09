@@ -443,9 +443,11 @@ export function OfferRow({
  *  supplier: Supplier · Status · Quote file · Days · Price · favourite.
  *  An asked shop waits until "Quote received", then its line takes the file,
  *  days, price (and quote no.); the received line shows them, the star picks. */
-function SupplierLines({ changeId, position: p, editable, currency, onChanged }: {
+function SupplierLines({ changeId, position: p, editable, currency, onChanged, estimate = false }: {
   changeId: number; position: CostPosition; editable: boolean
   currency: string | null; onChanged: () => void
+  /** the line is priced on an estimate: the estimate row, then the asked shops */
+  estimate?: boolean
 }) {
   const qc = useQueryClient()
   const { data: waits } = useQuery({
@@ -463,10 +465,10 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged }:
   const asked = (waits ?? []).filter((w) => w.position_id === p.id
     || (w.position_id == null && soleLine && w.department_id === p.department_id))
   const offers = p.offers ?? []
-  const names: string[] = []
-  for (const v of [...asked.map((w) => w.vendor_name), ...offers.map((o) => o.vendor_name)]) {
-    if (!names.some((n) => key(n) === key(v))) names.push(v)
-  }
+  // one row per received quote, plus one per asked shop without a quote
+  const names: string[] = asked.map((w) => w.vendor_name)
+    .filter((v, n, all) => all.findIndex((x) => key(x) === key(v)) === n)
+    .filter((v) => !offers.some((o) => key(o.vendor_name) === key(v)))
   const [received, setReceived] = useState<Set<string>>(new Set())
   const [shop, setShop] = useState('')
   const refresh = () => { qc.invalidateQueries({ queryKey: ['change', changeId] }); onChanged() }
@@ -488,12 +490,25 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged }:
   return (
     <div className="mt-1 rounded-lg border border-slate-600 bg-slate-800/60 p-2">
     <p className="mb-1 text-xs font-semibold text-slate-200">
+      <span className={`mr-2 rounded px-1.5 text-[11px] font-semibold ${estimate
+        ? 'bg-amber-700 text-amber-50' : 'bg-sky-700 text-white'}`}>
+        {estimate ? t('costpos.bannerEstimate') : t('costpos.bannerQuotes')}</span>
       {offers.filter((x) => !x.is_partial).length > 1 && !offers.some((x) => x.favorite) && (
         <span className="mr-2 rounded bg-red-800 px-1.5 text-[11px] font-semibold text-red-100">{t('costpos.pickFavoriteBanner')}</span>
       )}
       {t('costpos.quotesBox').replace('{w}', String(asked.filter((w) => w.is_open && !offers.some((x) => key(x.vendor_name) === key(w.vendor_name))).length))
         .replace('{r}', String(offers.length))}</p>
-    <table className="w-full" data-testid={`supplier-lines-${p.id}`}>
+    {estimate && editable && <EstimateQuickRow changeId={changeId} position={p} onChanged={onChanged} />}
+    {estimate && !editable && (
+      <p className="text-xs text-slate-300">{money(p.est_cost, currency)} · {p.lead_time_days ?? '-'} d · {p.basis_ref ?? ''}</p>
+    )}
+    <table className="w-full table-fixed" data-testid={`supplier-lines-${p.id}`}>
+      {/* Christoph 2026-11-08: fixed column widths */}
+      <colgroup>
+        <col style={{ width: '13%' }} /><col style={{ width: '19%' }} /><col style={{ width: '22%' }} />
+        <col style={{ width: '9%' }} /><col style={{ width: '11%' }} /><col style={{ width: '11%' }} />
+        <col style={{ width: '15%' }} />
+      </colgroup>
       <thead>
         <tr>
           <th className={th}>{t('costpos.supplier')}</th><th className={th}>{t('costpos.status')}</th>
@@ -503,17 +518,16 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged }:
         </tr>
       </thead>
       <tbody>
-        {names.length === 0 && (
+        {names.length === 0 && offers.length === 0 && (
           <tr><td className={`${td} text-slate-600`} colSpan={7}>{t('costpos.rfqNone')}</td></tr>
         )}
+        {offers.map((o) => (
+          <ReceivedLine key={`o${o.id}`} changeId={changeId} positionId={p.id} offer={o} td={td}
+            editable={editable} currency={currency} onChanged={onChanged}
+            onStar={() => star.mutate(o.id)} starring={star.isPending} />
+        ))}
         {names.map((n) => {
-          const o = offers.find((x) => key(x.vendor_name) === key(n))
           const w = asked.find((x) => key(x.vendor_name) === key(n))
-          if (o) {
-            return <ReceivedLine key={n} changeId={changeId} positionId={p.id} offer={o} td={td}
-              editable={editable} currency={currency} onChanged={onChanged}
-              onStar={() => star.mutate(o.id)} starring={star.isPending} />
-          }
           // marked "quote in" elsewhere without the quote: enter it now
           if (w && editable && (received.has(n) || (!w.is_open && w.close_reason === 'received'))) {
             return <ShopQuoteLine key={n} changeId={changeId} positionId={p.id} shop={n} td={td}
@@ -535,7 +549,13 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged }:
               <td className={td} colSpan={5}>
                 {editable && w?.is_open && (
                   <button type="button" className={btnSm.secondary} data-testid={`rfq-received-${w.id}`}
-                    onClick={() => setReceived(new Set([...received, n]))}>{t('costpos.quoteReceived')}</button>
+                    onClick={async () => {
+                      if (estimate) {
+                        await changesApi.updateCostPosition(changeId, p.id, { pricing: 'quote' })
+                        onChanged()
+                      }
+                      setReceived(new Set([...received, n]))
+                    }}>{t('costpos.quoteReceived')}</button>
                 )}
               </td>
             </tr>
@@ -582,7 +602,7 @@ function QuoteFileCell({ changeId, offerId, file: a, editable, onChanged }: {
     onError: (e: unknown) => toastError(e, 'Could not replace the file'),
   })
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className="inline-flex max-w-full items-center gap-1 overflow-hidden">
       <DownloadIcons changeId={changeId} attachments={[a]} />
       {editable && !asking && (
         <>
@@ -647,7 +667,7 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
           ? <span className="rounded bg-emerald-900/70 px-1.5 text-[11px] font-semibold text-emerald-100">{t('wait.sup.badge.received')}</span>
           : <span className="rounded bg-red-800 px-1.5 text-[11px] font-semibold text-red-100">{t('costpos.openNoFile')}</span>}
         {editable ? <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={t('costpos.shopRef')}
-          aria-label={t('costpos.shopRef')} className={`${fieldCls} ml-1 w-24`} />
+          aria-label={t('costpos.shopRef')} className={`${fieldCls} mt-0.5 block w-full`} />
           : (o.quote_ref ? <span className="ml-1 text-slate-400">#{o.quote_ref}</span> : null)}
       </td>
       <td className={td}>
@@ -664,15 +684,15 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
       <td className={`${td} text-right`}>
         {editable ? <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
           aria-label={t('costpos.totalDays')} title={t('costpos.daysMin')}
-          className={`${f} w-16 ${!(Number(days) >= 1) ? 'border-red-600' : ''}`} /> : (o.lead_time_days ?? '-')}
+          className={`${f} w-full ${!(Number(days) >= 1) ? 'border-red-600' : ''}`} /> : (o.lead_time_days ?? '-')}
       </td>
       <td className={`${td} text-right`}>
         {editable ? <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
-          aria-label={t('costpos.price')} className={`${f} w-24`} /> : money(o.cost, currency)}
+          aria-label={t('costpos.price')} className={`${f} w-full`} /> : money(o.cost, currency)}
       </td>
       <td className={`${td} text-right`}>
         {editable ? <input type="number" step="0.01" min={0} value={ship} onChange={(e) => setShip(e.target.value)}
-          placeholder={t('costpos.noTransport')} aria-label={t('costpos.transport')} className={`${f} w-32`} />
+          placeholder={t('costpos.noTransport')} aria-label={t('costpos.transport')} className={`${f} w-full`} />
           : (!o.shipping_included && o.shipping_cost ? money(o.shipping_cost, currency) : t('costpos.noTransport'))}
       </td>
       <td className={`${td} whitespace-nowrap`}>
@@ -741,7 +761,7 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel }: {
       <td className={`${td} font-medium text-amber-100`}>{shop}</td>
       <td className={td}>
         <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={t('costpos.shopRef')}
-          aria-label={t('costpos.shopRef')} className={`${fieldCls} w-24`} />
+          aria-label={t('costpos.shopRef')} className={`${fieldCls} w-full`} />
       </td>
       <td className={td}>
         <label className={`cursor-pointer rounded border px-1.5 py-0.5 text-[11px] hover:bg-slate-700/60 ${file
@@ -754,16 +774,16 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel }: {
       <td className={`${td} text-right`}>
         <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
           aria-label={t('costpos.totalDays')} title={t('costpos.daysMin')}
-          className={`${fieldCls} w-16 tabular-nums text-right ${days !== '' && !(Number(days) >= 1) ? 'border-red-600' : ''}`} />
+          className={`${fieldCls} w-full tabular-nums text-right ${days !== '' && !(Number(days) >= 1) ? 'border-red-600' : ''}`} />
       </td>
       <td className={`${td} text-right`}>
         <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
-          aria-label={t('costpos.price')} className={`${fieldCls} w-24 tabular-nums text-right`} />
+          aria-label={t('costpos.price')} className={`${fieldCls} w-full tabular-nums text-right`} />
       </td>
       <td className={`${td} text-right`}>
         <input type="number" step="0.01" min={0} value={ship} onChange={(e) => setShip(e.target.value)}
           placeholder={t('costpos.noTransport')} aria-label={t('costpos.transport')}
-          className={`${fieldCls} w-32 tabular-nums text-right`} />
+          className={`${fieldCls} w-full tabular-nums text-right`} />
       </td>
       <td className={`${td} whitespace-nowrap`}>
         <button type="button" className={btnSm.primary} data-testid={`shop-quote-save-${positionId}-${shop}`}
@@ -1522,11 +1542,12 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           </td>
         </tr>
       )}
-      {p.kind === 'external' && !isQuote && editable && !editing && (
+      {p.kind === 'external' && !isQuote && (
         <tr data-testid={`costpos-estimate-${p.id}`} className="bg-slate-900/40">
           <td />
           <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
-            <EstimateQuickRow changeId={changeId} position={p} onChanged={onChanged} />
+            <SupplierLines changeId={changeId} position={p} editable={editable}
+              currency={cur} onChanged={onChanged} estimate />
           </td>
         </tr>
       )}
@@ -1541,7 +1562,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           </td>
         </tr>
       )}
-      {v2 && isExternal && editing && (
+      {v2 && isExternal && editing && !isQuote && (
         <tr className="bg-slate-900/30">
           <td />
           <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
