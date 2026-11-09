@@ -750,6 +750,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.pcs': { de: 'Stk.', en: 'pcs' },
   'costpos.amountMissing': { de: 'Menge fehlt', en: 'Amount missing' },
   'costing.tag.amount_missing': { de: 'MENGE FEHLT', en: 'AMOUNT MISSING' },
+  'costpos.costingEffortRow': { de: 'Kalkulationsaufwand', en: 'Costing effort' },
+  'costpos.required': { de: 'PFLICHT', en: 'REQUIRED' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

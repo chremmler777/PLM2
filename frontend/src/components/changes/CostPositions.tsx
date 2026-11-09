@@ -1754,7 +1754,8 @@ function EffortRow({
     queryFn: () => changesApi.finalizeCheck(changeId, departmentId),
     enabled: editable && kind === 'internal_effort',
   })
-  const bookMissing = !!fc?.items?.some((i) => i.tag === 'book_hours')
+  void fc
+  const bookMissing = false  // assessment hours here are optional (Christoph 2026-11-08)
   // Blur and the Save click (or Enter, then blur) arrive in the same moment,
   // and isPending is only true after a render. One save at a time: a change
   // made while one is out (a second hours commit, a labour position pick) is
@@ -1861,7 +1862,7 @@ function EffortRow({
                 onClick={() => requestBookHours({ departmentId })}
                 className={bookMissing
                   ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100 hover:bg-red-800/60'
-                  : btnSm.secondary}>{bookMissing ? t('costpos.bookCostingBtn') : t('hours.title')}</button>
+                  : btnSm.secondary}>{t('hours.title')}</button>
             )}
           </span>
         ) : editable ? (
@@ -1891,6 +1892,47 @@ function EffortRow({
       </td>
       <td className={cellCls} />
       <td className={cellCls} />
+    </tr>
+  )
+}
+
+/** Christoph 2026-11-08: costing effort is booked (Book hours) and is
+ *  mandatory: the standing row is red until the first costing booking. */
+function CostingEffortStanding({ changeId, departmentId, position, editable, index }: {
+  changeId: number; departmentId: number; position?: CostPosition; editable: boolean; index: number
+}) {
+  const { data: fc } = useQuery({
+    queryKey: ['change', changeId, 'finalize-check', departmentId],
+    queryFn: () => changesApi.finalizeCheck(changeId, departmentId),
+    enabled: editable,
+  })
+  const missing = !!fc?.items?.some((i) => i.tag === 'book_hours')
+  return (
+    <tr className={`border-t border-slate-700/70 ${missing ? 'bg-red-950/30' : ''}`} data-testid={`costpos-costing-effort-${departmentId}`}>
+      <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
+      <td className={cellCls}>
+        <span className="text-slate-200">{t('costpos.costingEffortRow')}</span>
+        <span className="ml-1.5 rounded bg-slate-700/70 text-slate-400 px-1 py-0 text-[11px]">{t('costpos.standing')}</span>
+        {missing && <span className="ml-1.5 rounded bg-red-800 px-1 text-[11px] font-semibold text-red-100">{t('costpos.required')}</span>}
+      </td>
+      <td className={`${cellCls} text-slate-400 text-xs`}>{t('costpos.bookedHint')}
+        {position && <RateNote p={position} />}</td>
+      <td className={`${cellCls} text-xs text-slate-400 whitespace-nowrap`}>{t('costpos.type.time')}</td>
+      <td className={`${cellCls} ${numCls} whitespace-nowrap`}>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tabular-nums text-slate-200">
+            {position?.hours != null ? `${position.hours} h` : t('costpos.noneBooked')}</span>
+          {editable && (
+            <button type="button" data-testid={`costpos-costing-book-${departmentId}`}
+              onClick={() => requestBookHours({ departmentId })}
+              className={missing
+                ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100'
+                : btnSm.secondary}>{t('hours.title')}</button>
+          )}
+        </span>
+        {position && <LineValue p={position} />}
+      </td>
+      <td className={cellCls} /><td className={cellCls} />
     </tr>
   )
 }
@@ -2308,13 +2350,15 @@ export default function CostPositions({
   const boundIds = new Set(
     EFFORT_FIELDS.map(({ kind }) => mine.find((p) => p.kind === kind)?.id)
       .filter((id): id is number => id != null))
-  const listed = mine.filter((p) => !boundIds.has(p.id))
+  // the costing effort (bookings after the assessment) is a standing row
+  const costingEffort = mine.find((p) => p.kind === 'own_time' && p.notes === 'From the bookings')
+  const listed = mine.filter((p) => !boundIds.has(p.id) && p.id !== costingEffort?.id)
   const isToolEngineer = departmentName === TOOL_ENGINEER_DEPARTMENT
   const weightSaved = () => {
     qc.invalidateQueries({ queryKey: ['change', changeId] })
     qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
   }
-  const standingCount = EFFORT_FIELDS.length + (isToolEngineer ? 1 : 0)
+  const standingCount = EFFORT_FIELDS.length + 1 + (isToolEngineer ? 1 : 0)
   // The department's total, per currency (never added across currencies):
   // money lines plus every priced hours/trials value. Lines without a rate
   // are counted out loud, not as 0.
@@ -2389,6 +2433,8 @@ export default function CostPositions({
                   ctx={ctx} />
               )
             })}
+            <CostingEffortStanding changeId={changeId} departmentId={departmentId}
+              position={costingEffort} editable={editable} index={EFFORT_FIELDS.length + 1} />
             {isToolEngineer && (
               <PartWeightRow key={`weight-${partWeightG ?? 'new'}`}
                 changeId={changeId} departmentId={departmentId}
