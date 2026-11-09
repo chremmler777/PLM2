@@ -728,6 +728,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.docRfq': { de: 'Anfrage an Lieferant (RFQ)', en: 'Supplier inquiry (RFQ)' },
   'costpos.docPpt': { de: 'Interne Änderungs-PPT', en: 'Internal change PPT' },
   'costpos.refMin': { de: 'Angebots-Nr.: mindestens 5 Zeichen (z. B. HT-4471)', en: 'Quote no.: at least 5 characters (e.g. HT-4471)' },
+  'costpos.whyNoFile': { de: 'Angebotsdatei fehlt', en: 'Quote file missing' },
+  'costpos.whyRefShort': { de: 'Angebots-Nr. zu kurz (mind. 5 Zeichen, z. B. HT-4471)', en: 'Quote no. too short (min. 5 characters, e.g. HT-4471)' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

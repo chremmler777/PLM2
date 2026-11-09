@@ -682,6 +682,13 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
         {editable ? <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={t('costpos.shopRef')}
           aria-label={t('costpos.shopRef')} title={t('costpos.refMin')}
           className={`${fieldCls} mt-0.5 block w-full ${ref.trim().length < 5 ? 'border-red-600' : ''}`} />
+          : null}
+        {/* say why the row is red, in the row */}
+        {files.length === 0 && <span className="mt-0.5 block text-[11px] text-red-300">{t('costpos.whyNoFile')}</span>}
+        {files.length > 0 && o.favorite && refThin && (
+          <span className="mt-0.5 block text-[11px] text-red-300">{t('costpos.whyRefShort')}</span>
+        )}
+        {editable ? null
           : (o.quote_ref ? <span className="ml-1 text-slate-400">#{o.quote_ref}</span> : null)}
       </td>
       <td className={td}>
