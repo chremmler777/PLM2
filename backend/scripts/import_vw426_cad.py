@@ -6,6 +6,7 @@ Source: S:\\Capacity Studies\\Current Capacity\\KL\\2 OPmobility\\a 1864 - OPm V
           sheet + OUT434 quoted expedited 6/16, tool back 6/30) -> its latest major
   out463/ ECRs\\463 OUT 463 Rev E (VZM9524 package two) -> open draft x.1 on the grill carrier
   out467/ ECRs\\467 OUT Sept 08 2026 (add material 4 paint tabs, Hi-Tech quote 10/14) -> open draft x.2
+  OUT00470 (643 clip retention tuning) is NOT filed here: it comes with the ECR Cody enters in PLM
 SpinFire STEP conversions sit next to the CATParts (<name>.stp or <name>.CATPart.stp) and are filed
 as a sibling STEP; convert_vw426_viewers.py builds the 3D viewer from them.
 
@@ -53,7 +54,6 @@ PLAN = {
         ("latest", "out434", "Cpa_00308479.CATPart",
          "OPm OUT00434 (feasibility study, received 6/16/2026), implemented: latest level on the tool"),
         ("out463", "out463", "Cpa_00309738_463.CATPart", "OPm OUT00463 Rev E (VZM9524 optimization package two)"),
-        ("out463", "out463", "VW-426-ATLAS_OUT00463_QUOTATION.xls", "OPm OUT00463 file list"),
         ("out467", "out467", "Cpa_00313711.CATPart", "OPm OUT00467 (add material to 4 paint tabs)"),
     ],
 }
@@ -103,7 +103,7 @@ async def add_file(db, rev, src, filename, note, user_id, apply, written):
 
 async def main(stage, username, apply):
     missing = [os.path.join(stage, f, n) for steps in PLAN.values() for _, f, n, _ in steps
-               if not os.path.exists(os.path.join(stage, f, n))]
+               if n and not os.path.exists(os.path.join(stage, f, n))]
     if missing:
         raise SystemExit(f"missing files: {missing}")
     written = []
@@ -137,6 +137,8 @@ async def main(stage, username, apply):
                             revs.append(rev)
                         drafts[target] = rev
                     print(f"  -> {rev.revision_name}")
+                    if name is None:        # draft without files yet
+                        continue
                     src = os.path.join(stage, folder, name)
                     await add_file(db, rev, src, name, note, user.id, apply, written)
                     stp = step_of(src) if name.lower().endswith(".catpart") else None
