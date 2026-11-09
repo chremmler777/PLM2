@@ -752,6 +752,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.tag.amount_missing': { de: 'MENGE FEHLT', en: 'AMOUNT MISSING' },
   'costpos.costingEffortRow': { de: 'Kalkulationsaufwand', en: 'Costing effort' },
   'costpos.required': { de: 'PFLICHT', en: 'REQUIRED' },
+  'costpos.estBasisShort': { de: 'Grundlage (z. B. Katalog, früheres Werkzeug)', en: 'Based on (e.g. catalogue, earlier tool)' },
+  'costpos.missingWord': { de: 'fehlt', en: 'missing' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

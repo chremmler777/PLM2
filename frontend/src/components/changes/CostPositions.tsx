@@ -516,7 +516,6 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
       {t('costpos.quotesBox').replace('{w}', String(asked.filter((w) => w.is_open && !offers.some((x) => key(x.vendor_name) === key(w.vendor_name))).length))
         .replace('{r}', String(offers.length))}</p>
     {spare && <SpareAmount changeId={changeId} position={p} editable={editable} onChanged={refresh} />}
-    {estimate && editable && <EstimateQuickRow changeId={changeId} position={p} onChanged={onChanged} />}
     {spare && editable && (
       <div className="mt-1 flex items-center gap-1">
         <input value={item} onChange={(e) => setItem(e.target.value)} placeholder={t('costpos.itemName')}
@@ -544,7 +543,11 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
         </tr>
       </thead>
       <tbody>
-        {names.length === 0 && offers.length === 0 && (
+        {estimate && (
+          <EstimateLine changeId={changeId} position={p} td={td} editable={editable}
+            currency={currency} onChanged={refresh} />
+        )}
+        {names.length === 0 && offers.length === 0 && !estimate && (
           <tr><td className={`${td} text-slate-600`} colSpan={7}>{t('costpos.rfqNone')}</td></tr>
         )}
         {offers.map((o) => (
@@ -662,6 +665,73 @@ function QuoteFileCell({ changeId, offerId, file: a, editable, onChanged }: {
         </span>
       )}
     </span>
+  )
+}
+
+/** Christoph 2026-11-08: the estimate as a row of the same supplier table:
+ *  vendor, ESTIMATE + what it is based on, days total, price, (transport). */
+function EstimateLine({ changeId, position: p, td, editable, currency, onChanged }: {
+  changeId: number; position: CostPosition; td: string; editable: boolean
+  currency: string | null; onChanged: () => void
+}) {
+  const [vendor, setVendor] = useState(p.vendor_name ?? '')
+  const [basis, setBasis] = useState(p.basis_ref ?? '')
+  const [days, setDays] = useState(p.lead_time_days != null ? String(p.lead_time_days) : '')
+  const [cost, setCost] = useState(p.est_cost != null ? String(p.est_cost) : '')
+  const dirty = vendor.trim() !== (p.vendor_name ?? '') || basis.trim() !== (p.basis_ref ?? '')
+    || num(days) !== (p.lead_time_days ?? null) || num(cost) !== (p.est_cost ?? null)
+  const save = useMutation({
+    mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
+      vendor_name: vendor.trim() || null, basis: 'estimate', basis_ref: basis.trim() || null,
+      lead_time_days: num(days), lead_time_unit: 'calendar_days', est_cost: num(cost),
+    }),
+    onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
+    onError: (e: unknown) => toastError(e, 'Could not save the estimate'),
+  })
+  const noPrice = !(Number(cost) > 0)
+  const noDays = !(Number(days) >= 1)
+  const noBasis = basis.trim().length < 5
+  const missing = noPrice || noDays || noBasis
+  const f = `${fieldCls} w-full tabular-nums text-right`
+  return (
+    <tr data-testid={`estimate-line-${p.id}`} data-missing={missing ? 'yes' : 'no'}
+      className={`border-t border-slate-700/60 ${missing ? 'bg-red-950/40 outline outline-1 outline-red-700/70' : ''}`}>
+      <td className={td}>
+        {editable ? <input value={vendor} onChange={(e) => setVendor(e.target.value)}
+          placeholder={t('costpos.vendor')} aria-label={t('costpos.vendor')} className={`${fieldCls} w-full`} />
+          : <span className="font-medium text-slate-100">{p.vendor_name ?? '-'}</span>}
+      </td>
+      <td className={td}>
+        <span className="rounded bg-amber-700 px-1.5 text-[11px] font-semibold text-amber-50">{t('costpos.bannerEstimate')}</span>
+        {editable ? <input value={basis} onChange={(e) => setBasis(e.target.value)}
+          placeholder={t('costpos.estBasisShort')} title={t('costpos.estBasis')} aria-label={t('costpos.estBasis')}
+          className={`${fieldCls} mt-0.5 block w-full ${noBasis ? 'border-red-600' : ''}`} />
+          : <span className="ml-1 text-slate-400">{p.basis_ref}</span>}
+        {editable && missing && (
+          <span className="mt-0.5 block text-[11px] text-red-300">
+            {[noPrice && t('costpos.price'), noDays && t('costpos.daysShort'), noBasis && t('costpos.estBasisShort')]
+              .filter(Boolean).join(', ')} {t('costpos.missingWord')}</span>
+        )}
+      </td>
+      <td className={`${td} text-slate-500`}>-</td>
+      <td className={`${td} text-right`}>
+        {editable ? <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
+          aria-label={t('costpos.totalDays')} title={t('costpos.daysMin')} className={`${f} ${noDays ? 'border-red-600' : ''}`} />
+          : (p.lead_time_days ?? '-')}
+      </td>
+      <td className={`${td} text-right`}>
+        {editable ? <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
+          aria-label={t('costpos.price')} data-testid={`est-cost-${p.id}`} className={`${f} ${noPrice ? 'border-red-600' : ''}`} />
+          : money(p.est_cost, currency)}
+      </td>
+      <td className={`${td} text-right text-slate-500`}>{t('costpos.noTransport')}</td>
+      <td className={`${td} whitespace-nowrap`}>
+        {editable && dirty && (
+          <button type="button" className={btnSm.primary} data-testid={`est-save-${p.id}`}
+            disabled={save.isPending || (days !== '' && noDays)} onClick={() => save.mutate()}>{t('common.save')}</button>
+        )}
+      </td>
+    </tr>
   )
 }
 
@@ -994,7 +1064,7 @@ function InternalQuickRow({ changeId, position: p, onChanged }: {
 
 /** An estimated supplier line, same shape as a shop's quote: total cost,
  *  days, what the figure is based on (earlier tool, supplier figure + date). */
-function EstimateQuickRow({ changeId, position: p, onChanged }: {
+export function EstimateQuickRow({ changeId, position: p, onChanged }: {
   changeId: number; position: CostPosition; onChanged: () => void
 }) {
   // Christoph 2026-11-08: a bought item (spare part) states amount, price,

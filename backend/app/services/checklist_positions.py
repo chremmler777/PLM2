@@ -66,7 +66,8 @@ async def carry_cases(session, change, assessment, dept_name, user_id: int) -> i
                 change_id=change.id, department_id=assessment.department_id,
                 label=label, kind=kind, pricing="estimate",
                 notes=f"{NOTE_PREFIX}{row_label}", created_by=user_id,
-                **({"quantity": 1.0, "quantity_unit": "job"} if kind == "external" else {}),
+                **({"quantity": 1.0, "quantity_unit": "pcs" if e["key"] == "sparepart_required" else "job"}
+                   if kind == "external" else {}),
                 lead_time_unit="calendar_days")
             session.add(p)
             await session.flush()
