@@ -25,6 +25,12 @@ vi.mock('../../api/changes', () => ({
   },
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+// Christoph 2026-11-08 (ccf78c56): the submit form lists the department's
+// bookings and books the typed hours before the submit.
+vi.mock('../../api/hours', async (orig) => ({
+  ...(await orig<typeof import('../../api/hours')>()),
+  hoursApi: { get: vi.fn().mockResolvedValue({ bookings: [] }), book: vi.fn().mockResolvedValue({}) },
+}))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 vi.mock('./AttachmentDropzone', () => ({
   default: (p: { assessmentId?: number; kind?: string; extensions?: string[] }) => (
@@ -412,7 +418,8 @@ describe('AssessmentBuckets', () => {
   it('asks only the assessor\'s own hours, required (b74839e6); the rest of cost belongs to costing', async () => {
     buckets({ myDepartmentIds: [2] })
     await waitFor(() => expect(screen.getByTestId('assessment-submit')).toBeTruthy())
-    expect(screen.getByLabelText(t('effort.hoursRequired'))).toBeTruthy()
+    expect(screen.getByText(t('effort.hoursRequired'))).toBeTruthy()
+    expect(screen.getByLabelText(t('effort.bookNow'))).toBeTruthy()
     expect(screen.queryByText(t('effort.hours'))).toBeNull()
   })
 })
@@ -457,7 +464,8 @@ describe('AssessmentBuckets department questionnaires', () => {
     packaging()
     await screen.findByTestId('bucket-6')
     fireEvent.click(screen.getByTestId('pkg-impacted-no'))
-    // Nothing else to ask: no verdict picker, no notes — just record it.
+    // Nothing else to ask but the hours (ccf78c56): no verdict picker, no notes.
+    typeHours(6)
     const submit = screen.getByTestId('assessment-submit') as HTMLButtonElement
     expect(submit.disabled).toBe(false)
     expect(submit.textContent).toBe(t('pkg.submitNotImpacted'))

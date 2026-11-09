@@ -4,7 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AssessmentSubmitForm, { draftKey } from './AssessmentSubmitForm'
 import BucketErrorBoundary from './BucketErrorBoundary'
 import { t } from '../../i18n/cmLabels'
+import { hoursApi } from '../../api/hours'
 // ActivityChecklist reads the viewer (who may delete assessment documents).
+// Christoph 2026-11-08 (ccf78c56): the submit form lists the department's
+// bookings and books the typed hours before the submit.
+vi.mock('../../api/hours', async (orig) => ({
+  ...(await orig<typeof import('../../api/hours')>()),
+  hoursApi: { get: vi.fn().mockResolvedValue({ bookings: [] }), book: vi.fn().mockResolvedValue({}) },
+}))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 
 const submitAssessment = vi.fn().mockResolvedValue({})
@@ -39,12 +46,13 @@ describe('AssessmentSubmitForm', () => {
       departmentName="Quality" onDone={() => {}} />))
     fireEvent.change(screen.getByLabelText(/verdict/i), { target: { value: 'feasible' } })
     expect((screen.getByRole('button', { name: /submit assessment/i }) as HTMLButtonElement).disabled).toBeTruthy()
-    fireEvent.change(screen.getByLabelText(/your hours on this assessment/i), { target: { value: '3.5' } })
+    fireEvent.change(screen.getByLabelText(t('effort.bookNow')), { target: { value: '3.5' } })
     fireEvent.click(await screen.findByTestId('check-no-cycle_time_change'))
     fireEvent.click(screen.getByTestId('check-no-threed_change'))
     fireEvent.click(screen.getByRole('button', { name: /submit assessment/i })); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({ department_id: 2, verdict: 'feasible', effort_hours: 3.5 })))
+    expect(hoursApi.book).toHaveBeenCalledWith(7, expect.objectContaining({ department_id: 2, hours: 3.5 }))
   })
 })
 
