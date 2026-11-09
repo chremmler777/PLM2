@@ -6842,15 +6842,17 @@ class ChangeService:
                 text = ((e.get("remark") or "") if e.get("key")
                         else f"{e.get('label') or ''} {e.get('remark') or ''}")
                 return says_what(text) and (
-                    any(c.isdigit() for c in text)
+                    not cm_switches.YES_NEEDS_NUMBER
+                    or any(c.isdigit() for c in text)
                     or bool(e.get("key") and checklist.required_documents(e["key"])))
             thin = [name(e) for e in yes if not evidenced(e)]
             if thin:
                 raise ChangeError(
-                    "Impact yes: say for each Yes what changes (part, tool, "
-                    "process sheet) and the evidence (a drawing or document "
-                    "number, or a value with its unit), e.g. 'insert re-cut, "
-                    "DRW-4471 rev C': " + ", ".join(thin))
+                    "Impact yes: say for each Yes in a few words what changes "
+                    "(part, tool, process sheet, document)"
+                    + (" and the evidence (a drawing or document number, or a "
+                       "value with its unit)" if cm_switches.YES_NEEDS_NUMBER else "")
+                    + ": " + ", ".join(thin))
             return
         # the rows the current checklist asks (a legacy key rides along as
         # it was stored)

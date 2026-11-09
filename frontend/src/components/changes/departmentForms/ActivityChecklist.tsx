@@ -173,7 +173,9 @@ export function verdictEvidence(
     const evidenced = (i: ImpactItem) => {
       const v = i.key ? (i.remark ?? '') : `${i.label ?? ''} ${i.remark ?? ''}`
       const filed = !!defs.find((d) => d.key === i.key)?.requires_documents?.length
-      return saysWhat(v) && (/\d/.test(v) || filed)
+      // Christoph 2026-11-08: words are enough (backend YES_NEEDS_NUMBER off)
+      void filed
+      return saysWhat(v)
     }
     return { impact: 'yes', missing: yes.filter((i) => !evidenced(i)).map(label) }
   }

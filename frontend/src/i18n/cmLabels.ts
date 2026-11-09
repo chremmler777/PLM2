@@ -641,7 +641,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'why.questionnaire': { de: 'Fragebogen beantworten', en: 'Answer the questionnaire' },
   'why.doc': { de: '{r}: {d} fehlt', en: '{r}: {d} missing' },
   'why.notFeasiblePpt': { de: 'Nicht machbar braucht die Änderungs-PPT', en: 'Not feasible needs the change PPT' },
-  'why.evidence': { de: 'Bei Ja sagen, was sich ändert (mit Zahl/Referenz): {r}', en: 'Say what changes on each Yes (with a number or reference): {r}' },
+  'why.evidence': { de: 'Bei Ja in ein paar Worten sagen, was sich ändert: {r}', en: 'Say in a few words what changes on each Yes: {r}' },
   'why.condition': { de: 'Bedingung angeben', en: 'Say the condition' },
   'why.hours': { de: 'Stunden buchen (Knopf "Stunden buchen")', en: 'Book your hours ("Book hours")' },
   'bucket.otherDocs': { de: 'Weitere Dokumente (keinem Fall zugeordnet)', en: 'Other documents (not tied to a case)' },

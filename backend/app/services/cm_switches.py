@@ -63,6 +63,11 @@ ASKER_OWNS_QUESTION = True
 # costing is filled from it). Off = hours optional, as before.
 ASSESSMENT_HOURS_REQUIRED = True
 
+# Christoph 2026-11-08: a Yes on the checklist says in words what changes; a
+# number, date or reference is welcome but not forced (timing risk has no
+# number to give). True brings back the digit rule.
+YES_NEEDS_NUMBER = False
+
 # ---------------------------------------------------------------------------
 # ECR-solid switch groups (spec flow-spec rev 6, "Switches"). Every new HARD
 # gate and every new notification of the branch reads one of these at call
