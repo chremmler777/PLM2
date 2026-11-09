@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ActivityChecklist, {
-  checklistItemLabel, checklistProgress, earlierAnswers, missingDocuments, casesOf, refToNos, restToNo,
+  checklistItemLabel, checklistProgress, earlierAnswers, missingDocuments, casesOf, refToNos, restToNo, NO_NEEDS_REFERENCE,
   riskKeyOf, saysWhat, verdictEvidence,
 } from './ActivityChecklist'
 // ActivityChecklist reads the viewer (who may delete assessment documents).
@@ -271,11 +271,13 @@ describe('verdict evidence (spec §4)', () => {
     expect(saysWhat('+0.4s')).toBe(true)
   })
 
-  it('impact no owes a reference per No row; one ref fills the rest', () => {
+  it('impact no is complete without a reference per No row; one ref still fills the rest', () => {
     const value = { impacts: [
       { key: 'cycle_time_change', answer: 'no', impacted: false },
       { key: 'threed_change', answer: 'no', impacted: false, ref: 'DRW-1 rev A' }] }
-    expect(verdictEvidence(DEFS, value)).toEqual({ impact: 'no', missing: ['Cycle time change'] })
+    // c4eca299 (NO_NEEDS_REFERENCE off): an all-No answer owes nothing per row
+    expect(NO_NEEDS_REFERENCE).toBe(false)
+    expect(verdictEvidence(DEFS, value)).toEqual({ impact: 'no', missing: [] })
     expect(verdictEvidence(DEFS, refToNos(value, 'CL-12 row 4')).missing).toEqual([])
     // the row that had its own ref keeps it
     const kept = (refToNos(value, 'CL-12 row 4').impacts as { ref?: string }[])[1].ref

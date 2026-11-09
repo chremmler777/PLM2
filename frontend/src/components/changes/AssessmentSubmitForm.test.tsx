@@ -252,18 +252,12 @@ describe('AssessmentSubmitForm verdict evidence (spec §4, ASSESSMENT_V2)', () =
   afterEach(cleanup)
   const submitBtn = () => screen.getByTestId('assessment-submit') as HTMLButtonElement
 
-  it('impact no holds the submit until every No has its reference', async () => {
+  it('impact no needs no reference per No row (c4eca299, NO_NEEDS_REFERENCE off)', async () => {
     render(wrap(<AssessmentSubmitForm changeId={7} departmentId={2} verdictRefs
       departmentName="Quality" showEffort={false} onDone={() => {}} />))
     fireEvent.change(screen.getByLabelText(/verdict/i), { target: { value: 'feasible' } })
     fireEvent.click(await screen.findByTestId('check-no-cycle_time_change'))
     fireEvent.click(screen.getByTestId('check-no-threed_change'))
-    expect(screen.getByTestId('verdict-evidence').textContent).toContain('Cycle time change')
-    expect(submitBtn().disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('verdict-noref'), { target: { value: 'ok' } })
-    expect((screen.getByTestId('verdict-noref-apply') as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('verdict-noref'), { target: { value: 'CL-12 row 4' } })
-    fireEvent.click(screen.getByTestId('verdict-noref-apply'))
     expect(screen.queryByTestId('verdict-evidence')).toBeNull()
     expect(submitBtn().disabled).toBe(false)
   })
