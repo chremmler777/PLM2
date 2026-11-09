@@ -63,6 +63,10 @@ const buckets = (props: Record<string, unknown> = {}) =>
 // Drafts autosave to localStorage: every test starts without one.
 afterEach(() => { window.localStorage.clear() })
 
+// Christoph 2026-11-08 (b74839e6): the bucket's submit needs the assessor's hours.
+const typeHours = (deptId: number, hours = '2') => fireEvent.change(
+  document.getElementById(`effort-${deptId}`)!, { target: { value: hours } })
+
 describe('pickAssessment', () => {
   const row = (over: Partial<Assessment>) => assessment(over) as unknown as Assessment
 
@@ -405,10 +409,10 @@ describe('AssessmentBuckets', () => {
     expect(await screen.findByText(t('bucket.noObjects'))).toBeTruthy()
   })
 
-  it('asks nothing about cost — that belongs to costing', async () => {
+  it('asks only the assessor\'s own hours, required (b74839e6); the rest of cost belongs to costing', async () => {
     buckets({ myDepartmentIds: [2] })
     await waitFor(() => expect(screen.getByTestId('assessment-submit')).toBeTruthy())
-    expect(screen.queryByLabelText(/effort/i)).toBeNull()
+    expect(screen.getByLabelText(t('effort.hoursRequired'))).toBeTruthy()
     expect(screen.queryByText(t('effort.hours'))).toBeNull()
   })
 })
@@ -483,6 +487,7 @@ describe('AssessmentBuckets department questionnaires', () => {
     fireEvent.click(screen.getByTestId('pkg-impacted-yes'))
     fireEvent.click(screen.getByTestId('pkg-layout_change'))
     fireEvent.click(await screen.findByTestId('check-no-new_process'))
+    typeHours(6)
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit')); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
@@ -561,6 +566,7 @@ describe('AssessmentBuckets checklist', () => {
     fireEvent.change(screen.getByTestId('check-remark-cycle_time_change'),
       { target: { value: '+2s per part' } })
     answerRestNo()
+    typeHours(2)
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit')); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
@@ -600,6 +606,7 @@ describe('AssessmentBuckets checklist', () => {
     expect(zones.filter((z) => rfq.contains(z)).map((z) => [z.dataset.kind, z.dataset.assessment]))
       .toEqual([['rfq', '1']])
     answerRestNo()
+    typeHours(2)
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     // A strict gate, the backend's rule: submit waits, and says why.
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(true)
@@ -653,6 +660,7 @@ describe('AssessmentBuckets checklist', () => {
     // The bucket's own RFQ slot lists it too: same file, its named home.
     expect(screen.getByTestId('bucket-rfq-2').textContent).toContain('rfq-supplier.pdf')
     answerRestNo()
+    typeHours(2)
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     expect(screen.queryByTestId('assessment-docs-required')).toBeNull()
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
@@ -677,6 +685,7 @@ describe('AssessmentBuckets checklist', () => {
     fireEvent.click(screen.getByTestId('check-yes-article_design_update'))
     fireEvent.click(screen.getByTestId('check-choice-article_design_update-customer_given'))
     answerRestNo()
+    typeHours(2)
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit')); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
@@ -693,6 +702,7 @@ describe('AssessmentBuckets checklist', () => {
     fireEvent.blur(screen.getByTestId('check-free-input-0'),
       { target: { value: 'operator training' } })
     answerRestNo()
+    typeHours(2)
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit')); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
@@ -841,6 +851,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [changePpt] }) })
     await screen.findByTestId('bucket-2')
     fireEvent.click(await screen.findByTestId('check-no-new_process'))
+    typeHours(2)
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
       { target: { value: 'not_feasible' } })
     expect(screen.queryByTestId('bucket-evidence-required-2')).toBeNull()
@@ -854,6 +865,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
       attachments: [] }) })
     await screen.findByTestId('bucket-2')
     fireEvent.click(await screen.findByTestId('check-no-new_process'))
+    typeHours(2)
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
       { target: { value: 'not_feasible' } })
     expect(screen.queryByTestId('bucket-evidence-required-2')).toBeNull()
@@ -894,6 +906,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
     await screen.findByTestId('bucket-2')
     fireEvent.click(await screen.findByTestId('check-no-new_process'))
+    typeHours(2)
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     expect(screen.queryByTestId('assessment-evidence-required')).toBeNull()
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)

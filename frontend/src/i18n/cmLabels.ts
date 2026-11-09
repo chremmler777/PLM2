@@ -2653,6 +2653,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'rule.price_open': { de: 'Preis offen', en: 'Price open' },
   // ECR-solid C15: book hours
   'hours.title': { de: 'Stunden buchen', en: 'Book hours' },
+  'hours.notBookedYet': { de: 'Ihre Abteilung hat auf dieser Änderung noch keine Stunden gebucht', en: 'Your department has not booked hours on this change yet' },
   'hours.confirmTitle': { de: 'Stunden bestätigen', en: 'Confirm your hours' },
   'hours.confirmIntro': { de: 'Euer Teil ist erledigt: bestätige die Stunden (vorbelegt mit eurer Schätzung) oder überspringe, dann gilt "nicht gebucht".', en: 'Your part is done: confirm the hours (prefilled with your estimate), or skip; then it reads "not booked".' },
   'hours.skip': { de: 'Überspringen', en: 'Skip' },

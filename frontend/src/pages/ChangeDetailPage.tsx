@@ -62,7 +62,7 @@ import { ConcessionLine } from '../components/changes/release/AchievedCard';
 import BookHoursDialog from '../components/changes/hours/BookHoursDialog';
 import CloseSummary from '../components/changes/CloseSummary';
 import HoursCard from '../components/changes/hours/HoursCard';
-import { BOOK_HOURS_EVENT } from '../api/hours';
+import { BOOK_HOURS_EVENT, hoursApi, hoursKey } from '../api/hours';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -278,6 +278,14 @@ export default function ChangeDetailPage() {
     enabled: !!change && (change.origin === 'engineering_review' || !!change.from_intake),
   });
   const hasReview = !!review && (review.is_review || review.answers.length > 0);
+  // Christoph 2026-11-08: "Book hours" turns red while our department has
+  // booked nothing on this change (same source as the Hours card)
+  const { data: hoursState } = useQuery({
+    queryKey: hoursKey(changeId),
+    queryFn: () => hoursApi.get(changeId),
+  });
+  const ourHoursMissing = !!hoursState?.window_open
+    && (hoursState.mine ?? []).some((m) => !m.no_member && (m.booked_hours ?? 0) <= 0);
   const { data: myActions } = useQuery({
     queryKey: ['change-my-actions', changeId],
     queryFn: () => cockpitPart(changeId, 'my_actions'),
@@ -984,7 +992,12 @@ export default function ChangeDetailPage() {
   const headerActions = (
     <div className="flex shrink-0 items-center gap-2">
       {canBookHours && !isRecord && (
-        <button type="button" data-testid="header-book-hours" className={btnSm.secondary}
+        <button type="button" data-testid="header-book-hours"
+          data-missing={ourHoursMissing ? 'yes' : 'no'}
+          title={ourHoursMissing ? t('hours.notBookedYet') : undefined}
+          className={ourHoursMissing
+            ? 'rounded-lg border border-red-600 bg-red-900/50 px-3 py-1.5 text-sm font-medium text-red-100 hover:bg-red-800/60'
+            : btnSm.secondary}
           onClick={() => setHoursDialog({})}>{t('hours.title')}</button>
       )}
       {change.status === 'rejected' && may('scoping') && (
