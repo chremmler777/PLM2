@@ -93,6 +93,8 @@ def allowed_extensions(kind: str) -> tuple | None:
 CASE_DOCUMENTS = {
     "modification_external": ("change_ppt", "rfq"),
     "modification_internal": ("change_ppt",),
+    # Christoph 2026-11-08: a spare part case files like the external change
+    "sparepart_required": ("change_ppt", "rfq"),
 }
 
 

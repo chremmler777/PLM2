@@ -970,12 +970,14 @@ function CaseDocs({ changeId, position: p }: { changeId: number; position: CostP
       try { details = typeof a.details === 'string' ? JSON.parse(a.details) : (a.details ?? {}) } catch { details = {} }
       return (details.impacts as { key?: string; cases?: (string | { id: string; text: string })[] }[] | undefined) ?? []
     })
-  const want = p.label.trim().toLowerCase()
+  // a spare part line is labelled "Spare part: <name>"; its case text may also sit in the notes
+  const wants = new Set([p.label, spareName(p.label), (p.notes ?? '').replace(/^From the assessment:\s*/, '')]
+    .map((x) => x.trim().toLowerCase()).filter(Boolean))
   let caseId: string | null = null
   let kind = ''
   for (const i of impacts) {
     for (const c of i.cases ?? []) {
-      if (typeof c !== 'string' && c.text.trim().toLowerCase() === want) {
+      if (typeof c !== 'string' && wants.has(c.text.trim().toLowerCase())) {
         caseId = c.id; kind = i.key === 'modification_internal' ? 'internal' : 'external'
       }
     }
