@@ -312,3 +312,58 @@ async def test_a_filed_quote_closes_its_shops_wait_not_the_typed_price(
     async with session_factory() as s:
         w = await s.get(SupplierWait, wid)
         assert w.closed_at is not None and w.close_reason == "received"
+
+
+async def test_a_closed_wait_reopens_until_its_shops_quote_is_filed(client, ec):
+    """Christoph 2026-11-08 (8b4735cd): 'Quote received' / 'not needed' by
+    accident is undone by reopen: the department (not another one) reopens
+    it; refused once a quote of that shop is filed on its line."""
+    pos = await client.post(_u(ec, "/costing/positions"), json={
+        "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
+        "pricing": "quote", "quantity": 1, "quantity_unit": "pcs"}, headers=ec["dale"])
+    pid = pos.json()["id"]
+    res = await _wait(client, ec, ec["dale"], ec["shop"], position_id=pid, vendor_name="Hasco")
+    wid = res.json()[0]["id"]
+    close = lambda: client.post(_u(ec, f"/supplier-waits/{wid}/close"),  # noqa: E731
+                                json={"reason": "received"}, headers=ec["dale"])
+    reopen = _u(ec, f"/supplier-waits/{wid}/reopen")
+    assert (await close()).status_code == 200
+    # NEGATIVE: another department
+    assert (await client.post(reopen, headers=ec["pe"])).status_code == 403
+    res = await client.post(reopen, headers=ec["dale"])
+    assert res.status_code == 200, res.text
+    row = next(w for w in res.json() if w["id"] == wid)
+    assert row["is_open"] is True
+    # once the shop's quote is on the line, reopening is refused
+    res = await client.post(_u(ec, f"/costing/positions/{pid}/offers"), json={
+        "vendor_name": "Hasco", "cost": 900.0, "shipping_included": True,
+        "quote_ref": "HA-Q-4410", "lead_time_days": 10,
+        "lead_time_unit": "calendar_days"}, headers=ec["dale"])
+    assert res.status_code in (200, 201), res.text
+    assert (await close()).status_code == 200
+    res = await client.post(reopen, headers=ec["dale"])
+    assert res.status_code == 400 and "delete that quote first" in res.json()["detail"]
+
+
+@pytest.mark.hours_required
+async def test_costing_finalize_needs_a_booking_after_the_assessment(client, ec):
+    """Christoph 2026-11-08 (8b4735cd, ASSESSMENT_HOURS_REQUIRED): costing is
+    work too; without a booking after the assessment submit, finalize is
+    refused and finalize-check names it (book_hours)."""
+    pos = await client.post(_u(ec, "/costing/positions"), json={
+        "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
+        "quantity": 1, "quantity_unit": "pcs", "est_cost": 900.0,
+        "basis_ref": "Hasco figure 12 Oct 2026", "lead_time_days": 10,
+        "lead_time_unit": "calendar_days"}, headers=ec["dale"])
+    assert pos.status_code == 201, pos.text
+    fin = _u(ec, f"/costing/departments/{ec['shop']}/finalize")
+    res = await client.post(fin, headers=ec["dale"])
+    assert res.status_code == 400 and "Book the hours" in res.json()["detail"]
+    check = (await client.get(_u(ec, f"/costing/departments/{ec['shop']}/finalize-check"),
+                              headers=ec["dale"])).json()
+    assert "book_hours" in [i["tag"] for i in check["items"]]
+    res = await client.post(_u(ec, "/hours"), json={
+        "department_id": ec["shop"], "hours": 1.5, "note": "Costing"}, headers=ec["dale"])
+    assert res.status_code == 201, res.text
+    res = await client.post(fin, headers=ec["dale"])
+    assert res.status_code == 200, res.text
