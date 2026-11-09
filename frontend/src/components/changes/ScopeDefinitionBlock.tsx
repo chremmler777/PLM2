@@ -49,9 +49,13 @@ export default function ScopeDefinitionBlock({
   const rightsNote = !SCOPE_EDITABLE_STATUSES.includes(change.status) ? t('scope.readOnly')
     : editable ? null : t('scope.rights')
 
+  // No scope yet while it can still be written = open work, red as in costing.
+  const missing = !text && SCOPE_EDITABLE_STATUSES.includes(change.status)
+
   return (
-    <section data-testid="scope-definition"
-      className="rounded-lg border border-sky-800/60 bg-sky-950/20 p-3 space-y-2">
+    <section data-testid="scope-definition" data-missing={missing || undefined}
+      className={`rounded-lg border p-3 space-y-2 ${missing
+        ? 'border-red-600/80 ring-1 ring-red-700/40 bg-red-950/20' : 'border-sky-800/60 bg-sky-950/20'}`}>
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-medium uppercase tracking-wide text-sky-300">
           {t('scope.title')}
@@ -86,7 +90,7 @@ export default function ScopeDefinitionBlock({
       ) : text ? (
         <p data-testid="scope-text" className="whitespace-pre-wrap text-sm text-slate-100">{text}</p>
       ) : (
-        <p data-testid="scope-empty" className="text-xs text-slate-500">{t('scope.empty')}</p>
+        <p data-testid="scope-empty" className={`text-xs ${missing ? 'text-red-300' : 'text-slate-500'}`}>{t('scope.empty')}</p>
       )}
       {!editing && rightsNote && (
         <p className="text-[11px] text-slate-500" data-testid="scope-rights">{rightsNote}</p>

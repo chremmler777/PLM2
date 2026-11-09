@@ -92,7 +92,7 @@ export default function NeedsInfoCard({
 
   const state = !c.is_open ? 'solved' : c.answered_at != null || !!c.answer_note ? 'answered' : 'open'
   const SUMMARY_DOT: Record<string, string> = {
-    open: 'text-amber-400', answered: 'text-sky-400', solved: 'text-slate-500',
+    open: 'text-red-400', answered: 'text-red-400', solved: 'text-slate-500',
   }
 
   if (!expanded) {
@@ -120,8 +120,8 @@ export default function NeedsInfoCard({
   }
 
   const STATE_STYLE: Record<string, string> = {
-    open: 'bg-amber-900/70 text-amber-200',
-    answered: 'bg-sky-900/70 text-sky-200',
+    open: 'bg-red-900/70 text-red-100',
+    answered: 'bg-red-900/70 text-red-100',
     solved: 'bg-slate-700 text-slate-300',
   }
   const STATE_LABEL: Record<string, string> = {
@@ -135,9 +135,8 @@ export default function NeedsInfoCard({
       className={`rounded-lg border p-4 space-y-3 ${
         solved
           ? 'border-slate-700 bg-slate-800/40 text-slate-400'
-          : answered
-            ? 'border-sky-800/60 bg-sky-950/20'
-            : 'border-amber-700/60 bg-amber-950/20'}`}>
+          // Open work is red, as in costing (answered still waits for closure).
+          : 'border-red-600/80 ring-1 ring-red-700/40 bg-red-950/20'}`}>
       <header className="flex items-center gap-2 flex-wrap">
         <span data-testid={`needs-info-state-${c.id}`}
           className={`inline-flex items-center rounded px-1.5 py-0 text-[11px] leading-tight font-medium ${STATE_STYLE[state]}`}>

@@ -326,6 +326,13 @@ export default function ScopingPanel(
   // the whole answer, so it is shown in place and not only as a toast.
   const [decideError, setDecideError] = useState<string | null>(null)
   const [refusal, setRefusal] = useState<string | null>(null)
+  // The refusal is a snapshot: once the change itself moves on (scope written,
+  // parts picked, anything saved) it may no longer hold, so it goes away and
+  // the next Proceed asks the server again (Christoph 2026-11-09: scope saved
+  // but "No scope defined" still showed).
+  const changeStamp = [change.updated_at, change.scope_definition ?? '',
+    change.impact_confirmed_at ?? ''].join('|')
+  useEffect(() => { setDecideError(null) }, [changeStamp])
   // Closing a rejected customer change is an act with a record: the letter is
   // attached, then Sales confirms it went out and the backend closes the ECR.
   const markSent = useMutation({
@@ -970,7 +977,12 @@ export default function ScopingPanel(
           </ul>
         )}
 
-        <ul className="divide-y divide-slate-700 border border-slate-700 rounded-lg">
+        {/* Open work is red, as in costing: a meeting still waiting for its
+            decision during scoping. */}
+        <ul data-testid="latest-meeting"
+          className={`divide-y divide-slate-700 border rounded-lg ${meetingOpen && latestMeeting
+            && !latestMeeting.decision && !replacedBy(latestMeeting)
+            ? 'border-red-600/80 ring-1 ring-red-700/40' : 'border-slate-700'}`}>
           {latestMeeting ? meetingRow(latestMeeting) : (
             <li className="p-3 text-slate-400">{t('meeting.none')}</li>
           )}
