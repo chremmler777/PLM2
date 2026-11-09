@@ -537,13 +537,23 @@ export default function ChangeDetailPage() {
   // it waits. The start tab and the green dot follow the viewer's departments.
   const myDepts = myActions?.memberships ?? []
   const myStep: Tab | 'done' | null = (() => {
+    // Christoph 2026-11-09: assessment & costing is one self-running step;
+    // in costing too each department lands where IT is still open
+    // (stage-state auto_advance: assessment or costing), else 'done'
+    const auto = stage?.auto_advance
+    if (change.status === 'costing' && auto && !stopped && myDepts.length) {
+      const mine = auto.open.filter((o) => myDepts.includes(o.department_id))
+      if (mine.some((o) => o.open === 'assessment')) return 'assessments' as Tab
+      if (mine.length) return 'costing' as Tab
+      return change.assessments.some((a) => myDepts.includes(a.department_id)) ? 'done' : null
+    }
     if (change.status !== 'in_assessment' || stopped || !myDepts.length) return null
     const pending = new Set(change.costing_pending_department_ids ?? [])
     const finalized = new Set(change.costing_finalized_department_ids ?? [])
     const owed = new Set(change.costing_owed_department_ids ?? [])
     const mineAssessing = change.assessments.some((a) => myDepts.includes(a.department_id)
       && !a.submitted_at)
-    if (mineAssessing) return 'assessment' as Tab
+    if (mineAssessing) return 'assessments' as Tab
     if (myDepts.some((d) => pending.has(d))) return 'costing' as Tab
     if (myDepts.some((d) => finalized.has(d) || owed.has(d))) return 'done'
     return null
@@ -944,6 +954,7 @@ export default function ChangeDetailPage() {
     mayOverride: (to: string) => !readOnly && (may(to) || isAdmin || isChangeLead || isPmMember),
     onAbsorb: () => setAbsorbOpen(true),
     // A6-06: the backend lets the next hop through: nothing listed holds it
+    autoAdvance: stage?.auto_advance ?? null,
     nextHopFree: !!stage?.can_transition && !!change.next_step?.to
       && stage.can_transition[change.next_step.to] === true
       && !stage.transition_blocks?.[change.next_step.to],

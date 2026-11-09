@@ -13,6 +13,11 @@ export interface StepperEnd {
   closed?: boolean
 }
 
+/** One "Assessment & costing" step instead of two (Christoph 2026-11-09). */
+export function mergeAssessmentCosting(order: ChangeStatus[]): ChangeStatus[] {
+  return order.includes('in_assessment') ? order.filter((s) => s !== 'costing') : order
+}
+
 /**
  * The change's path, quiet by default: past stages are a check and a muted
  * name, the current stage is the one filled pill (with its owner and a
@@ -32,11 +37,15 @@ export default function LifecycleStepper({
   end?: StepperEnd | null
 }) {
   const offPath = OFF_PATH_STATUSES.includes(status)
-  const order = branchStepOrder(customerRelevant, origin)
+  // Christoph 2026-11-09: assessment and costing are one step that runs on
+  // its own ("Assessment & costing"); both statuses sit on it.
+  const order = mergeAssessmentCosting(branchStepOrder(customerRelevant, origin))
+  const onPath = (s: ChangeStatus) => (s === 'costing' && !order.includes('costing') ? 'in_assessment' : s)
   // A stopped change reads up to where it stopped; everything after is greyed
   // and the path ends in a red pill, never in "Closed".
-  const stopIdx = end?.stoppedAt ? order.indexOf(end.stoppedAt) : -1
-  const idx = end ? stopIdx : order.indexOf(status)
+  const stopIdx = end?.stoppedAt ? order.indexOf(onPath(end.stoppedAt)) : -1
+  const idx = end ? stopIdx : order.indexOf(onPath(status))
+  const merged = !order.includes('costing') && order.includes('in_assessment')
   const visible = end ? order.filter((s) => s !== 'closed') : order
   // A closed change finished its path: every stage, Closed included, is done.
   const allDone = !end && status === 'closed'
@@ -63,6 +72,7 @@ export default function LifecycleStepper({
           // Engineering review (spec §17): lock the impact, departments answer.
           : origin === 'engineering_review' && s === 'scoping' ? 'Lock the impact, departments answer'
           : origin === 'engineering_review' && s === 'released' ? 'Every answer "no impact": index active'
+          : merged && s === 'in_assessment' ? t('stepper.hint.assessmentCosting')
           : t(`stepper.hint.${s}`)
         const stoppedHere = !!end && i === stopIdx
         const current = !offPath && !end && !allDone && i === idx
@@ -75,7 +85,8 @@ export default function LifecycleStepper({
           : past ? 'text-emerald-300'
           : current ? 'bg-sky-500/15 text-sky-100 ring-1 ring-sky-500/60 font-semibold rounded-full'
           : 'text-slate-500'
-        const label = origin === 'engineering_review' && s === 'scoping' ? 'Impact and review' : stepperLabel(s)
+        const label = origin === 'engineering_review' && s === 'scoping' ? 'Impact and review'
+          : merged && s === 'in_assessment' ? t('stepper.assessmentCosting') : stepperLabel(s)
         return (
           <li key={s} className="flex items-center gap-0.5" aria-current={current ? 'step' : undefined}>
             <div className="relative flex items-center gap-1">

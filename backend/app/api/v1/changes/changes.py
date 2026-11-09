@@ -1636,6 +1636,9 @@ async def reject_deviation(change_id: int, body: RoutingDeviationDecision,
     except ValueError as e:
         raise HTTPException(400, str(e))
     await db.commit()
+    # Christoph 2026-11-09: assessment & costing runs on its own
+    from app.services import auto_advance
+    await auto_advance.run_after(db, change_id, current_user)
     return await get_routing(change_id, db, current_user)
 
 
@@ -1656,6 +1659,9 @@ async def approve_deviation(change_id: int, db: AsyncSession = Depends(get_db),
     except ValueError as e:
         raise HTTPException(400, str(e))
     await db.commit()
+    # Christoph 2026-11-09: assessment & costing runs on its own
+    from app.services import auto_advance
+    await auto_advance.run_after(db, change_id, current_user)
     return await get_routing(change_id, db, current_user)
 
 
@@ -2059,6 +2065,9 @@ async def submit_assessment(
             status_code=403 if isinstance(e, (RightsForbidden, TaskRightsForbidden)) else 400,
             detail=str(e))
     await db.commit()
+    # Christoph 2026-11-09: assessment & costing runs on its own
+    from app.services import auto_advance
+    await auto_advance.run_after(db, change_id, current_user)
     await db.refresh(a)
     return await _assessment_out(db, a, current_user)
 
@@ -3401,6 +3410,9 @@ async def decide_deviation(
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    # Christoph 2026-11-09: assessment & costing runs on its own
+    from app.services import auto_advance
+    await auto_advance.run_after(db, change_id, current_user)
     return (await _deviation_rows(db, change, [dev], current_user))[0]
 
 
@@ -3722,6 +3734,9 @@ async def _concern_act(change_id: int, current_user: User, db: AsyncSession, act
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    # Christoph 2026-11-09: assessment & costing runs on its own
+    from app.services import auto_advance
+    await auto_advance.run_after(db, change_id, current_user)
     await db.refresh(concern)
     return concern
 
@@ -3828,6 +3843,9 @@ async def _followup_act(change_id: int, current_user: User, db: AsyncSession, ac
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    # Christoph 2026-11-09: assessment & costing runs on its own
+    from app.services import auto_advance
+    await auto_advance.run_after(db, change_id, current_user)
     return await IndexFollowupService.for_change(db, change)
 
 
@@ -3966,6 +3984,9 @@ async def _withdraw_concern(
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    # Christoph 2026-11-09: assessment & costing runs on its own
+    from app.services import auto_advance
+    await auto_advance.run_after(db, change_id, current_user)
     await db.refresh(concern)
     return concern
 

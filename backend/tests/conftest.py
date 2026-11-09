@@ -659,3 +659,13 @@ def _hours_optional_by_default(monkeypatch, request):
     if request.node.get_closest_marker("hours_required") is None:
         from app.services import cm_switches
         monkeypatch.setattr(cm_switches, "ASSESSMENT_HOURS_REQUIRED", False)
+
+
+@pytest.fixture(autouse=True)
+def _manual_close_by_default(monkeypatch, request):
+    """Older tests close assessment and costing by hand; the automatic move
+    (Christoph 2026-11-09, services/auto_advance) is tested on purpose with
+    the marker auto_advance."""
+    if request.node.get_closest_marker("auto_advance") is None:
+        from app.services import auto_advance
+        monkeypatch.setattr(auto_advance, "ON", False)

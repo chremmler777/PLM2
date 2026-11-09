@@ -6,7 +6,7 @@ import { changesApi } from '../../api/changes'
 import Dialog from '../common/Dialog'
 import Button from '../common/Button'
 import { toastError } from '../../lib/apiError'
-import type { ChangeDetail, ChangeStatus, Gate, GateKey, MyAction, NextStepItem, StageAssessment } from '../../types/change'
+import type { AutoAdvanceState, ChangeDetail, ChangeStatus, Gate, GateKey, MyAction, NextStepItem, StageAssessment } from '../../types/change'
 import { signoffOwed } from '../../lib/signoff'
 import { hasEnded, endLabel } from '../../lib/transitionRights'
 import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor, transitionLabel } from '../../lib/changeStatus'
@@ -125,6 +125,9 @@ interface Props {
       ("Waiting for Quality since 14 Oct") instead of a bare count. `to` is
       the status it asks for: that move is not offered while it waits. */
   pendingOverrides?: { id: number; to: string; who: string; since: string }[]
+  /** Christoph 2026-11-09: assessment & costing runs on its own (stage-state
+      auto_advance): no "Close assessment", the progress and who is open. */
+  autoAdvance?: AutoAdvanceState | null
 }
 
 /** What the cockpit needs of the engineering review state. */
@@ -182,8 +185,26 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
   | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at' | 'internal_approved_at'>
   & Partial<Pick<ChangeDetail, 'origin' | 'info_sent_at' | 'plan_published_at' | 'rejection_sent_at'
     | 'costing_pending_department_ids' | 'impact_confirmed_at' | 'mother_plant_name' | 'next_step'>>,
-  assessment?: StageAssessment | null, review?: ReviewProgress | null): NextStep[] {
+  assessment?: StageAssessment | null, review?: ReviewProgress | null,
+  auto?: AutoAdvanceState | null): NextStep[] {
   const s = change.status
+  // Christoph 2026-11-09: assessment & costing moves on by itself once every
+  // department finished; a not-feasible answer or a routing change still
+  // needs its decision (below), the reject stays offered in assessment.
+  const autoOn = !!auto && (s === 'in_assessment' || (s === 'costing' && !!change.customer_relevant))
+  const notFeasibleOpen = s === 'in_assessment' && !!assessment
+    && assessment.not_feasible.length > 0 && assessment.override !== 'approved'
+  const routingOpen = s === 'in_assessment' && !!assessment?.routing_deviation_pending
+  if (autoOn && auto && !notFeasibleOpen && !routingOpen) {
+    const out: NextStep[] = [{ kind: 'wait', key: 'auto', text: autoAdvanceText(auto) }]
+    if (auto.open.length > 0) {
+      out.push({ kind: 'wait', key: 'auto-open', text: autoOpenText(auto) })
+    } else if (auto.held_by) {
+      out.push({ kind: 'wait', key: 'auto-held', text: t('next.autoHeld').replace('{x}', auto.held_by) })
+    }
+    if (s === 'in_assessment') out.push({ kind: 'advance', to: 'rejected', label: t('next.reject') })
+    return out
+  }
   // The assessment round (spec §16 P1 6/8): no primary while departments are
   // still answering; a not-feasible answer offers the three ways out; a full
   // round closes into costing.
@@ -324,6 +345,18 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
   return nextStatusesFor(s, change.origin).map((to) => ({ kind: 'advance', to }))
 }
 
+/** "Runs on its own: moves to Quote creation when all departments finished (2 of 6)". */
+export function autoAdvanceText(auto: AutoAdvanceState): string {
+  return t(auto.final === 'quoting' ? 'next.autoQuote' : 'next.autoInternal')
+    .replace('{x}', String(auto.done)).replace('{y}', String(auto.total))
+}
+
+/** "Still open: Sales (assessment), Project Manager (costing)". */
+export function autoOpenText(auto: AutoAdvanceState): string {
+  return t('next.autoOpen').replace('{x}', auto.open.map((o) =>
+    `${o.department_name ?? `#${o.department_id}`} (${t(o.open === 'costing' ? 'next.autoOpenCosting' : 'next.autoOpenAssessment')})`).join(', '))
+}
+
 /** "Decide 1 plan deviation(s)" reads "Decide 1 plan deviation"; 2 get their s. */
 export const pluralizeLabel = (label: string): string =>
   label.replace(/\b(\d+)(\s+[^()\d]*?)\(s\)/g, (_m, n: string, word: string) => `${n}${word}${n === '1' ? '' : 's'}`)
@@ -346,7 +379,7 @@ const Where = ({ to }: { to: string }) => (
 /** One blocker, as the Blocked-by card and the "Resolve first" button both read it. */
 interface Blocker { key: string; text: string; go?: () => void }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, canEditDeadline = true, waits: rawWaits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview, onOverride, onAbsorb, canAbsorb = false, mayOverride, onSign, maySign, nextHopFree = false, pendingOverrides }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, canEditDeadline = true, waits: rawWaits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview, onOverride, onAbsorb, canAbsorb = false, mayOverride, onSign, maySign, nextHopFree = false, pendingOverrides, autoAdvance = null }: Props) {
   // A6-06: only what holds the next hop is a blocker
   const waits = nextHopFree ? rawWaits.map((w) => ({ ...w, info: true })) : rawWaits
   const pendingCount = nextHopFree ? 0 : pendingDeviations
@@ -558,7 +591,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   // the ones that hold nothing (info) are listed apart and never counted.
   const infoWaits = waits.filter((w) => w.info)
   // Steps the viewer may not take are not offered (spec §16 P1 4).
-  const allSteps = nextStepFor(change, assessment, review)
+  const allSteps = nextStepFor(change, assessment, review, autoAdvance)
   // A not-feasible answer is the lead's and PM's call (reject, back to
   // scoping, or a deviation to costing). Anyone else reads who decides
   // instead of "choose how to go on" with nothing to choose.

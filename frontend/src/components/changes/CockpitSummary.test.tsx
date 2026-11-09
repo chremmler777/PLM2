@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import CockpitSummary, { nextStepFor, pluralizeLabel } from './CockpitSummary'
-import type { ChangeDetail, MyAction } from '../../types/change'
+import type { AutoAdvanceState, ChangeDetail, MyAction } from '../../types/change'
 import { t } from '../../i18n/cmLabels'
 import { changesApi } from '../../api/changes'
 import { formatDayMonth } from '../../lib/format'
@@ -934,6 +934,44 @@ describe('CockpitSummary early stages (spec §16)', () => {
     expect(go.className).toContain('bg-sky-700')
     fireEvent.click(go)
     expect(onAdvance).toHaveBeenCalledWith('costing')
+  })
+
+  // Christoph 2026-11-09: assessment & costing runs on its own
+  const auto = (over: Partial<AutoAdvanceState> = {}): AutoAdvanceState => ({
+    total: 6, done: 2, ready: false, to: 'costing', held_by: null, final: 'quoting',
+    open: [{ department_id: 5, department_name: 'Sales', open: 'assessment' },
+      { department_id: 6, department_name: 'Project Manager', open: 'costing' }], ...over,
+  })
+
+  it('runs on its own: no "Close assessment", the progress and who is still open', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'in_assessment', customer_relevant: true })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      assessment={round({ waiting_on: [], all_submitted: true, submitted: 2 })} autoAdvance={auto()} />))
+    expect(screen.queryByTestId('next-to-costing')).toBeNull()
+    expect(screen.getByTestId('next-wait-auto').textContent)
+      .toBe('Runs on its own: moves to Quote creation when all departments finished (2 of 6)')
+    expect(screen.getByTestId('next-wait-auto-open').textContent)
+      .toBe('Still open: Sales (assessment), Project Manager (costing)')
+    // the push back stays
+    expect(screen.getByTestId('next-to-rejected')).toBeTruthy()
+  })
+
+  it('in costing offers no "Close costing" while it runs on its own, and names what holds it', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'costing', customer_relevant: true })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      autoAdvance={auto({ to: 'quoting', done: 6, open: [], ready: true,
+        held_by: 'Newer index pending: Index D of 123 waits for triage (Development)' })} />))
+    expect(screen.queryByTestId('next-to-quoting')).toBeNull()
+    expect(screen.getByTestId('next-wait-auto').textContent).toContain('(6 of 6)')
+    expect(screen.getByTestId('next-wait-auto-held').textContent).toContain('Newer index pending')
+  })
+
+  it('a not-feasible answer still needs its decision while it runs on its own', () => {
+    const steps = nextStepFor(change({ status: 'in_assessment' }),
+      round({ waiting_on: [], all_submitted: true,
+        not_feasible: [{ department_id: 3, department_name: 'Tool Engineer' }] } as never), null, auto())
+    expect(steps.map((st) => st.kind === 'advance' ? st.to : st.key))
+      .toEqual(['not-feasible', 'rejected', 'scoping', 'override-costing'])
   })
 
   it('offers reject, back to scoping and an override when a department is not feasible', () => {

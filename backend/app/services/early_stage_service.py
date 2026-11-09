@@ -1329,6 +1329,9 @@ class EarlyStageService:
             "end_state": end,
             "scope_change": scope,
             "waits": waits,
+            # Christoph 2026-11-09: assessment & costing runs on its own
+            # (X of Y departments finished, who is open, what holds it)
+            "auto_advance": await _auto_state(session, change),
         }
         if user.effective_role == "viewer":
             # R24 (A1-03): a read-only user, a viewer named as lead too,
@@ -1589,3 +1592,8 @@ class EarlyStageService:
 async def _may_pull_in(session, change, user) -> bool:
     from app.services.change_routing_service import ChangeRoutingService
     return await ChangeRoutingService.may_pull_in(session, change, user)
+
+
+async def _auto_state(session: AsyncSession, change: ChangeRequest) -> Optional[dict]:
+    from app.services import auto_advance
+    return await auto_advance.state(session, change)

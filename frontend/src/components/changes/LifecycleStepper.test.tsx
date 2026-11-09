@@ -11,8 +11,8 @@ describe('LifecycleStepper', () => {
     expect(screen.getByTestId('step-captured').className).toContain('emerald')
     // Past stages collapse to a check and a muted name.
     expect(screen.getByTestId('step-captured').querySelector('svg')).not.toBeNull()
-    expect(screen.getByTestId('step-costing').className).toContain('sky-500')
-    expect(screen.getByTestId('step-costing').closest('li')?.getAttribute('aria-current')).toBe('step')
+    expect(screen.getByTestId('step-in_assessment').className).toContain('sky-500')
+    expect(screen.getByTestId('step-in_assessment').closest('li')?.getAttribute('aria-current')).toBe('step')
     expect(screen.getByTestId('step-released').className).toContain('text-slate-500')
   })
 
@@ -33,7 +33,20 @@ describe('LifecycleStepper', () => {
 
   it('shows the plain-language hint under the current step', () => {
     render(<LifecycleStepper status="costing" />)
-    expect(screen.getByText('Sum up costs')).toBeDefined()
+    expect(screen.getByText(t('stepper.hint.assessmentCosting'))).toBeDefined()
+  })
+
+  it('shows one "Assessment & costing" step for both statuses (Christoph 2026-11-09)', () => {
+    for (const status of ['in_assessment', 'costing'] as const) {
+      render(<LifecycleStepper status={status} customerRelevant />)
+      expect(screen.queryByTestId('step-costing')).toBeNull()
+      const step = screen.getByTestId('step-in_assessment')
+      expect(step.textContent).toContain('Assessment & costing')
+      expect(step.closest('li')?.getAttribute('aria-current')).toBe('step')
+      expect(screen.getByTestId('step-scoping').className).toContain('emerald')
+      expect(screen.getByTestId('step-quoting').className).toContain('text-slate-500')
+      cleanup()
+    }
   })
 
   it('sources the hint from the bilingual cmLabels layer, not a hardcoded string', () => {
@@ -112,7 +125,7 @@ describe('LifecycleStepper end states (spec §16)', () => {
     expect(screen.getByTestId('stepper-end').textContent).toContain('stopped at In Assessment')
     expect(screen.getByTestId('step-captured').className).toContain('emerald')
     expect(screen.getByTestId('step-in_assessment').className).toContain('red')
-    expect(screen.getByTestId('step-costing').className).toContain('slate-600')
+    expect(screen.getByTestId('step-quoting').className).toContain('slate-600')
     // Never "Closed" as the end of a stopped path, and no "Rejected" off-path badge twice.
     expect(screen.queryByTestId('step-closed')).toBeNull()
     expect(screen.getAllByText(/Rejected/)).toHaveLength(1)

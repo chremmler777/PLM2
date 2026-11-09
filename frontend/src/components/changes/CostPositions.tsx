@@ -1537,6 +1537,19 @@ const EFFORT_FIELDS: { kind: CostPositionKind; labelKey: string; rowKey: string;
     rowKey: 'costpos.supportEffortRow', descKey: 'costpos.supportEffortDesc' },
 ]
 
+/** Christoph 2026-11-09, the Project Manager's standing rows: "Scoping
+ *  effort: time spent" (booked during capture and scoping, instead of the
+ *  assessment effort), the costing effort (booked), and "PM time still to
+ *  come, estimated" on the support_effort row (required, 0 allowed). */
+export const effortFieldsFor = (departmentName?: string) => departmentName !== 'Project Manager'
+  ? EFFORT_FIELDS
+  : EFFORT_FIELDS.map((f) => f.kind === 'support_effort' ? {
+    ...f, labelKey: 'costpos.pmEffortField', rowKey: 'costpos.pmEffortRow', descKey: 'costpos.pmEffortDesc',
+  } : f.kind === 'internal_effort' ? {
+    // the PM did the scoping, not an assessment: its booked scoping time
+    ...f, labelKey: 'costpos.pmScopingField', rowKey: 'costpos.pmScopingRow', descKey: 'costpos.pmScopingDesc',
+  } : f)
+
 /**
  * A standing row. It is a row, not a line anybody has to think about adding:
  * filling it the first time creates the position behind it (with the fixed
@@ -2358,7 +2371,7 @@ export default function CostPositions({
             <SectionHeader testId={`costpos-group-time-${departmentId}`} first
               title={t('costpos.grp.ourTime')} kinds={[['time', ownLines.length + standingRows]]}
               subtotal={<>{formatHours(internalHours)} · {money(internalMoney, cur0)}</>} />
-            {EFFORT_FIELDS.map(({ kind, labelKey, rowKey, descKey }, i) => {
+            {effortFieldsFor(departmentName).map(({ kind, labelKey, rowKey, descKey }, i) => {
               const bound = mine.find((p) => p.kind === kind)
               return (
                 // Keyed on the position it binds to, so the row remounts once

@@ -5687,8 +5687,12 @@ class ChangeService:
             return []         # a read-only lead: the hop would be refused (R24)
         if is_pm_member is None:
             is_pm_member = await ChangeService.member_of(db, user, "Project Manager")
+        # Christoph 2026-11-09: assessment & costing moves on by itself, no
+        # "Ready: move it on" for those hops (services/auto_advance)
+        from app.services import auto_advance
         cand = [c for c in changes
                 if c.status in ChangeService.ADVANCE_STATUSES
+                and not (auto_advance.applies(c) and auto_advance.target(c) is not None)
                 and (not ChangeService._advance_held(c) or c.status == "approved")]
         orphaned: set = set()
         if is_pm_member:

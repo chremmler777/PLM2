@@ -60,15 +60,50 @@ def _rows(change: ChangeRequest, department_id: int) -> list[ChangeAssessment]:
                   key=lambda a: (a.stage_order, a.id or 0))
 
 
+# Christoph 2026-11-09: "PM has to book hours for himself at costing" and
+# "PM needs future estimated time". On a customer change the Project Manager
+# department owes its costing like any department (whatever stage its row is
+# on and whatever it answered): its costing hours (Book hours) and the
+# estimate of PM time still to come (offer, implementation, release: the
+# support_effort standing row, priced at the PM rate), then Finalize.
+ALWAYS_OWING_DEPARTMENTS = ("Project Manager",)
+
+
+def _always_owes(change: ChangeRequest, department_id: int) -> bool:
+    if not change.customer_relevant:
+        return False
+    rows = [a for a in _rows(change, department_id) if a.status != "waived"]
+    return any(_dept_name(a) in ALWAYS_OWING_DEPARTMENTS for a in rows)
+
+
+def _dept_name(a: ChangeAssessment) -> Optional[str]:
+    """The row's department name when loaded (selectin); never a lazy load
+    (async: a row made in this session has none yet)."""
+    from sqlalchemy import inspect as _inspect
+    from sqlalchemy.orm.base import NO_VALUE
+    d = _inspect(a).attrs.department.loaded_value
+    return None if d is NO_VALUE or d is None else d.name
+
+
 def owes(change: ChangeRequest, department_id: int) -> bool:
-    """The department answered feasible and its answer owes a cost input."""
+    """The department answered feasible and its answer owes a cost input
+    (or it is the Project Manager on a customer change)."""
     from app.services.change_service import ChangeService
-    return any(a.verdict in COSTING_VERDICTS and ChangeService.owes_costing_input(a)
-               for a in _rows(change, department_id))
+    return (any(a.verdict in COSTING_VERDICTS and ChangeService.owes_costing_input(a)
+                for a in _rows(change, department_id))
+            or _always_owes(change, department_id))
 
 
 def has_costing_verdict(change: ChangeRequest, department_id: int) -> bool:
-    return any(a.verdict in COSTING_VERDICTS for a in _rows(change, department_id))
+    return (any(a.verdict in COSTING_VERDICTS for a in _rows(change, department_id))
+            or _always_owes(change, department_id))
+
+
+def _anchor(change: ChangeRequest, department_id: int) -> ChangeAssessment:
+    """The row a finalization is stored on: the feasible answer, else (the
+    PM, owing without one) its earliest row."""
+    rows = _rows(change, department_id)
+    return next((a for a in rows if a.verdict in COSTING_VERDICTS), rows[0])
 
 
 def costing_open_for(change: ChangeRequest, department_id: int) -> bool:
@@ -250,7 +285,10 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
     if await _costing_hours_missing(session, change, department_id):
         raise EarlyCostingError("Book the hours you spent on costing first (Book hours)")
     if await _support_hours_missing(session, change, department_id):
-        raise EarlyCostingError("Enter the implementation support hours first (0 is allowed)")
+        raise EarlyCostingError(
+            "Enter the PM time still to come, estimated first (0 is allowed)"
+            if _always_owes(change, department_id) else
+            "Enter the implementation support hours first (0 is allowed)")
     if not await _has_answer(session, change, department_id):
         raise EarlyCostingError(
             "Nothing to finalize yet: enter hours or an amount on at least one "
@@ -262,8 +300,7 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
             x.closed_at = datetime.utcnow()
             x.closed_by = actor.id
             x.close_reason = "not_received"
-    anchor = next((a for a in _rows(change, department_id)
-                   if a.verdict in COSTING_VERDICTS), None)
+    anchor = _anchor(change, department_id)
     _set_details(anchor, costing_finalized_at=datetime.utcnow().isoformat(),
                  costing_finalized_by=actor.id)
     await session.flush()
@@ -448,7 +485,12 @@ async def _costing_hours_missing(session: AsyncSession, change: ChangeRequest,
     q = select(func.count(ImplementationBooking.id)).where(
         ImplementationBooking.change_id == change.id,
         ImplementationBooking.department_id == department_id)
-    if since is not None:
+    if _always_owes(change, department_id):
+        # the PM's costing time: booked in assessment or costing (its
+        # scoping time is the other standing row), Christoph 2026-11-09
+        from app.services.hours_service import HoursService
+        q = q.where(ImplementationBooking.status_at_booking.in_(HoursService.PM_COSTING))
+    elif since is not None:
         q = q.where(ImplementationBooking.booked_at >= since)
     return not ((await session.execute(q)).scalar() or 0)
 
@@ -543,7 +585,10 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
     if await _costing_hours_missing(session, change, department_id):
         items.append({"tag": "book_hours", "text": "Book the hours you spent on costing (Book hours)"})
     if await _support_hours_missing(session, change, department_id):
-        items.append({"tag": "support_hours", "text": "Implementation support: enter the hours (0 allowed)"})
+        items.append({"tag": "support_hours", "text": (
+            "PM time still to come (offer, implementation, release): enter the hours (0 allowed)"
+            if _always_owes(change, department_id) else
+            "Implementation support: enter the hours (0 allowed)")})
     # Christoph 2026-11-08: the quote status per line as info (no blocker):
     # received quotes, and shops still out on a line that already has one
     info: list[dict] = []
@@ -637,8 +682,7 @@ async def no_cost(session: AsyncSession, change: ChangeRequest, department_id: i
         raise EarlyCostingError(
             "The department has cost lines with hours or money: clear them "
             "first, or finalize the costing with them")
-    anchor = next((a for a in _rows(change, department_id)
-                   if a.verdict in COSTING_VERDICTS), None)
+    anchor = _anchor(change, department_id)
     answer = {"reason": reason, **({"hours": float(hours)} if reason == "absorbed" else {})}
     _set_details(anchor, costing_finalized_at=datetime.utcnow().isoformat(),
                  costing_finalized_by=actor.id, costing_no_cost=answer)

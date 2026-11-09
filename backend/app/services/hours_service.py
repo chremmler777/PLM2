@@ -234,6 +234,9 @@ class HoursService:
     PRE_OFFER = ("draft", "captured", "scoping", "in_assessment", "costing")
 
     COSTING_EFFORT_LABEL = "Costing effort: time spent on costing (h)"
+    PM_SCOPING_LABEL = "Scoping effort: time spent (h)"
+    PM_SCOPING = ("draft", "captured", "scoping")
+    PM_COSTING = ("in_assessment", "costing")
     FROM_BOOKINGS = "From the bookings"
 
     @staticmethod
@@ -246,14 +249,26 @@ class HoursService:
         rows = (await session.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id == change.id,
             ChangeAssessment.department_id == department_id))).scalars().all()
-        if not rows:
+        pm = (await session.execute(select(Department.name).where(
+            Department.id == department_id))).scalar_one_or_none() == "Project Manager"
+        if not rows and not pm:
             return
         since = max((a.submitted_at for a in rows if a.submitted_at), default=None)
         base = select(_f.coalesce(_f.sum(ImplementationBooking.hours), 0)).where(
             ImplementationBooking.change_id == change.id,
             ImplementationBooking.department_id == department_id,
             ImplementationBooking.status_at_booking.in_(HoursService.PRE_OFFER))
-        if since is None:
+        if pm:
+            # Christoph 2026-11-09: the PM did the scoping, not an
+            # assessment: 'Scoping effort' = booked during capture and
+            # scoping, 'Costing effort' = booked in assessment and costing
+            assess = float((await session.execute(base.where(
+                ImplementationBooking.status_at_booking.in_(
+                    HoursService.PM_SCOPING)))).scalar() or 0)
+            costing = float((await session.execute(base.where(
+                ImplementationBooking.status_at_booking.in_(
+                    HoursService.PM_COSTING)))).scalar() or 0)
+        elif since is None:
             assess = float((await session.execute(base)).scalar() or 0)
             costing = 0.0
         else:
@@ -282,7 +297,8 @@ class HoursService:
             await costing_rates.snapshot_position(session, change, row)
             await session.flush()
 
-        await put("internal_effort", "Internal effort: time spent on assessment (h)", assess, None)
+        await put("internal_effort", HoursService.PM_SCOPING_LABEL if pm
+                  else "Internal effort: time spent on assessment (h)", assess, None)
         await put("own_time", HoursService.COSTING_EFFORT_LABEL, costing, HoursService.FROM_BOOKINGS)
 
     # Christoph 2026-11-08: a correction of booked hours (edit or delete) is

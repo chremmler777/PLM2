@@ -1748,12 +1748,29 @@ export interface StageEndState {
   label?: string | null;
 }
 
+/** Christoph 2026-11-09: assessment & costing runs on its own (stage-state
+ *  auto_advance): X of Y departments finished, who is open, what holds it. */
+export interface AutoAdvanceState {
+  total: number
+  done: number
+  ready: boolean
+  open: { department_id: number; department_name: string | null; owner_name?: string | null;
+    open: 'assessment' | 'costing'; stage_order?: number }[]
+  /** The next automatic hop: costing (internal step) or quoting. */
+  to: ChangeStatus | null
+  /** The rule holding that hop once nothing is open, else null. */
+  held_by: string | null
+  /** Where the road ends: quoting (customer) or approved (internal). */
+  final: ChangeStatus
+}
+
 export interface StageStateResponse {
   change_id: number;
   status: ChangeStatus;
   status_label?: string;
   /** {to_status: may the viewer} for every hop out of the current status. */
   can_transition: Record<string, boolean>;
+  auto_advance?: AutoAdvanceState | null;
   /** Forward hops refused today: kind hard | gate | guard | decide, the reason and,
    * for a soft rule, its key (C6: what an override binds to). */
   transition_blocks?: Record<string, {

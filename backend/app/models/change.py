@@ -730,7 +730,9 @@ class ChangeAssessment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="assessments", foreign_keys=[change_id])
-    department: Mapped["Department"] = relationship(foreign_keys=[department_id])
+    # selectin: early_costing reads the name (the PM owes costing, 2026-11-09)
+    department: Mapped["Department"] = relationship(foreign_keys=[department_id],
+                                                    lazy="selectin")
     cost_lines: Mapped[list["AssessmentCostLine"]] = relationship(
         back_populates="assessment", cascade="all, delete-orphan", lazy="selectin",
     )

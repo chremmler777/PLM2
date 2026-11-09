@@ -128,6 +128,9 @@ async def finalize_department_costing(change_id: int, department_id: int,
     except early_costing.EarlyCostingError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    # Christoph 2026-11-09: assessment & costing runs on its own
+    from app.services import auto_advance
+    await auto_advance.run_after(db, change_id, current_user)
     return await _costing_state(db, change_id, current_user)
 
 
@@ -183,6 +186,9 @@ async def department_no_cost(change_id: int, department_id: int, body: NoCostIn,
     except early_costing.EarlyCostingError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    # Christoph 2026-11-09: assessment & costing runs on its own
+    from app.services import auto_advance
+    await auto_advance.run_after(db, change_id, current_user)
     return await _costing_state(db, change_id, current_user)
 
 
