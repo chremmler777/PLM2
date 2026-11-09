@@ -666,6 +666,7 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
     fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     fireEvent.change(await screen.findByTestId('risk-template-select'), { target: { value: '31' } })
     fireEvent.click(screen.getByTestId('risk-template-delete'))
+    fireEvent.click(screen.getByTestId('risk-template-delete-yes'))
     await waitFor(() => expect(changesApi.deleteRiskTemplate).toHaveBeenCalledWith(31))
   })
 
@@ -692,6 +693,7 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
     await waitFor(() => expect(changesApi.createRiskType).toHaveBeenCalledWith(4, 'Hot runner'))
     await waitFor(() => expect(select.value).toBe('d4_hot_runner'))
     fireEvent.click(await screen.findByTestId('risk-type-delete'))
+    fireEvent.click(screen.getByTestId('risk-type-delete-yes'))
     await waitFor(() => expect(changesApi.deleteRiskType).toHaveBeenCalledWith(77))
   })
 

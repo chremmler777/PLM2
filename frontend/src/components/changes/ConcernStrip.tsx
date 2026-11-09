@@ -191,6 +191,9 @@ export default function ConcernStrip({
   })
   const [templateId, setTemplateId] = useState<number | ''>('')
   const [saveTemplate, setSaveTemplate] = useState(false)
+  // Christoph 2026-11-08: deleting an own type / saved template is an × and
+  // a "Delete? Yes / No" (the fixed list has no ×)
+  const [confirmDel, setConfirmDel] = useState<'template' | 'type' | null>(null)
   const applyTemplate = (id: number | '') => {
     setTemplateId(id)
     const tpl = templates.find((x) => x.id === id)
@@ -647,13 +650,26 @@ export default function ConcernStrip({
                 ))}
               </select>
               {templateId !== '' && (
-                <button type="button" data-testid="risk-template-delete"
-                  className="text-xs text-red-300 hover:text-red-200 underline decoration-dotted disabled:opacity-50"
-                  title={t('risk.templateHint')}
-                  disabled={deleteTemplate.isPending}
-                  onClick={() => deleteTemplate.mutate(templateId as number)}>
-                  {t('risk.deleteTemplate')}
-                </button>
+<span className="inline-flex items-center gap-1">
+                {confirmDel === 'template' ? (
+                  <>
+                    <span className="text-[11px] text-red-200">{t('risk.confirmDelete')}</span>
+                    <button type="button" data-testid="risk-template-delete-yes"
+                      className="rounded bg-red-800 px-1.5 text-[11px] text-white hover:bg-red-700 disabled:opacity-50"
+                      disabled={deleteTemplate.isPending}
+                      onClick={() => { setConfirmDel(null); deleteTemplate.mutate(templateId as number) }}>{t('risk.yes')}</button>
+                    <button type="button" data-testid="risk-template-delete-no"
+                      className="rounded border border-slate-600 px-1.5 text-[11px] text-slate-200"
+                      onClick={() => setConfirmDel(null)}>{t('risk.no')}</button>
+                  </>
+                ) : (
+                  <button type="button" data-testid="risk-template-delete"
+                    aria-label={t('risk.deleteTemplate')}
+                    title={t('risk.deleteTemplate')}
+                    className="px-1 text-sm leading-none text-red-300 hover:text-red-200"
+                    onClick={() => setConfirmDel('template')}>×</button>
+                )}
+              </span>
               )}
             </div>
           )}
@@ -677,12 +693,26 @@ export default function ConcernStrip({
               )}
             </select>
             {riskType && customIdOf(riskType) != null && (
-              <button type="button" data-testid="risk-type-delete"
-                className="text-[11px] text-red-300 hover:text-red-200 underline decoration-dotted disabled:opacity-50"
-                title={t('risk.templateHint')} disabled={deleteType.isPending}
-                onClick={() => deleteType.mutate(customIdOf(riskType) as number)}>
-                {t('risk.deleteType')}
-              </button>
+<span className="inline-flex items-center gap-1">
+                {confirmDel === 'type' ? (
+                  <>
+                    <span className="text-[11px] text-red-200">{t('risk.confirmDelete')}</span>
+                    <button type="button" data-testid="risk-type-delete-yes"
+                      className="rounded bg-red-800 px-1.5 text-[11px] text-white hover:bg-red-700 disabled:opacity-50"
+                      disabled={deleteType.isPending}
+                      onClick={() => { setConfirmDel(null); deleteType.mutate(customIdOf(riskType) as number) }}>{t('risk.yes')}</button>
+                    <button type="button" data-testid="risk-type-delete-no"
+                      className="rounded border border-slate-600 px-1.5 text-[11px] text-slate-200"
+                      onClick={() => setConfirmDel(null)}>{t('risk.no')}</button>
+                  </>
+                ) : (
+                  <button type="button" data-testid="risk-type-delete"
+                    aria-label={t('risk.deleteType')}
+                    title={t('risk.deleteType')}
+                    className="px-1 text-sm leading-none text-red-300 hover:text-red-200"
+                    onClick={() => setConfirmDel('type')}>×</button>
+                )}
+              </span>
             )}
             {newType !== null && (
               <span className="flex items-center gap-1">
