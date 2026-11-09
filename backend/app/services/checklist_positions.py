@@ -15,11 +15,13 @@ from app.models.change_cost import CostingPosition
 from app.services import assessment_checklist as checklist
 
 # checklist key -> costing position kind
-CASE_KEYS = {"modification_external": "external", "modification_internal": "own_time"}
+CASE_KEYS = {"modification_external": "external", "modification_internal": "own_time",
+             # Christoph 2026-11-08: several spare parts, each its own supplier line
+             "sparepart_required": "external"}
 # Christoph 2026-11-08: every other Yes row is a costing line too (spare
 # part = bought from a supplier; the rest is own work). Not a cost line: the
 # timing risk (a risk), the cycle time (the per-plant grid, min per part).
-ROW_EXTERNAL = {"sparepart_required"}
+ROW_EXTERNAL: set = set()
 ROW_SKIP = {"timing_risk", "cycle_time_change"} | set(CASE_KEYS)
 NOTE_PREFIX = "From the assessment: "
 

@@ -337,6 +337,10 @@ async def _refuse_thin_basis(session: AsyncSession, change: ChangeRequest,
         if offer_ids else set()
     quotes, estimates, checks = [], [], []
     for p in positions:
+        if "spare part" in ((p.notes or "") + " " + p.label).lower() and p.pricing == "quote":
+            if not p.counted_offers(p.favorite_offer):
+                quotes.append(f"'{p.label}' (no offer, or no favourite among several)")
+            continue
         if p.estimate_check == "pending":
             checks.append(f"'{p.label}'")
         if p.pricing == "quote":
@@ -443,6 +447,9 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
         select(ChangeAttachment.costing_offer_id).where(
             ChangeAttachment.costing_offer_id.in_(offer_ids)))).scalars().all()) if offer_ids else set()
     for p in ext:
+        if "spare part" in ((p.notes or "") + " " + p.label).lower() and not (p.quantity or 0) > 0:
+            items.append({"tag": "amount_missing", "text": f"{p.label}: enter the amount"})
+            ids.append(p.id)
         if p.estimate_check == "pending":
             items.append({"tag": "compare", "text": f"{p.label}: compare the quote with your estimate"})
             ids.append(p.id)
@@ -456,7 +463,9 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
                 items.append({"tag": "favourite", "text": f"{p.label}: pick the favourite"})
                 ids.append(p.id)
                 continue
-            for o in p.counted_offers(fav):
+            # a spare part may be a catalogue buy: its quote file / no. is optional
+            spare = "spare part" in ((p.notes or "") + " " + p.label).lower()
+            for o in ([] if spare else p.counted_offers(fav)):
                 miss = ([] if reference_refusal(o.quote_ref) is None else ["quote no."]) \
                     + ([] if o.id in filed else ["quote file"])
                 if miss:

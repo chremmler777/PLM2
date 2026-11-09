@@ -47,7 +47,7 @@ export interface ImpactItem {
 
 /** Rows that take several cases, each a costing line (backend CASE_KEYS). */
 export const NO_NEEDS_REFERENCE = false
-export const CASE_KEYS = new Set(['modification_internal', 'modification_external'])
+export const CASE_KEYS = new Set(['modification_internal', 'modification_external', 'sparepart_required'])
 export interface CaseEntry { id: string; text: string }
 const newCaseId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 /** A row's cases as {id, text}; the first falls back to the remark. */
