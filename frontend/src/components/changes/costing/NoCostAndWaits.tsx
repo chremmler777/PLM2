@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { btnSm } from '../../common/buttonStyles'
 import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
+import { invalidateCosting } from '../../../lib/invalidateCosting'
 import { formatDate } from '../../../lib/format'
 import { t } from '../../../i18n/cmLabels'
 import type { ChangeRequest, NoCostReason, SupplierWait } from '../../../types/change'
@@ -26,14 +27,7 @@ const today = () => new Date().toISOString().slice(0, 10)
 
 function useRefresh(changeId: number) {
   const qc = useQueryClient()
-  return () => {
-    qc.invalidateQueries({ queryKey: ['change', changeId] })
-    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
-    qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
-    qc.invalidateQueries({ queryKey: ['change-my-tasks'] })
-    qc.invalidateQueries({ queryKey: ['change', changeId, 'supplier-waits'] })
-    qc.invalidateQueries({ queryKey: ['change', changeId, 'impl-state'] })
-  }
+  return () => invalidateCosting(qc, changeId)
 }
 
 /** "No cost: absorbed (6 h)" in words. */

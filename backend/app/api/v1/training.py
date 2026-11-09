@@ -1052,6 +1052,7 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/changes/{change_id}/implementation/bookings"),
     # ECR-solid C15 book hours, §11 achieved value
     ("POST", "/changes/{change_id}/hours"),
+    ("PATCH", "/changes/{change_id}/hours/{booking_id}"),
     ("DELETE", "/changes/{change_id}/hours/{booking_id}"),
     ("POST", "/changes/{change_id}/achieved"),
     ("DELETE", "/changes/{change_id}/implementation/bookings/{bid}"),

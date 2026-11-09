@@ -1200,12 +1200,51 @@ async def book_hours(
     return out
 
 
+class HoursPatch(BaseModel):
+    hours: Optional[float] = None
+    work_date: Optional[str] = None
+    note: Optional[str] = None
+
+
+@router.patch("/{change_id}/hours/{booking_id}")
+async def correct_hours(
+    change_id: int, booking_id: int, body: HoursPatch,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Christoph 2026-11-08: correct a booking (hours, day worked, note); the
+    booker, its department (members, manager) or an admin, while the window
+    is open."""
+    from app.services.hours_service import HoursError, HoursForbidden, HoursService
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        row = await ImplementationService.get_booking(db, change, booking_id)
+    except ImplementationError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        await HoursService.correct(db, change, row, body.model_dump(exclude_unset=True),
+                                   current_user)
+    except HoursForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except HoursError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    out = await HoursService.state(db, change, current_user)
+    await db.commit()
+    return out
+
+
 @router.delete("/{change_id}/hours/{booking_id}")
 async def delete_hours(
     change_id: int, booking_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """C15: take back your own booking while the window is open."""
+    """C15: take back a booking while the window is open. Christoph
+    2026-11-08: the booker's, its department's (members, manager) or an
+    admin's correction."""
     from app.services.hours_service import HoursService, window_open
     from app.services.implementation_service import (
         ImplementationError, ImplementationService,
@@ -1217,8 +1256,10 @@ async def delete_hours(
         row = await ImplementationService.get_booking(db, change, booking_id)
     except ImplementationError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    if row.booked_by != current_user.id and current_user.effective_role != "admin":
-        raise HTTPException(status_code=403, detail="Only your own booking is yours to take back")
+    if not await HoursService.may_correct(db, current_user, row):
+        raise HTTPException(status_code=403, detail=(
+            "A booking is corrected by the person who booked it, its department "
+            "or an admin"))
     if not window_open(change):
         raise HTTPException(status_code=400, detail="The booking window of this change has ended")
     dept_id = row.department_id

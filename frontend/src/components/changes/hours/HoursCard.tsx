@@ -4,7 +4,8 @@
  * booking, never 0), the bookings, and the Book hours button.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { hoursApi, hoursKey, requestBookHours } from '../../../api/hours'
+import { hoursApi, hoursKey, requestBookHours, requestHoursCorrection } from '../../../api/hours'
+import { invalidateCosting } from '../../../lib/invalidateCosting'
 import { formatCalendarDate } from '../../../lib/format'
 import { toastError } from '../../../lib/apiError'
 import { btnSm } from '../../common/buttonStyles'
@@ -17,11 +18,12 @@ export default function HoursCard({ changeId, canBook }: { changeId: number; can
   const { data: state } = useQuery({ queryKey: hoursKey(changeId), queryFn: () => hoursApi.get(changeId) })
   const remove = useMutation({
     mutationFn: (id: number) => hoursApi.remove(changeId, id),
-    onSuccess: (data) => qc.setQueryData(hoursKey(changeId), data),
+    onSuccess: (data) => { qc.setQueryData(hoursKey(changeId), data); invalidateCosting(qc, changeId) },
     onError: (e: unknown) => toastError(e, t('hours.error')),
   })
   if (!state || !Array.isArray(state.departments)) return null
   const open = state.window_open
+  const correctable = open && (state.bookings ?? []).some((b) => b.can_edit ?? b.can_delete)
   return (
     <section data-testid="hours-card" className="space-y-2 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -29,9 +31,13 @@ export default function HoursCard({ changeId, canBook }: { changeId: number; can
         <span data-testid="hours-total" className="text-xs text-slate-400">
           {t('hours.total').replace('{b}', h(state.total_booked)).replace('{e}', h(state.total_estimate))}
         </span>
+        {correctable && (
+          <button type="button" data-testid="hours-correct" onClick={() => requestHoursCorrection()}
+            className={`ml-auto ${btnSm.ghost}`}>{t('hours.correct')}</button>
+        )}
         {canBook && open && (
           <button type="button" data-testid="hours-book" onClick={() => requestBookHours()}
-            className={`ml-auto ${btnSm.secondary}`}>{t('hours.title')}</button>
+            className={`${correctable ? '' : 'ml-auto '}${btnSm.secondary}`}>{t('hours.title')}</button>
         )}
       </div>
       {state.departments.length > 0 && (

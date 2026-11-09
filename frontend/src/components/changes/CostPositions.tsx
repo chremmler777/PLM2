@@ -27,7 +27,8 @@
  * the lead and admins read. Sales has nothing to fill in here — they get the
  * picture and put a price on it later.
  */
-import { requestBookHours } from '../../api/hours'
+import { requestBookHours, requestHoursCorrection } from '../../api/hours'
+import { COSTING_REFETCH_MS, invalidateCosting } from '../../lib/invalidateCosting'
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -300,7 +301,7 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
     enabled: editable,
   })
   const lineMissing = !!fcheck?.position_ids?.includes(p.id)
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['change', changeId] }); onChanged() }
+  const refresh = () => { invalidateCosting(qc, changeId); onChanged() }
   const iso = (d: Date) => d.toISOString().slice(0, 10)
   // Christoph 2026-11-08: a request states when it was asked and when the quote is expected
   const [askedOn, setAskedOn] = useState(iso(new Date()))
@@ -1002,6 +1003,10 @@ function BookedRow({ changeId, position: p, editable }: {
             ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100'
             : btnSm.secondary}>{t('hours.title')}</button>
       )}
+      {editable && p.hours != null && (
+        <button type="button" onClick={() => requestHoursCorrection({ departmentId: p.department_id })}
+          title={t('hours.correctBooked')} className={btnSm.ghost}>{t('hours.correct')}</button>
+      )}
     </div>
   )
 }
@@ -1665,6 +1670,12 @@ function EffortRow({
                   ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100 hover:bg-red-800/60'
                   : btnSm.secondary}>{t('hours.title')}</button>
             )}
+            {editable && position?.hours != null && (
+              <button type="button" data-testid={`costpos-effort-correct-${departmentId}`}
+                title={t('hours.correctBooked')}
+                onClick={() => requestHoursCorrection({ departmentId })}
+                className={btnSm.ghost}>{t('hours.correct')}</button>
+            )}
           </span>
         ) : editable ? (
           <span className="inline-flex items-center gap-1.5">
@@ -1706,6 +1717,7 @@ function CostingEffortStanding({ changeId, departmentId, position, editable, ind
   const { data: fc } = useQuery({
     queryKey: ['change', changeId, 'finalize-check', departmentId],
     queryFn: () => changesApi.finalizeCheck(changeId, departmentId),
+    refetchInterval: COSTING_REFETCH_MS,
     enabled: editable,
   })
   const missing = !!fc?.items?.some((i) => i.tag === 'book_hours')
@@ -1730,6 +1742,12 @@ function CostingEffortStanding({ changeId, departmentId, position, editable, ind
               className={missing
                 ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100'
                 : btnSm.secondary}>{t('hours.title')}</button>
+          )}
+          {editable && position?.hours != null && (
+            <button type="button" data-testid={`costpos-costing-correct-${departmentId}`}
+              title={t('hours.correctBooked')}
+              onClick={() => requestHoursCorrection({ departmentId })}
+              className={btnSm.ghost}>{t('hours.correct')}</button>
           )}
         </span>
         {position && <LineValue p={position} />}
@@ -2238,6 +2256,7 @@ export default function CostPositions({
   const { data: positions } = useQuery({
     queryKey: ['costing-positions', changeId],
     queryFn: () => changesApi.listCostPositions(changeId),
+    refetchInterval: COSTING_REFETCH_MS,
   })
   const { data: tags } = useQuery({
     queryKey: ['costing-tags', departmentId],
@@ -2249,14 +2268,9 @@ export default function CostPositions({
     retry: false,
   })
   const categories = tags?.items ?? []
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['costing-positions', changeId] })
-    qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
-    // A position is an answer too: the change's costing_pending_department_ids
-    // moves, and "Your actions" drops its "Enter costs" row.
-    qc.invalidateQueries({ queryKey: ['change', changeId] })
-    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
-  }
+  // A position is an answer too: the change's costing_pending_department_ids
+  // moves, and "Your actions" drops its "Enter costs" row (one shared helper).
+  const invalidate = () => invalidateCosting(qc, changeId)
   const mine = (positions ?? []).filter((p) => p.department_id === departmentId)
   // Each standing row binds to THE position of its kind. A department that
   // somehow has two keeps the extras in the list below rather than losing them.
@@ -2267,10 +2281,7 @@ export default function CostPositions({
   const costingEffort = mine.find((p) => p.kind === 'own_time' && p.notes === 'From the bookings')
   const listed = mine.filter((p) => !boundIds.has(p.id) && p.id !== costingEffort?.id)
   const isToolEngineer = departmentName === TOOL_ENGINEER_DEPARTMENT
-  const weightSaved = () => {
-    qc.invalidateQueries({ queryKey: ['change', changeId] })
-    qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
-  }
+  const weightSaved = () => invalidateCosting(qc, changeId)
   // The department's total, per currency (never added across currencies):
   // money lines plus every priced hours/trials value. Lines without a rate
   // are counted out loud, not as 0.

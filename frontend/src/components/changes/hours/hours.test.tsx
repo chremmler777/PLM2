@@ -5,10 +5,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { hoursApi, type HoursState } from '../../../api/hours'
 import BookHoursDialog, { bookBlocked } from './BookHoursDialog'
 import HoursCard from './HoursCard'
+import BookingsDialog, { editBlocked, phaseLabel } from './BookingsDialog'
+import { invalidateCosting } from '../../../lib/invalidateCosting'
 
 vi.mock('../../../api/hours', async (orig) => ({
   ...(await orig<typeof import('../../../api/hours')>()),
-  hoursApi: { get: vi.fn(), book: vi.fn(), remove: vi.fn() },
+  hoursApi: { get: vi.fn(), book: vi.fn(), remove: vi.fn(), update: vi.fn() },
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
@@ -99,5 +101,95 @@ describe('HoursCard', () => {
     wrap(<HoursCard changeId={7} canBook />)
     await waitFor(() => expect(screen.getByTestId('hours-card')).toBeTruthy())
     expect(screen.queryByTestId('hours-book')).toBeNull()
+  })
+})
+
+// Christoph 2026-11-08: correct booked hours (edit / delete) in a table
+const booking = (id: number, over: Partial<HoursState['bookings'][number]> = {}) => ({
+  id, department_id: 2, department_name: 'Development', hours: 3, work_date: '2026-11-02',
+  source: 'typed' as const, booked_by_name: 'Apurva', note: 'first look', phase: 'assessment',
+  can_edit: true, can_delete: true, ...over,
+})
+
+describe('BookingsDialog', () => {
+  const withBookings = () => vi.mocked(hoursApi.get).mockResolvedValue(state({ bookings: [
+    booking(11), booking(12, { hours: 2, phase: 'costing', booked_by_name: 'Holmes', note: null }),
+    booking(13, { department_id: 4, department_name: 'Tool Engineer', can_edit: false, can_delete: false }),
+  ] }))
+  it('lists the department\'s bookings with date, person, hours, phase, note and their sum', async () => {
+    withBookings()
+    wrap(<BookingsDialog changeId={7} open onClose={() => {}} departmentId={2}
+      departments={[{ id: 2, name: 'Development' }]} />)
+    await waitFor(() => expect(screen.getByTestId('booking-row-11')).toBeTruthy())
+    expect(screen.queryByTestId('booking-row-13')).toBeNull()
+    expect(screen.getByTestId('booking-row-12').textContent).toContain('Costing')
+    expect(screen.getByTestId('booking-row-11').textContent).toContain('Assessment')
+    expect(screen.getByTestId('bookings-sum').textContent).toBe('Total: 5 h')
+  })
+  it('edits hours and note inline, sends only what changed and refreshes the costing', async () => {
+    withBookings()
+    vi.mocked(hoursApi.update).mockResolvedValue(state())
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    render(<QueryClientProvider client={qc}><BookingsDialog changeId={7} open onClose={() => {}}
+      departmentId={2} departments={[{ id: 2, name: 'Development' }]} /></QueryClientProvider>)
+    await waitFor(() => expect(screen.getByTestId('booking-edit-11')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('booking-edit-11'))
+    fireEvent.change(screen.getByTestId('booking-hours-11'), { target: { value: '2.5' } })
+    fireEvent.change(screen.getByTestId('booking-note-11'), { target: { value: 'corrected' } })
+    fireEvent.click(screen.getByTestId('booking-save-11'))
+    await waitFor(() => expect(hoursApi.update).toHaveBeenCalled())
+    expect(vi.mocked(hoursApi.update).mock.calls[0]).toEqual([7, 11, { hours: 2.5, note: 'corrected' }])
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['costing-positions', 7] }))
+  })
+  it('delete asks in an inline row first, then deletes', async () => {
+    withBookings()
+    vi.mocked(hoursApi.remove).mockResolvedValue(state())
+    wrap(<BookingsDialog changeId={7} open onClose={() => {}} departmentId={2}
+      departments={[{ id: 2, name: 'Development' }]} />)
+    await waitFor(() => expect(screen.getByTestId('booking-delete-12')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('booking-delete-12'))
+    expect(hoursApi.remove).not.toHaveBeenCalled()
+    expect(screen.getByTestId('booking-confirm-12').textContent).toContain('Delete 2 h')
+    fireEvent.click(screen.getByTestId('booking-delete-yes-12'))
+    await waitFor(() => expect(hoursApi.remove).toHaveBeenCalledWith(7, 12))
+  })
+  it('NEGATIVE: a booking that is not mine to correct is read only; a closed window allows nothing', async () => {
+    withBookings()
+    wrap(<BookingsDialog changeId={7} open onClose={() => {}} departmentId={4}
+      departments={[{ id: 4, name: 'Tool Engineer' }]} />)
+    await waitFor(() => expect(screen.getByTestId('booking-row-13')).toBeTruthy())
+    expect(screen.queryByTestId('booking-edit-13')).toBeNull()
+    expect(screen.queryByTestId('booking-delete-13')).toBeNull()
+    cleanup()
+    vi.mocked(hoursApi.get).mockResolvedValue(state({ window_open: false, bookings: [booking(11)] }))
+    wrap(<BookingsDialog changeId={7} open onClose={() => {}} departmentId={2}
+      departments={[{ id: 2, name: 'Development' }]} />)
+    await waitFor(() => expect(screen.getByTestId('booking-row-11')).toBeTruthy())
+    expect(screen.queryByTestId('booking-edit-11')).toBeNull()
+  })
+  it('NEGATIVE: editBlocked refuses 0, more than a day, a new date in the future or too old', () => {
+    expect(editBlocked('0', '2026-11-02', '2026-11-02', '2026-11-08')).not.toBeNull()
+    expect(editBlocked('25', '2026-11-02', '2026-11-02', '2026-11-08')).not.toBeNull()
+    expect(editBlocked('2', '2026-11-09', '2026-11-02', '2026-11-08')).not.toBeNull()
+    expect(editBlocked('2', '2026-10-01', '2026-11-02', '2026-11-08')).not.toBeNull()
+    // an old date that is not changed stays allowed
+    expect(editBlocked('2', '2026-10-01', '2026-10-01', '2026-11-08')).toBeNull()
+  })
+  it('phase words', () => {
+    expect(phaseLabel({ phase: 'costing', activity: null })).toBe('Costing')
+    expect(phaseLabel({ phase: 'assessment', activity: 'coordination' })).toBe('Assessment, coordination')
+  })
+})
+
+describe('invalidateCosting', () => {
+  it('refreshes the lines, the summation, the change (finalize check, waits, hours) and the actions', () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    invalidateCosting(qc, 7)
+    const keys = spy.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey))
+    for (const k of [['costing-positions', 7], ['change-summation', 7], ['change', 7], ['change-my-actions', 7]]) {
+      expect(keys).toContain(JSON.stringify(k))
+    }
   })
 })

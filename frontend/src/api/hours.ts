@@ -13,7 +13,14 @@ export interface HoursBooking {
   note?: string | null
   booked_by_name?: string | null
   status_at_booking?: string | null
+  booked_by?: number | null
+  /** Christoph 2026-11-08: where it counts: 'assessment' (up to the
+   *  department's submit), 'costing' (after it, before the offer), else the
+   *  change status it was booked in */
+  phase?: string | null
+  /** the booker, the department (members, manager) or an admin */
   can_delete?: boolean
+  can_edit?: boolean
 }
 
 export interface HoursDepartment {
@@ -61,6 +68,12 @@ export interface HoursIn {
   note?: string
 }
 
+export interface HoursPatch {
+  hours?: number
+  work_date?: string
+  note?: string | null
+}
+
 export const hoursKey = (changeId: number) => ['change', changeId, 'hours'] as const
 
 export const hoursApi = {
@@ -68,6 +81,9 @@ export const hoursApi = {
     client.get<HoursState>(`/v1/changes/${changeId}/hours`).then((r) => r.data),
   book: (changeId: number, body: HoursIn) =>
     client.post<HoursState>(`/v1/changes/${changeId}/hours`, body).then((r) => r.data),
+  /** Christoph 2026-11-08: correct a booking (hours, day worked, note). */
+  update: (changeId: number, bookingId: number, body: HoursPatch) =>
+    client.patch<HoursState>(`/v1/changes/${changeId}/hours/${bookingId}`, body).then((r) => r.data),
   remove: (changeId: number, bookingId: number) =>
     client.delete<HoursState>(`/v1/changes/${changeId}/hours/${bookingId}`).then((r) => r.data),
 }
@@ -78,4 +94,11 @@ export const hoursApi = {
 export const BOOK_HOURS_EVENT = 'plm2:book-hours'
 export function requestBookHours(detail: { departmentId?: number; confirm?: boolean } = {}) {
   window.dispatchEvent(new CustomEvent(BOOK_HOURS_EVENT, { detail }))
+}
+
+/** Christoph 2026-11-08: open the "Booked hours" correction table (edit or
+ *  delete bookings), optionally for one department. */
+export const HOURS_CORRECTION_EVENT = 'plm2:hours-correction'
+export function requestHoursCorrection(detail: { departmentId?: number } = {}) {
+  window.dispatchEvent(new CustomEvent(HOURS_CORRECTION_EVENT, { detail }))
 }

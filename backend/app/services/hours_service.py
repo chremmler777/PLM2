@@ -285,6 +285,96 @@ class HoursService:
         await put("internal_effort", "Internal effort: time spent on assessment (h)", assess, None)
         await put("own_time", HoursService.COSTING_EFFORT_LABEL, costing, HoursService.FROM_BOOKINGS)
 
+    # Christoph 2026-11-08: a correction of booked hours (edit or delete) is
+    # the booker's, the department's (its members, its manager) or an admin's
+    @staticmethod
+    async def may_correct(session: AsyncSession, actor: User,
+                          booking: ImplementationBooking,
+                          mine: Optional[set] = None,
+                          managed: Optional[set] = None) -> bool:
+        if actor.effective_role == "admin" or booking.booked_by == actor.id:
+            return True
+        if mine is None:
+            from app.services.workflow_service import WorkflowService
+            mine = set(await WorkflowService.effective_department_ids(session, actor))
+        if booking.department_id in mine:
+            return True
+        if managed is None:
+            managed = await HoursService._managed_department_ids(session, actor)
+        return booking.department_id in managed
+
+    @staticmethod
+    async def _managed_department_ids(session: AsyncSession, actor: User) -> set:
+        from app.services.change_people import is_acting
+        if is_acting(actor):
+            return set()
+        return set((await session.execute(select(Department.id).where(
+            Department.manager_id == actor.id))).scalars().all())
+
+    @staticmethod
+    async def correct(session: AsyncSession, change: ChangeRequest,
+                      booking: ImplementationBooking, spec: dict, actor: User
+                      ) -> ImplementationBooking:
+        """Christoph 2026-11-08: correct a booking's hours, day worked or note
+        (same limits as Book hours), on the record with old and new."""
+        if not window_open(change):
+            raise HoursError("The booking window of this change has ended")
+        if not await HoursService.may_correct(session, actor, booking):
+            raise HoursForbidden("A booking is corrected by the person who booked it, "
+                                 "its department or an admin")
+        old = {"hours": booking.hours,
+               "work_date": booking.work_date.isoformat() if booking.work_date else None,
+               "note": booking.note}
+        if spec.get("hours") is not None:
+            try:
+                hours = float(spec["hours"])
+            except (TypeError, ValueError):
+                raise HoursError("Hours are a number")
+            if not hours > 0:
+                raise HoursError("Hours above zero: to take a booking back, delete it")
+            if hours > MAX_HOURS:
+                raise HoursError(f"At most {MAX_HOURS:g} h per booking (one day's work)")
+            if round(hours, 2) != booking.hours:
+                booking.hours = round(hours, 2)
+                # a changed number is no longer the confirmed estimate
+                booking.source = "typed"
+        if spec.get("work_date") not in (None, ""):
+            try:
+                wd = date.fromisoformat(str(spec["work_date"])[:10])
+            except ValueError:
+                raise HoursError("The work date is a date (YYYY-MM-DD)")
+            if wd != booking.work_date:
+                from app.utils.clock import business_today
+                today = business_today()
+                if wd > today:
+                    raise HoursError("The work date is today or earlier")
+                if wd < today - timedelta(days=BACKDATE_DAYS):
+                    raise HoursError(
+                        f"Hours are booked within {BACKDATE_DAYS} days of the work")
+                booking.work_date = wd
+        if "note" in spec:
+            booking.note = (spec.get("note") or "").strip() or None
+        new = {"hours": booking.hours,
+               "work_date": booking.work_date.isoformat() if booking.work_date else None,
+               "note": booking.note}
+        if new == old:
+            return booking
+        await session.flush()
+        from app.services.change_service import ChangeService
+        dept = await session.get(Department, booking.department_id)
+        await ChangeService.append_changelog(
+            session, change, "hours_corrected",
+            f"Booking corrected for {dept.name if dept else booking.department_id}: "
+            + ", ".join(f"{k} {old[k] if old[k] is not None else '-'} -> "
+                        f"{new[k] if new[k] is not None else '-'}"
+                        for k in new if new[k] != old[k]),
+            actor.id, old_value={"booking_id": booking.id, **old},
+            new_value={"booking_id": booking.id, **new},
+            for_department_id=booking.department_id)
+        await HoursService.sync_assessment_effort(
+            session, change, booking.department_id, actor.id)
+        return booking
+
     @staticmethod
     async def state(session: AsyncSession, change: ChangeRequest, actor: User) -> dict:
         """Booked vs estimated per department (the ones the viewer may read),
@@ -355,6 +445,29 @@ class HoursService:
                         no_member_words(names.get(did), who)
                         + (f"; its estimate: {e:g} h" if e else "")
                         + (f", {b:g} h booked" if b else ""))})
+        # Christoph 2026-11-08: the phase a booking counts in, as the standing
+        # rows split it: assessment (up to the department's submit), costing
+        # (after it, before the offer), else the status it was booked in
+        since_by: dict = {}
+        for did, at in (await session.execute(
+                select(ChangeAssessment.department_id,
+                       func.max(ChangeAssessment.submitted_at))
+                .where(ChangeAssessment.change_id == change.id)
+                .group_by(ChangeAssessment.department_id))).all():
+            since_by[did] = at
+
+        def phase(x) -> str:
+            if x.status_at_booking in HoursService.PRE_OFFER:
+                since = since_by.get(x.department_id)
+                return "assessment" if since is None or (
+                    x.booked_at is not None and x.booked_at <= since) else "costing"
+            return x.status_at_booking or "other"
+        managed = await HoursService._managed_department_ids(session, actor)
+        admin = actor.effective_role == "admin"
+
+        def correctable(x) -> bool:
+            return (admin or x.booked_by == actor.id or x.department_id in mine
+                    or x.department_id in managed)
         until = window_until(change)
         return {
             "change_id": change.id, "window_open": window_open(change),
@@ -372,7 +485,9 @@ class HoursService:
                 "note": x.note, "booked_by": x.booked_by,
                 "booked_by_name": users.get(x.booked_by),
                 "status_at_booking": x.status_at_booking,
-                "can_delete": x.booked_by == actor.id or actor.effective_role == "admin",
+                "phase": phase(x),
+                "can_delete": correctable(x),
+                "can_edit": correctable(x),
             } for x in bookings],
         }
 

@@ -246,3 +246,82 @@ async def test_effort_report_window_never_calls_an_earlier_booking_not_booked(
                             headers=people["Project Manager"][1])).json()
     row = next(r for r in rep["changes"] if r["change_id"] == quiet)
     assert row["booked_hours"] == 5.0 and row["not_booked"] == ["Tool Engineer"]
+
+
+# --- Christoph 2026-11-08: correct booked hours (edit / delete) -------------
+
+async def test_correct_a_booking_hours_date_note_and_the_effort_row_follows(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _with_estimate(client, admin, seed, session_factory, depts)
+    dev = people["Development"][1]
+    res = await _book(client, dev, cid, department_id=depts["Development"], hours=6,
+                      source="estimate")
+    b = res.json()["bookings"][0]
+    assert b["can_edit"] and b["can_delete"] and b["phase"] == "assessment"
+    day = (business_today() - timedelta(days=3)).isoformat()
+    res = await client.patch(f"/api/v1/changes/{cid}/hours/{b['id']}", headers=dev,
+                             json={"hours": 4.5, "work_date": day, "note": "typo"})
+    assert res.status_code == 200, res.text
+    nb = res.json()["bookings"][0]
+    assert nb["hours"] == 4.5 and nb["work_date"] == day and nb["note"] == "typo"
+    # a changed number is no longer the confirmed estimate
+    assert nb["source"] == "typed"
+    async with session_factory() as s:
+        pos = (await s.execute(select(CostingPosition).where(
+            CostingPosition.change_id == cid,
+            CostingPosition.department_id == depts["Development"],
+            CostingPosition.kind == "internal_effort",
+            CostingPosition.label != "Assessment"))).scalars().all()
+    # the standing assessment-effort row is the bookings' sum (when it exists)
+    for p in pos:
+        assert p.hours == 4.5
+
+
+async def test_negative_corrections_that_are_refused(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _with_estimate(client, admin, seed, session_factory, depts)
+    dev = people["Development"][1]
+    bid = (await _book(client, dev, cid, department_id=depts["Development"],
+                       hours=2)).json()["bookings"][0]["id"]
+    url = f"/api/v1/changes/{cid}/hours/{bid}"
+    # NEGATIVE: another department may not edit or delete it
+    pm = people["Project Manager"][1]
+    assert (await client.patch(url, headers=pm, json={"hours": 1})).status_code == 403
+    assert (await client.delete(url, headers=pm)).status_code == 403
+    st = (await client.get(f"/api/v1/changes/{cid}/hours", headers=pm)).json()
+    assert all(not x["can_edit"] for x in st["bookings"])
+    # NEGATIVE: the booking limits hold for a correction too
+    for body in ({"hours": 0}, {"hours": 25},
+                 {"work_date": (business_today() + timedelta(days=1)).isoformat()},
+                 {"work_date": (business_today() - timedelta(days=30)).isoformat()}):
+        res = await client.patch(url, headers=dev, json=body)
+        assert res.status_code == 400, (body, res.text)
+    # NEGATIVE: a booking of another change is not found here
+    other = await _with_estimate(client, admin, seed, session_factory, depts)
+    res = await client.patch(f"/api/v1/changes/{other}/hours/{bid}", headers=dev,
+                             json={"hours": 1})
+    assert res.status_code == 404
+
+
+async def test_a_department_colleague_and_the_manager_may_correct(
+        client, admin, seed, depts, people, session_factory):
+    from app.models.workflow import Department
+    cid = await _with_estimate(client, admin, seed, session_factory, depts)
+    dev = people["Development"][1]
+    bid = (await _book(client, dev, cid, department_id=depts["Development"],
+                       hours=2)).json()["bookings"][0]["id"]
+    url = f"/api/v1/changes/{cid}/hours/{bid}"
+    # the seeded engineer is a Development member too
+    eng = await login(client, "eng@test.io", admin=False)
+    res = await client.patch(url, headers=eng, json={"hours": 3})
+    assert res.status_code == 200, res.text
+    # the department's manager (not a member) as well
+    q_uid, q = people["Quality"]
+    async with session_factory() as s:
+        await s.execute(update(Department).where(Department.id == depts["Development"])
+                        .values(manager_id=q_uid))
+        await s.commit()
+    res = await client.patch(url, headers=q, json={"note": "checked"})
+    assert res.status_code == 200, res.text
+    res = await client.delete(url, headers=q)
+    assert res.status_code == 200 and res.json()["bookings"] == []

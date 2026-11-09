@@ -11,7 +11,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Dialog from '../../common/Dialog'
 import Button from '../../common/Button'
 import DateInput from '../../gantt/DateInput'
-import { hoursApi, hoursKey, type HoursIn } from '../../../api/hours'
+import { hoursApi, hoursKey, requestHoursCorrection, type HoursIn } from '../../../api/hours'
+import { invalidateCosting } from '../../../lib/invalidateCosting'
 import { readNumberInput, todayIso } from '../../../lib/format'
 import { toastError } from '../../../lib/apiError'
 import { inputCls } from '../offer/offerFormat'
@@ -83,8 +84,9 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
     mutationFn: (body: HoursIn) => hoursApi.book(changeId, body),
     onSuccess: (data) => {
       qc.setQueryData(hoursKey(changeId), data)
-      qc.invalidateQueries({ queryKey: ['change', changeId, 'impl-bookings'] })
-      qc.invalidateQueries({ queryKey: ['change', changeId, 'impl-state'] })
+      // Christoph 2026-11-08: the standing effort rows, totals, finalize
+      // check and PM overview follow at once (impl-* sit under ['change', id])
+      invalidateCosting(qc, changeId)
       onClose()
     },
     onError: (e: unknown) => toastError(e, t('hours.error')),
@@ -155,6 +157,12 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
         )}
         <input data-testid="book-hours-note" value={note} onChange={(e) => setNote(e.target.value)}
           placeholder={t('hours.note')} aria-label={t('hours.note')} className={`${inputCls} w-full`} />
+        {(state?.bookings ?? []).some((b) => (deptId == null || b.department_id === deptId) && (b.can_edit ?? b.can_delete)) && (
+          <button type="button" data-testid="book-hours-correct"
+            onClick={() => { onClose(); requestHoursCorrection(deptId != null ? { departmentId: deptId } : {}) }}
+            className="text-[11px] text-sky-300 underline decoration-dotted hover:text-sky-200">
+            {t('hours.correctBooked')}</button>
+        )}
         {blocked && (hours || deptId != null) && (
           <p data-testid="book-hours-blocked" className="text-[11px] text-slate-400">{blocked}</p>
         )}
