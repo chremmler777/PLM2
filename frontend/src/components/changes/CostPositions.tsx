@@ -471,6 +471,12 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
     .filter((v) => !offers.some((o) => key(o.vendor_name) === key(v)))
   const [received, setReceived] = useState<Set<string>>(new Set())
   const [shop, setShop] = useState('')
+  const { data: fcheck } = useQuery({
+    queryKey: ['change', changeId, 'finalize-check', p.department_id],
+    queryFn: () => changesApi.finalizeCheck(changeId, p.department_id),
+    enabled: editable,
+  })
+  const lineMissing = !!fcheck?.position_ids?.includes(p.id)
   const refresh = () => { qc.invalidateQueries({ queryKey: ['change', changeId] }); onChanged() }
   const iso = (d: Date) => d.toISOString().slice(0, 10)
   const ask = useMutation({
@@ -488,7 +494,9 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
   const th = 'px-2 py-1 text-left text-[11px] font-medium uppercase tracking-wide text-slate-500'
   const td = 'px-2 py-1 text-xs align-middle'
   return (
-    <div className="mt-1 rounded-lg border border-slate-600 bg-slate-800/60 p-2">
+    <div className={`mt-1 rounded-lg border p-2 ${lineMissing
+      ? 'border-red-600/80 bg-red-950/20 ring-1 ring-red-700/40' : 'border-slate-600 bg-slate-800/60'}`}
+      data-missing={lineMissing ? 'yes' : 'no'}>
     <p className="mb-1 text-xs font-semibold text-slate-200">
       <span className={`mr-2 rounded px-1.5 text-[11px] font-semibold ${estimate
         ? 'bg-amber-700 text-amber-50' : 'bg-sky-700 text-white'}`}>
@@ -660,6 +668,7 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
     onError: (e: unknown) => toastError(e, 'Could not delete the quote'),
   })
   return (
+    <>
     <tr data-testid={`supplier-line-${positionId}-${o.vendor_name}`} className="border-t border-slate-700/60">
       <td className={`${td} font-medium text-slate-100`}>{o.vendor_name}</td>
       <td className={td}>
@@ -713,21 +722,27 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
           <button type="button" aria-label={`Delete the quote from ${o.vendor_name}`} title={t('costpos.deleteQuote')}
             className="ml-1 px-1 text-sm leading-none text-red-300 hover:text-red-200" onClick={() => setAskDel(true)}>×</button>
         )}
-        {askDel && (
-          <span className="ml-1 inline-flex items-center gap-1">
-            <span className="text-[11px] text-red-200">{t('risk.confirmDelete')}</span>
-            <button type="button" className="rounded bg-red-800 px-1.5 text-[11px] text-white"
-              onClick={() => { setAskDel(false); delOffer.mutate() }}>{t('risk.yes')}</button>
-            <button type="button" className="rounded border border-slate-600 px-1.5 text-[11px] text-slate-200"
-              onClick={() => setAskDel(false)}>{t('risk.no')}</button>
-          </span>
-        )}
         {o.chosen && (
           <span className="ml-1 rounded bg-violet-800 px-1.5 text-[11px] font-semibold text-violet-100"
             title={o.chosen_reason ?? undefined}>{t('vendor.salesChose')}</span>
         )}
       </td>
     </tr>
+    {askDel && (
+      <tr className="bg-red-950/50">
+        <td colSpan={7} className={`${td} text-red-100`}>
+          <span className="inline-flex flex-wrap items-center gap-2">
+            {t('costpos.deleteQuoteAsk').replace('{x}', o.vendor_name)}
+            <button type="button" data-testid={`supplier-del-yes-${o.id}`}
+              className="rounded bg-red-700 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-red-600"
+              onClick={() => { setAskDel(false); delOffer.mutate() }}>{t('costpos.yesDelete')}</button>
+            <button type="button" className="rounded border border-slate-500 px-2 py-0.5 text-[11px] text-slate-100"
+              onClick={() => setAskDel(false)}>{t('costpos.keepIt')}</button>
+          </span>
+        </td>
+      </tr>
+    )}
+    </>
   )
 }
 
@@ -804,10 +819,13 @@ function CaseDocs({ changeId, position: p }: { changeId: number; position: CostP
     queryFn: () => changesApi.get(changeId),
   })
   if (!change || !(p.notes ?? '').startsWith('From the assessment')) return null
-  const a = change.assessments?.find((x) => x.department_id === p.department_id)
-  let details: Record<string, unknown> = {}
-  try { details = typeof a?.details === 'string' ? JSON.parse(a.details) : (a?.details ?? {}) } catch { details = {} }
-  const impacts = (details.impacts as { key?: string; cases?: (string | { id: string; text: string })[] }[] | undefined) ?? []
+  // every assessment row of the department (a department can have two)
+  const impacts = (change.assessments ?? []).filter((x) => x.department_id === p.department_id)
+    .flatMap((a) => {
+      let details: Record<string, unknown> = {}
+      try { details = typeof a.details === 'string' ? JSON.parse(a.details) : (a.details ?? {}) } catch { details = {} }
+      return (details.impacts as { key?: string; cases?: (string | { id: string; text: string })[] }[] | undefined) ?? []
+    })
   const want = p.label.trim().toLowerCase()
   let caseId: string | null = null
   let kind = ''
@@ -2167,8 +2185,28 @@ export default function CostPositions({
     }
     if (p.line_value != null && quantityOf(p) > 0) addTo(p.rate_currency ?? cur, p.line_value)
   }
+  // Christoph 2026-11-08: three totals: hours spent so far (booked), the
+  // internal work (hours x rate + own money lines), the external range
+  const cur0 = ctx?.currency ?? (mine[0]?.currency ?? '')
+  const spentHours = mine.filter((p) => p.kind === 'internal_effort').reduce((n, p) => n + (p.hours ?? 0), 0)
+  const internalLines = mine.filter((p) => p.kind !== 'external')
+  const internalHours = internalLines.reduce((n, p) => n + (p.kind === 'machine_time' || p.kind === 'sampling' ? 0 : (p.hours ?? 0)), 0)
+  const internalMoney = internalLines.reduce((n, p) => n + (p.line_value != null && quantityOf(p) > 0 ? p.line_value : 0), 0)
+  const offerTotal = (o: CostingOffer) => Number(o.cost) + (!o.shipping_included && o.shipping_cost ? Number(o.shipping_cost) : 0)
+  let extLow = 0, extHigh = 0, extFav = 0
+  let extComplete = true
+  for (const p of mine.filter((x) => x.kind === 'external')) {
+    if (p.pricing === 'quote') {
+      const vals = (p.offers ?? []).filter((o) => !o.is_partial).map(offerTotal)
+      if (!vals.length) { extComplete = false; continue }
+      extLow += Math.min(...vals); extHigh += Math.max(...vals)
+      const fav = (p.offers ?? []).find((o) => o.favorite)
+      if (fav) extFav += offerTotal(fav); else extComplete = false
+    } else if (p.est_cost) {
+      extLow += Number(p.est_cost); extHigh += Number(p.est_cost); extFav += Number(p.est_cost)
+    } else extComplete = false
+  }
   const unpriced = mine.filter((p) => p.rate_missing).length
-  const totalHours = mine.reduce((s, p) => s + (p.kind === 'machine_time' || p.kind === 'sampling' ? 0 : (p.hours ?? 0)), 0)
   const totals = [...byCurrency.entries()]
 
   return (
@@ -2234,14 +2272,23 @@ export default function CostPositions({
               </td>
               <td className={`${cellCls} ${numCls} text-slate-100 whitespace-nowrap`}
                 data-testid={`costpos-total-${departmentId}`}>
-                {totals.length === 0
-                  ? money(0, ctx?.currency)
-                  : totals.map(([cur, v]) => (
-                    <span key={cur || '-'} className="block">{money(v, cur)}</span>
-                  ))}
-                {totalHours > 0 && (
-                  <span className="block text-xs text-slate-400">{formatHours(totalHours)}</span>
-                )}
+                <span className="block text-xs text-slate-400" data-testid={`costpos-total-spent-${departmentId}`}>
+                  {t('costpos.totSpent')}: {formatHours(spentHours)}</span>
+                <span className="block" data-testid={`costpos-total-internal-${departmentId}`}>
+                  <span className="text-xs text-slate-400">{t('costpos.totInternal')} ({formatHours(internalHours)}): </span>
+                  {money(internalMoney, cur0)}</span>
+                <span className="block" data-testid={`costpos-total-external-${departmentId}`}>
+                  <span className="text-xs text-slate-400">{t('costpos.totExternal')}: </span>
+                  {/* Christoph 2026-11-08: from–to over the quotes, always */}
+                  {extHigh === 0 ? '-' : extLow === extHigh ? money(extLow, cur0)
+                    : `${money(extLow, cur0)} – ${money(extHigh, cur0)}`}
+                  {extHigh > 0 && extComplete && extFav > 0 && extLow !== extHigh && (
+                    <span className="block text-[11px] text-slate-500">{t('costpos.favShort')}: {money(extFav, cur0)}</span>
+                  )}
+                </span>
+                {totals.length > 1 && totals.map(([cur, v]) => (
+                  <span key={cur || '-'} className="block text-[11px] text-slate-500">{money(v, cur)}</span>
+                ))}
                 {unpriced > 0 && (
                   <span data-testid={`costpos-unpriced-${departmentId}`}
                     className="block text-[11px] text-amber-300" title={t('costpos.noRateHint')}>
