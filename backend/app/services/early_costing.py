@@ -315,8 +315,18 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
     # HARD #8: finalized above the approved total -> the approver again
     await ChangeService.withdraw_outgrown_internal_approval(session, change, actor.id)
     # A6-02: the last finalize makes the internal approval owed
-    from app.services.decision_notices import internal_approval_owed
+    from app.services.decision_notices import internal_approval_owed, costing_finalized_notice
     await internal_approval_owed(session, change, actor.id)
+    # Christoph 2026-11-09: the PM is told by mail/notification
+    try:
+        from app.services.early_stage_service import EarlyStageService
+        name = (await EarlyStageService._dept_names(session, [department_id])).get(department_id) \
+            or f"Department {department_id}"
+        await costing_finalized_notice(session, change, name,
+                                       datetime.utcnow().strftime("%Y%m%d%H%M%S"), actor.id)
+    except Exception:  # a notice never blocks the finalize
+        import logging
+        logging.getLogger(__name__).exception("costing_finalized_notice failed")
     return anchor
 
 

@@ -89,6 +89,25 @@ async def internal_approval_owed(session: AsyncSession, change,
         f"/changes/{change.id}?tab=offer")
 
 
+async def costing_finalized_notice(session: AsyncSession, change, department_name: str,
+                                   finalized_at: str, actor_id: Optional[int]) -> int:
+    """Christoph 2026-11-09: PM and Sales hear when a department finalized
+    its costing (and how many are still open), never the actor."""
+    from app.services.change_service import ChangeService
+    # Christoph 2026-11-09: PM and Sales
+    ids = (await _members(session, change, "Project Manager", exclude=(actor_id,))
+           + await _members(session, change, "Sales", exclude=(actor_id,)))
+    if not ids:
+        return 0
+    pending = await ChangeService.costing_pending_department_ids(session, change)
+    rest = f"{len(pending)} department(s) still open." if pending else "All departments have finalized."
+    return await _send(
+        session, ids, f"chg:{change.id}:costing_finalized:{department_name}:{finalized_at}",
+        f"{change.change_number}: {department_name} finalized its costing",
+        f"{department_name} confirmed its costing is done. {rest}",
+        f"/changes/{change.id}?tab=costing")
+
+
 async def concession_owed(session: AsyncSession, change, issue,
                           actor_id: Optional[int]) -> int:
     """Quality decides a requested concession once the customer's mail is

@@ -47,6 +47,10 @@ ON = True
 # The routing stage whose work IS the quote (Sales sends it): not owed
 # before quote creation. Names as seeded (wf_seed_service ECM_BEWERTUNG).
 QUOTE_STAGE_NAMES = ("Customer activities", "Quotation")
+# Christoph 2026-11-09: the PM's "Review cost summary" row (Summation & Budget)
+# does not hold the change: the PM's own finalized costing is enough.
+PM_REVIEW_STAGE_NAMES = ("Summation & Budget",)
+PM_DEPARTMENT = "Project Manager"
 
 TEXT_COSTING = ("Automatically to costing: every first-stage assessment is in, "
                 "the next routing stage is open")
@@ -64,6 +68,29 @@ def applies(change: ChangeRequest) -> bool:
     from app.services import mother_plants as mp
     from app.services.engineering_review_service import is_review
     return not (mp.is_mother_plant(change) or is_review(change))
+
+
+async def _stage_orders(session: AsyncSession, change: ChangeRequest, names) -> set[int]:
+    from app.models.workflow import WfInstance, WfStage
+    rows = (await session.execute(
+        select(WfStage.stage_order)
+        .join(WfInstance, WfInstance.template_id == WfStage.template_id)
+        .where(WfInstance.change_id == change.id,
+               WfInstance.status.in_(("active", "completed")),
+               WfStage.name.in_(names)))).scalars().all()
+    return set(rows)
+
+
+async def counted_rows(session: AsyncSession, change: ChangeRequest) -> list:
+    """The assessment rows that must be done before Quote creation: not the
+    quote stage itself, not the PM's cost-summary review."""
+    from app.models.workflow import Department
+    skip = await _quote_stage_orders(session, change)
+    pm_skip = await _stage_orders(session, change, PM_REVIEW_STAGE_NAMES)
+    pm_id = (await session.execute(select(Department.id).where(
+        Department.name == PM_DEPARTMENT))).scalar_one_or_none()
+    return [a for a in change.assessments if a.stage_order not in skip
+            and not (a.department_id == pm_id and a.stage_order in pm_skip)]
 
 
 async def _quote_stage_orders(session: AsyncSession, change: ChangeRequest) -> set[int]:
@@ -86,8 +113,7 @@ async def progress(session: AsyncSession, change: ChangeRequest) -> dict:
     or finalized it / said no cost."""
     from app.services import early_costing
     from app.services.early_stage_service import EarlyStageService
-    skip = await _quote_stage_orders(session, change)
-    rows = [a for a in change.assessments if a.stage_order not in skip]
+    rows = await counted_rows(session, change)
     dept_ids = sorted({a.department_id for a in rows})
     pending_costing = set(early_costing.state(change)["pending"])
     names = await EarlyStageService._dept_names(session, dept_ids)
