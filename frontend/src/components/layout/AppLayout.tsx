@@ -12,9 +12,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen flex-col bg-slate-900">
       {actingAsUser && <ViewingAsBanner name={actingAsUser.name} />}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
-        <div className="flex-1 min-w-0 overflow-auto">{children}</div>
+        <div className="relative flex-1 min-w-0 overflow-auto">{children}</div>
       </div>
     </div>
   );
