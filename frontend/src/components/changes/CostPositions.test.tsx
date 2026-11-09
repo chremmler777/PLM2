@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, within, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import CostPositions from './CostPositions'
+import CostPositions, { NewOfferForm } from './CostPositions'
 import { changesApi } from '../../api/changes'
 import { costSheetMachinesApi } from '../../api/costSheetMachines'
 import { t } from '../../i18n/cmLabels'
@@ -393,7 +393,12 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('offer-part-81')).toBeTruthy()
     expect(screen.queryByTestId('offer-fav-81')).toBeNull()
     expect(screen.getByTestId('offer-fav-83').getAttribute('aria-pressed')).toBe('true')
-    // The new-offer form asks which kind it is and sends it along.
+    // 0b6529d8: a quote is filed via 'Quote received' from an asked shop, the
+    // free new-offer form is gone from the line
+    expect(screen.queryByTestId('offer-new-11')).toBeNull()
+    cleanup()
+    // The new-offer form (still exported) asks which kind it is and sends it along.
+    wrap(<NewOfferForm changeId={7} positionId={11} onAdded={() => {}} />)
     fireEvent.change(screen.getByTestId('offer-new-vendor-11'), { target: { value: 'Vendor P' } })
     fireEvent.change(screen.getByTestId('offer-new-cost-11'), { target: { value: '100' } })
     fireEvent.click(screen.getByTestId('offer-new-scope-11-partial'))
@@ -473,8 +478,8 @@ describe('CostPositions', () => {
     expect(screen.queryByTestId('costpos-lead-11')).toBeNull()
   })
 
-  it('adds the next vendor to a quoted position', async () => {
-    positions()
+  it('adds the next vendor to a quoted position (NewOfferForm on its own since 0b6529d8)', async () => {
+    wrap(<NewOfferForm changeId={7} positionId={11} onAdded={() => {}} />)
     await screen.findByTestId('offer-new-11')
     fireEvent.change(screen.getByTestId('offer-new-vendor-11'), { target: { value: 'Vendor C' } })
     fireEvent.change(screen.getByTestId('offer-new-cost-11'), { target: { value: '4800' } })
