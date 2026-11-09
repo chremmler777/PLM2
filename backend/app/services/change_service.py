@@ -7185,6 +7185,19 @@ class ChangeService:
         # the customer is actually shown. A moldflow report proves the
         # department did the work; it is not the thing that gets sent out.
         # Every other verdict is ungated: evidence stays "if needed".
+        if (cm_switches.ASSESSMENT_HOURS_REQUIRED and cm_switches.on("ASSESSMENT_V2")
+                and not (effort_hours or 0) > 0):
+            # Christoph 2026-11-08: no submit without the hours it took
+            # (typed now, or already on the standing effort row)
+            from app.models.change_cost import CostingPosition
+            booked = (await session.execute(
+                select(func.coalesce(func.sum(CostingPosition.hours), 0)).where(
+                    CostingPosition.change_id == change.id,
+                    CostingPosition.department_id == department_id,
+                    CostingPosition.kind == "internal_effort"))).scalar() or 0
+            if not float(booked) > 0:
+                raise ChangeError(
+                    "Log the hours you spent on this assessment before you submit")
         if (verdict == "feasible_with_conditions" and cm_switches.on("ASSESSMENT_V2")
                 and len((conditions or "").strip()) < 5):
             # spec §4 "Feasible if...": the condition, in words
@@ -7235,6 +7248,18 @@ class ChangeService:
         a.notes = notes
         a.responsible_id = responsible_id
         a.effort_hours = effort_hours
+        if effort_hours and effort_hours > 0 and cm_switches.on("ASSESSMENT_V2"):
+            # the standing "Assessment effort" row in costing shows the same hours
+            from app.services.costing_position_service import CostingPositionService
+            actor = await session.get(User, user_id)
+            try:
+                await CostingPositionService.create_position(
+                    session, change, {"department_id": department_id,
+                                      "kind": "internal_effort",
+                                      "label": "Internal effort: time spent on assessment (h)",
+                                      "hours": float(effort_hours)}, actor)
+            except Exception:   # never let the costing mirror block the submit
+                pass
         if details is not None:
             if not isinstance(details, dict):
                 raise ChangeError("Assessment details must be an object")

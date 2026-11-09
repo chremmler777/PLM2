@@ -638,7 +638,7 @@ export default function AssessmentBuckets({
                 ) : canSubmit ? (
                   <>
                     <AssessmentSubmitForm changeId={changeId} departmentId={row.id}
-                      departmentName={deptName(row.id)} showEffort={false}
+                      departmentName={deptName(row.id)} showEffort
                       serverDraft={a?.details ?? null} verdictRefs={!!change.assessment_v2}
                       changePptCount={changePptOf(a?.id).length
                         + (a?.has_change_ppt ? 1 : 0)}

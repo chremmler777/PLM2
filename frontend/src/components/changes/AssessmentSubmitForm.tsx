@@ -191,8 +191,19 @@ export default function AssessmentSubmitForm({
   const ready = !needsChangePpt && missingDocs.length === 0 && checklistDone
     && !(evidenceNeed && evidenceNeed.missing.length) && !conditionMissing
     && (notImpacted || (verdict !== ''
-    && (!showEffort || (effort !== '' && parseFloat(effort) >= 0))
+    // Christoph 2026-11-08: the hours are required (backend ASSESSMENT_HOURS_REQUIRED)
+    && (!showEffort || (effort !== '' && parseFloat(effort) > 0))
     && (!Fields || details.impacted !== undefined)))
+  const effortField = (
+          <div>
+            <label htmlFor={`effort-${departmentId}`} className="block text-xs text-slate-500 mb-1">
+              {t('effort.hoursRequired')}
+            </label>
+            <input id={`effort-${departmentId}`} type="number" min="0" step="0.25"
+              value={effort} onChange={(e) => setEffort(e.target.value)}
+              className="w-28 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+          </div>
+  )
   return (
     <div className="border border-slate-700 rounded-lg p-3 space-y-2 text-sm">
       {Fields && <Fields value={details} onChange={setDetails} />}
@@ -242,6 +253,8 @@ export default function AssessmentSubmitForm({
           )}
         </div>
       )}
+      {/* the hours are owed by a "not impacted" answer too (2026-11-08) */}
+      {notImpacted && showEffort && effortField}
       {/* Not impacted answers everything: the rest of the form would only ask
           about work that does not exist. */}
       {!notImpacted && (
@@ -257,16 +270,7 @@ export default function AssessmentSubmitForm({
             {VERDICTS.map((v) => <option key={v} value={v}>{verdictLabel(v)}</option>)}
           </select>
         </div>
-        {showEffort && (
-          <div>
-            <label htmlFor={`effort-${departmentId}`} className="block text-xs text-slate-500 mb-1">
-              {t('effort.hours')}
-            </label>
-            <input id={`effort-${departmentId}`} type="number" min="0" step="0.25"
-              value={effort} onChange={(e) => setEffort(e.target.value)}
-              className="w-28 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
-          </div>
-        )}
+        {showEffort && effortField}
       </div>
       )}
       {!notImpacted && verdict === 'feasible_with_conditions' && (

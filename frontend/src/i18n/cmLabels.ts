@@ -1629,6 +1629,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'meeting.decided': { de: 'Entschieden', en: 'Decided' },
   'meeting.none': { de: 'Noch kein Meeting erfasst.', en: 'No meeting recorded yet.' },
   'effort.hours': { de: 'Aufwand (Std.)', en: 'Effort (hours)' },
+  'effort.hoursRequired': { de: 'Ihre Stunden für diese Bewertung (Pflicht)', en: 'Your hours on this assessment (required)' },
   'effort.total': { de: 'Bewertungsaufwand gesamt', en: 'Total assessment effort' },
   'assessment.submit': { de: 'Bewertung abgeben', en: 'Submit assessment' },
   'assessment.verdict': { de: 'Ergebnis', en: 'Verdict' },

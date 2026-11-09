@@ -650,3 +650,12 @@ def old_question_routing(monkeypatch):
     before Christoph's 2026-11-08 'the asker owns the question'."""
     from app.services import cm_switches
     monkeypatch.setattr(cm_switches, "ASKER_OWNS_QUESTION", False)
+
+
+@pytest.fixture(autouse=True)
+def _hours_optional_by_default(monkeypatch, request):
+    """Older tests submit without hours; the rule (Christoph 2026-11-08) is
+    tested on purpose with the marker hours_required."""
+    if request.node.get_closest_marker("hours_required") is None:
+        from app.services import cm_switches
+        monkeypatch.setattr(cm_switches, "ASSESSMENT_HOURS_REQUIRED", False)

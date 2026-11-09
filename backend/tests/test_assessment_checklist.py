@@ -578,3 +578,25 @@ async def test_removing_a_required_document_reopens_the_assessment(
         a = await s.get(ChangeAssessment, tab["assessment_id"])
         assert a.submitted_at is None and a.verdict == "pending"
         assert "wrong.pdf" in a.details_dict["sent_back"]["reason"]
+
+
+
+@pytest.mark.hours_required
+async def test_submit_needs_the_assessment_hours(client, admin_auth, tab, session_factory):
+    """Christoph 2026-11-08: no submit without the hours; they land on the
+    standing effort row in costing."""
+    from app.models.change_cost import CostingPosition
+    impacts = answered("Tool Engineer", yes=set())
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 400
+    assert "hours" in res.json()["detail"]
+    res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
+                            json={"department_id": tab["department_id"], "verdict": "feasible",
+                                  "effort_hours": 2.5, "details": {"impacts": impacts}},
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        rows = (await s.execute(select(CostingPosition).where(
+            CostingPosition.change_id == tab["change_id"],
+            CostingPosition.kind == "internal_effort"))).scalars().all()
+        assert [r.hours for r in rows] == [2.5]

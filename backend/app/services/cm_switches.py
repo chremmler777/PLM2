@@ -58,6 +58,11 @@ ASSUMED_CUSTOMER_BLOCKS_RELEASE = True
 # routing (Sales for customer/supplier, the lead for our team).
 ASKER_OWNS_QUESTION = True
 
+# Christoph 2026-11-08: an assessor logs the hours spent on the assessment
+# before the submit goes through (the standing "Assessment effort" row in
+# costing is filled from it). Off = hours optional, as before.
+ASSESSMENT_HOURS_REQUIRED = True
+
 # ---------------------------------------------------------------------------
 # ECR-solid switch groups (spec flow-spec rev 6, "Switches"). Every new HARD
 # gate and every new notification of the branch reads one of these at call
