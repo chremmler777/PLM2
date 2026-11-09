@@ -81,11 +81,14 @@ import { btnIcon, btnSm } from '../components/common/buttonStyles';
 import { addDaysIso, formatDate, formatMoney, todayIso } from '../lib/format';
 import TaskCard from '../components/changes/TaskCard';
 import OpenQuestionsBanner from '../components/changes/OpenQuestionsBanner';
+import { LIVE_REFETCH_MS, invalidateChangeDetails } from '../lib/invalidateCosting';
 
-/** The change-detail queries refresh when the user comes back to the tab:
- *  other departments answer, approve and block while it sits in the
- *  background, and a stale cockpit invites 409s (the app default is off). */
-const LIVE = { refetchOnWindowFocus: true } as const;
+/** The change-detail queries refresh when the user comes back to the tab
+ *  and every LIVE_REFETCH_MS while it is visible: other departments answer,
+ *  approve and block while it is open, and a stale cockpit invites 409s
+ *  (Christoph 2026-11-09: "when a department changes something they see it
+ *  live and don't have to manually refresh"). */
+const LIVE = { refetchOnWindowFocus: true, refetchInterval: LIVE_REFETCH_MS } as const;
 
 type Tab = ChangeTab;
 // F2: before costing there's no cost basis yet: the summation, quote basis and
@@ -183,6 +186,19 @@ export default function ChangeDetailPage() {
     queryFn: () => changesApi.get(changeId),
     ...LIVE,
   });
+  // Live view: when the polled change comes back different (another
+  // department submitted, finalized, moved the stage), refetch the tabs'
+  // own queries too (routing, costing, summation, offers, meetings ...).
+  // The first load is not a change; an unchanged poll keeps the same object
+  // (structural sharing), so nothing refetches then.
+  const seenLiveChange = useRef<unknown>(null);
+  useEffect(() => {
+    if (!change) return;
+    if (seenLiveChange.current !== null && seenLiveChange.current !== change) {
+      invalidateChangeDetails(qc, changeId);
+    }
+    seenLiveChange.current = change;
+  }, [change, changeId, qc]);
   const { data: allPlants = [] } = useQuery({
     queryKey: ['plants'],
     queryFn: plantsApi.list,

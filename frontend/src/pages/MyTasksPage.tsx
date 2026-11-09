@@ -31,6 +31,7 @@ import FormPanel from '../forms/FormPanel';
 import IntakeSection from '../components/intake/IntakeSection';
 import CostSheetReviewTask from '../components/costSheet/CostSheetReviewTask';
 import { useMyTaskCounts } from '../hooks/queries/useOpenTaskCount';
+import { LIVE_REFETCH_MS } from '../lib/invalidateCosting';
 import { useIsReadOnlyViewer } from '../hooks/queries/useEffectiveRole';
 
 interface MyLessonAction {
@@ -562,7 +563,7 @@ function TaskList() {
   const { data: changeTasks, isLoading: loadingChange } = useQuery({
     queryKey: ['change-my-tasks'],
     queryFn: () => changesApi.myTasks(),
-    refetchInterval: 60_000,
+    refetchInterval: LIVE_REFETCH_MS,
   });
   const activeDepartments = departments.filter((d) => d.is_active);
 

@@ -21,6 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import EmptyState from '../components/common/EmptyState';
 import type { ChangeRequest } from '../types/change';
+import { LIVE_REFETCH_MS } from '../lib/invalidateCosting';
 
 type Sort = 'action' | 'recent' | 'overdue';
 const SORTS: Sort[] = ['action', 'recent', 'overdue'];
@@ -135,6 +136,8 @@ export default function ChangesPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['changes', statusFilter],
     queryFn: () => changesApi.list(statusFilter ? { status: statusFilter } : {}),
+    // the list shows other departments' progress without a reload
+    refetchInterval: LIVE_REFETCH_MS,
   });
 
   const listed = useMemo(() => {

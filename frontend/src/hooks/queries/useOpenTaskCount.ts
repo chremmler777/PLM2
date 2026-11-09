@@ -15,6 +15,7 @@ import { changesApi } from '../../api/changes';
 import { costSheetApi } from '../../api/costSheet';
 import { intakeKeys, intakesApi } from '../../api/intakes';
 import { getMyTasks } from '../../api/workflows';
+import { LIVE_REFETCH_MS } from '../../lib/invalidateCosting';
 import { foldChangeTasks, foldWorkflowTasks, isBackup } from '../../lib/myTasks';
 
 const REFETCH_MS = 60_000;
@@ -42,7 +43,9 @@ export function useMyTaskCounts(): MyTaskCounts {
   const { data: changeTasks } = useQuery({
     queryKey: ['change-my-tasks'],
     queryFn: () => changesApi.myTasks(),
-    refetchInterval: REFETCH_MS,
+    // change tasks move with other departments' input: same pace as the
+    // change page (Christoph 2026-11-09 night)
+    refetchInterval: LIVE_REFETCH_MS,
     staleTime: 30_000,
   });
   const { data: intakes } = useQuery({
