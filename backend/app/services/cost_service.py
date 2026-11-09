@@ -419,9 +419,9 @@ class CostService:
                 else value,
                 "rate": price.rate,
                 "recommended_vendor": favorite.vendor_name if favorite else None,
-                "recommended_cost": favorite.total_cost if favorite else None,
+                "recommended_cost": p.offer_total(favorite) if favorite else None,
                 "chosen_vendor": chosen.vendor_name if chosen else None,
-                "chosen_cost": chosen.total_cost if chosen else None,
+                "chosen_cost": p.offer_total(chosen) if chosen else None,
                 "chosen_reason": chosen.chosen_reason if chosen else None,
                 "choice_diverges": bool(
                     chosen is not None and favorite is not None

@@ -243,6 +243,7 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
         raise EarlyCostingError("The department's costing is already finalized")
     await _refuse_while_waiting(session, change, department_id)
     await _refuse_thin_basis(session, change, department_id)
+    await _refuse_transport_missing(session, change, department_id)
     empty, _ = await _empty_lines(session, change, department_id)
     if empty:
         raise EarlyCostingError(". ".join(empty))
@@ -306,6 +307,41 @@ async def _refuse_while_waiting(session: AsyncSession, change: ChangeRequest,
         raise EarlyCostingError(
             f"{waits.line(w)}: close the wait when the quote is in, or the lead "
             "decides to price it on your estimate")
+
+
+def transport_missing(offer) -> bool:
+    """Christoph 2026-11-08: "transport none is not ok, mark red but 0 is
+    allowed". A supplier quote states its transport: 0 (shipping_included
+    False, shipping_cost 0) counts as entered, an empty field
+    (shipping_cost None, e.g. shipping_included True with no amount) does not."""
+    return offer.shipping_cost is None
+
+
+def _transport_gaps(positions) -> list[tuple]:
+    """(position, offer) of every counted offer of a quoted external line,
+    spare parts included, whose transport is not entered."""
+    out = []
+    for p in positions:
+        if p.kind != "external" or p.pricing != "quote" or not p.offers:
+            continue
+        for o in p.counted_offers(p.favorite_offer):
+            if transport_missing(o):
+                out.append((p, o))
+    return out
+
+
+async def _refuse_transport_missing(session: AsyncSession, change: ChangeRequest,
+                                    department_id: int) -> None:
+    from app.models.change_cost import CostingPosition
+    rows = (await session.execute(select(CostingPosition).where(
+        CostingPosition.change_id == change.id,
+        CostingPosition.department_id == department_id,
+        CostingPosition.kind == "external"))).scalars().all()
+    gaps = _transport_gaps(rows)
+    if gaps:
+        raise EarlyCostingError(
+            "Enter the transport of the quote (0 is allowed): "
+            + ", ".join(f"'{p.label}' ({o.vendor_name})" for p, o in gaps))
 
 
 async def _refuse_thin_basis(session: AsyncSession, change: ChangeRequest,
@@ -463,6 +499,11 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
                 items.append({"tag": "favourite", "text": f"{p.label}: pick the favourite"})
                 ids.append(p.id)
                 continue
+            for o in p.counted_offers(fav):
+                if transport_missing(o):
+                    items.append({"tag": "transport_missing",
+                                  "text": f"{p.label}: {o.vendor_name} transport missing (0 allowed)"})
+                    ids.append(p.id)
             # a spare part may be a catalogue buy: its quote file / no. is optional
             spare = "spare part" in ((p.notes or "") + " " + p.label).lower()
             for o in ([] if spare else p.counted_offers(fav)):

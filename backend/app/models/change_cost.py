@@ -258,8 +258,20 @@ class CostingPosition(Base):
         return [o for o in self.offers if o.is_partial]
 
     @property
+    def per_piece(self) -> float:
+        """Christoph 2026-11-08: a spare part line (unit 'pcs') is priced per
+        piece: its prices count amount x price, transport once on top."""
+        if self.kind == "external" and (self.quantity_unit or "") == "pcs" and (self.quantity or 0) > 0:
+            return float(self.quantity)
+        return 1.0
+
+    def offer_total(self, offer: "CostingOffer") -> float:
+        """An offer's invoiced total on this line (amount x price + transport)."""
+        return offer.total_cost + float(offer.cost or 0.0) * (self.per_piece - 1.0)
+
+    @property
     def parts_cost(self) -> float:
-        return float(sum(o.total_cost for o in self.parts))
+        return float(sum(self.offer_total(o) for o in self.parts))
 
     @property
     def favorite_offer(self) -> "CostingOffer | None":
@@ -312,7 +324,7 @@ class CostingPosition(Base):
         """
         if self.kind == "external" and self.pricing == "quote":
             return self._quoted_total(self.favorite_offer)
-        return None if self.est_cost is None else float(self.est_cost)
+        return None if self.est_cost is None else float(self.est_cost) * self.per_piece
 
     def _quoted_total(self, alternative: "CostingOffer | None") -> float | None:
         """Parts always add up; the alternative that counts is added on top.
@@ -322,7 +334,7 @@ class CostingPosition(Base):
             return None
         if self.alternatives and alternative is None:
             return None
-        return self.parts_cost + (alternative.total_cost if alternative else 0.0)
+        return self.parts_cost + (self.offer_total(alternative) if alternative else 0.0)
 
     def counted_offers(self, alternative: "CostingOffer | None") -> list["CostingOffer"]:
         return self.parts + ([alternative] if alternative else [])

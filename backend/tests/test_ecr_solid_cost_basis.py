@@ -84,7 +84,8 @@ async def _finalize(client, cb):
 
 async def _offer(client, cb, pid, **body):
     res = await client.post(_u(cb, f"/costing/positions/{pid}/offers"), json={
-        "vendor_name": "FZ", "cost": 1300.0, **body}, headers=cb["te"])
+        # transport stated (0 is allowed, empty blocks finalize)
+        "vendor_name": "FZ", "cost": 1300.0, "shipping_cost": 0, **body}, headers=cb["te"])
     assert res.status_code == 201, res.text
     return res.json()
 

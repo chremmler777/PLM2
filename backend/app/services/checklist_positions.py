@@ -3,9 +3,11 @@ carried into its costing, so nobody types it twice.
 
 An Internal or External modification row can hold several cases ("re-cut
 insert LH", "new ejector plate"); each case becomes its own costing line when
-the assessment is submitted: an external case a supplier money line (estimate,
-1 job, price still to fill in), an internal case an own-time line (hours still
-to fill in). Re-submitting adds only new cases; a line the department deleted
+the assessment is submitted: a supplier money line (estimate, 1 job, price
+still to fill in). Christoph 2026-11-08: an internal case is costed exactly
+like an external change estimate too ("I don't have internal change in there
+so this needs to be as external estimate"), vendor KTX Toolshop; its notes
+keep the row label "Internal modification", which tells the two apart. Re-submitting adds only new cases; a line the department deleted
 or reworded is not brought back under the same wording, and nothing is ever
 removed here.
 """
@@ -15,12 +17,14 @@ from app.models.change_cost import CostingPosition
 from app.services import assessment_checklist as checklist
 
 # checklist key -> costing position kind
-CASE_KEYS = {"modification_external": "external", "modification_internal": "own_time",
+CASE_KEYS = {"modification_external": "external", "modification_internal": "external",
              # Christoph 2026-11-08: several spare parts, each its own supplier line
              "sparepart_required": "external"}
 # Christoph 2026-11-08: every other Yes row is a costing line too (spare
 # part = bought from a supplier; the rest is own work). Not a cost line: the
 # timing risk (a risk), the cycle time (the per-plant grid, min per part).
+# The vendor an internal modification case is carried with (our own shop).
+INTERNAL_VENDOR = "KTX Toolshop"
 ROW_EXTERNAL: set = set()
 ROW_SKIP = {"timing_risk", "cycle_time_change"} | set(CASE_KEYS)
 NOTE_PREFIX = "From the assessment: "
@@ -68,6 +72,7 @@ async def carry_cases(session, change, assessment, dept_name, user_id: int) -> i
                 notes=f"{NOTE_PREFIX}{row_label}", created_by=user_id,
                 **({"quantity": 1.0, "quantity_unit": "pcs" if e["key"] == "sparepart_required" else "job"}
                    if kind == "external" else {}),
+                **({"vendor_name": INTERNAL_VENDOR} if e["key"] == "modification_internal" else {}),
                 lead_time_unit="calendar_days")
             session.add(p)
             await session.flush()

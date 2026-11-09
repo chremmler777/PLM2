@@ -270,6 +270,33 @@ async def test_effective_cost_adds_shipping_unless_it_is_included(
     assert position["effective_cost"] == 1000.0
 
 
+async def test_a_spare_part_line_in_pcs_counts_amount_times_price_transport_once(
+        client, admin_auth, costing):
+    """Christoph 2026-11-08: a line in 'pcs' is priced per piece: 10 pcs x
+    1000 + 20 transport = 10020. A line in any other unit is unchanged."""
+    pid = (await _add_position(client, admin_auth, costing, pricing="quote",
+                               quantity=10, quantity_unit="pcs")).json()["id"]
+    offer = (await _add_offer(client, admin_auth, costing, pid, vendor_name="A",
+                              cost=1000.0, shipping_cost=20.0)).json()
+    assert offer["total_cost"] == 10020.0
+    rows = {p["id"]: p for p in
+            (await client.get(_positions_url(costing), headers=admin_auth)).json()}
+    assert rows[pid]["effective_cost"] == 10020.0
+    assert rows[pid]["recommended_cost"] == 10020.0
+
+    job = (await _add_position(client, admin_auth, costing, pricing="quote",
+                               label="Re-cut", quantity=3, quantity_unit="job")).json()["id"]
+    offer = (await _add_offer(client, admin_auth, costing, job, vendor_name="B",
+                              cost=1000.0, shipping_cost=20.0)).json()
+    assert offer["total_cost"] == 1020.0
+    est = (await _add_position(client, admin_auth, costing, label="Pins",
+                               quantity=10, quantity_unit="pcs", est_cost=50.0)).json()["id"]
+    rows = {p["id"]: p for p in
+            (await client.get(_positions_url(costing), headers=admin_auth)).json()}
+    assert rows[job]["effective_cost"] == 1020.0
+    assert rows[est]["effective_cost"] == 500.0
+
+
 async def test_a_single_offer_prices_the_position_without_a_vote(
         client, admin_auth, costing):
     pid = (await _add_position(client, admin_auth, costing,

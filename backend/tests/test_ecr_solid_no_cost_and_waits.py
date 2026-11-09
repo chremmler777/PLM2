@@ -262,7 +262,7 @@ async def test_one_quote_on_a_line_finalizes_and_closes_the_shop_still_out(
     assert res.status_code == 200, res.text
     wid = res.json()[0]["id"]
     res = await client.post(_u(ec, f"/costing/positions/{pid}/offers"), json={
-        "vendor_name": "Hasco", "cost": 900.0, "shipping_included": True,
+        "vendor_name": "Hasco", "cost": 900.0, "shipping_included": False, "shipping_cost": 0,
         "quote_ref": "HA-Q-4410", "lead_time_days": 10,
         "lead_time_unit": "calendar_days"}, headers=ec["dale"])
     assert res.status_code in (200, 201), res.text
@@ -282,6 +282,47 @@ async def test_one_quote_on_a_line_finalizes_and_closes_the_shop_still_out(
         assert w.closed_at is not None and w.close_reason == "not_received"
 
 
+async def test_a_quote_without_transport_blocks_finalize_zero_is_allowed(client, ec):
+    """Christoph 2026-11-08: "transport none is not ok, mark red but 0 is
+    allowed". A counted offer whose transport is empty (shipping_included,
+    no amount) is a transport_missing item and blocks finalize; 0 passes."""
+    pos = await client.post(_u(ec, "/costing/positions"), json={
+        "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
+        "pricing": "quote", "quantity": 1, "quantity_unit": "job"}, headers=ec["dale"])
+    assert pos.status_code == 201, pos.text
+    pid = pos.json()["id"]
+    res = await client.post(_u(ec, f"/costing/positions/{pid}/offers"), json={
+        "vendor_name": "Hasco", "cost": 900.0, "shipping_included": True,
+        "quote_ref": "HA-Q-4410", "lead_time_days": 10,
+        "lead_time_unit": "calendar_days"}, headers=ec["dale"])
+    assert res.status_code in (200, 201), res.text
+    oid = res.json()["id"]
+    assert res.json()["total_cost"] == 900.0       # empty transport adds nothing
+    res = await client.post(_u(ec, "/attachments"),
+                            files={"file": ("quote.pdf", b"%PDF-1.4 q", "application/pdf")},
+                            data={"kind": "vendor_quote", "costing_offer_id": str(oid)},
+                            headers=ec["dale"])
+    assert res.status_code in (200, 201), res.text
+    check = (await client.get(_u(ec, f"/costing/departments/{ec['shop']}/finalize-check"),
+                              headers=ec["dale"])).json()
+    items = [i for i in check["items"] if i["tag"] == "transport_missing"]
+    assert [i["text"] for i in items] == ["Insert re-cut: Hasco transport missing (0 allowed)"]
+    assert pid in check["position_ids"]
+    fin = _u(ec, f"/costing/departments/{ec['shop']}/finalize")
+    res = await client.post(fin, headers=ec["dale"])
+    assert res.status_code == 400 and "transport" in res.json()["detail"], res.text
+    # 0 is a stated transport
+    res = await client.put(_u(ec, f"/costing/offers/{oid}"), json={
+        "shipping_included": False, "shipping_cost": 0}, headers=ec["dale"])
+    assert res.status_code == 200, res.text
+    assert res.json()["total_cost"] == 900.0
+    check = (await client.get(_u(ec, f"/costing/departments/{ec['shop']}/finalize-check"),
+                              headers=ec["dale"])).json()
+    assert not [i for i in check["items"] if i["tag"] == "transport_missing"]
+    res = await client.post(fin, headers=ec["dale"])
+    assert res.status_code == 200, res.text
+
+
 async def test_a_filed_quote_closes_its_shops_wait_not_the_typed_price(
         client, ec, session_factory):
     """Christoph 2026-11-08 (5f6e0e9e, regression for the UnboundLocalError
@@ -297,7 +338,7 @@ async def test_a_filed_quote_closes_its_shops_wait_not_the_typed_price(
     assert res.status_code == 200, res.text
     wid = res.json()[0]["id"]
     res = await client.post(_u(ec, f"/costing/positions/{pid}/offers"), json={
-        "vendor_name": "Hasco", "cost": 900.0, "shipping_included": True,
+        "vendor_name": "Hasco", "cost": 900.0, "shipping_included": False, "shipping_cost": 0,
         "quote_ref": "HA-Q-4410", "lead_time_days": 10,
         "lead_time_unit": "calendar_days"}, headers=ec["dale"])
     assert res.status_code in (200, 201), res.text
@@ -336,7 +377,7 @@ async def test_a_closed_wait_reopens_until_its_shops_quote_is_filed(client, ec):
     assert row["is_open"] is True
     # once the shop's quote is on the line, reopening is refused
     res = await client.post(_u(ec, f"/costing/positions/{pid}/offers"), json={
-        "vendor_name": "Hasco", "cost": 900.0, "shipping_included": True,
+        "vendor_name": "Hasco", "cost": 900.0, "shipping_included": False, "shipping_cost": 0,
         "quote_ref": "HA-Q-4410", "lead_time_days": 10,
         "lead_time_unit": "calendar_days"}, headers=ec["dale"])
     assert res.status_code in (200, 201), res.text

@@ -509,8 +509,21 @@ async def test_modification_cases_become_costing_lines(
                 select(CostingPosition).where(
                     CostingPosition.change_id == tab["change_id"]))).scalars())
     assert await lines() == [("external", "New ejector plate"),
-                             ("external", "Re-cut insert LH"),
-                             ("own_time", "Polish 2 cavities")]
+                             ("external", "Polish 2 cavities"),
+                             ("external", "Re-cut insert LH")]
+    # Christoph 2026-11-08: an internal case is an external estimate too
+    # (1 job, KTX Toolshop); its notes keep the row label
+    async with session_factory() as s:
+        p = (await s.execute(select(CostingPosition).where(
+            CostingPosition.change_id == tab["change_id"],
+            CostingPosition.label == "Polish 2 cavities"))).scalars().one()
+        assert (p.pricing, p.quantity, p.quantity_unit, p.vendor_name, p.hours) == \
+            ("estimate", 1.0, "job", "KTX Toolshop", None)
+        assert p.notes == "From the assessment: Internal modification"
+        ext = (await s.execute(select(CostingPosition).where(
+            CostingPosition.change_id == tab["change_id"],
+            CostingPosition.label == "New ejector plate"))).scalars().one()
+        assert ext.vendor_name is None
     # carried once: running the carry again adds nothing
     from app.models.change import ChangeAssessment, ChangeRequest
     from app.services.checklist_positions import carry_cases

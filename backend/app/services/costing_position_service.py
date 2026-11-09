@@ -276,10 +276,10 @@ class CostingPositionService:
                 # the position so a wrap-up line reads "recommended: A ·
                 # chosen: B (reason)" without joining anything.
                 "recommended_vendor": favorite.vendor_name if favorite else None,
-                "recommended_cost": favorite.total_cost if favorite else None,
+                "recommended_cost": p.offer_total(favorite) if favorite else None,
                 "chosen_offer_id": chosen.id if chosen else None,
                 "chosen_vendor": chosen.vendor_name if chosen else None,
-                "chosen_cost": chosen.total_cost if chosen else None,
+                "chosen_cost": p.offer_total(chosen) if chosen else None,
                 "chosen_reason": chosen.chosen_reason if chosen else None,
                 "chosen_by_name": (choosers.get(chosen.chosen_by)
                                    if chosen else None),
@@ -301,7 +301,7 @@ class CostingPositionService:
                     "lead_time_unit": o.lead_time_unit,
                     "lead_time_calendar_days": o.lead_time_calendar_days,
                     "favorite": o.favorite, "is_partial": o.is_partial,
-                    "total_cost": o.total_cost,
+                    "total_cost": p.offer_total(o),
                     "chosen": o.chosen, "chosen_reason": o.chosen_reason,
                     "chosen_by": o.chosen_by,
                     "chosen_by_name": choosers.get(o.chosen_by),
