@@ -367,6 +367,9 @@ class CostingPositionService:
             position.pricing = "estimate"
         if position.lead_time_days is not None and position.lead_time_days < 0:
             raise CostingPositionError("Lead time cannot be negative")
+        if (position.kind == "external" and position.lead_time_days is not None
+                and position.lead_time_days < 1):
+            raise CostingPositionError("Lead time: at least 1 day (incl. shipping)")
         if position.lead_time_unit not in LEAD_TIME_UNITS:
             raise CostingPositionError(
                 f"Invalid lead time unit '{position.lead_time_unit}'")
@@ -442,8 +445,9 @@ class CostingPositionService:
             raise CostingPositionError("An offer needs a cost of zero or more")
         if offer.shipping_cost is not None and offer.shipping_cost < 0:
             raise CostingPositionError("Shipping cost cannot be negative")
-        if offer.lead_time_days is not None and offer.lead_time_days < 0:
-            raise CostingPositionError("Lead time cannot be negative")
+        if offer.lead_time_days is not None and offer.lead_time_days < 1:
+            # Christoph 2026-11-08: 0 days makes no sense for a supplier
+            raise CostingPositionError("Lead time: at least 1 day (incl. shipping)")
         if offer.lead_time_unit not in LEAD_TIME_UNITS:
             raise CostingPositionError(
                 f"Invalid lead time unit '{offer.lead_time_unit}'")

@@ -599,8 +599,9 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
         {!editable && files.length === 0 && <span className="text-red-300">{t('costpos.noFile')}</span>}
       </td>
       <td className={`${td} text-right`}>
-        {editable ? <input type="number" step="1" min={0} value={days} onChange={(e) => setDays(e.target.value)}
-          aria-label={t('costpos.shopDays')} className={`${f} w-16`} /> : (o.lead_time_days ?? '-')}
+        {editable ? <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
+          aria-label={t('costpos.totalDays')} title={t('costpos.daysMin')}
+          className={`${f} w-16 ${!(Number(days) >= 1) ? 'border-red-600' : ''}`} /> : (o.lead_time_days ?? '-')}
       </td>
       <td className={`${td} text-right`}>
         {editable ? <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
@@ -613,7 +614,7 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
       </td>
       <td className={`${td} whitespace-nowrap`}>
         {editable && dirty && (
-          <button type="button" className={btnSm.primary} disabled={save.isPending}
+          <button type="button" className={btnSm.primary} disabled={save.isPending || !(Number(days) >= 1)}
             onClick={() => save.mutate()}>{t('common.save')}</button>
         )}
         <button type="button" data-testid={`supplier-star-${o.id}`} disabled={!editable || starring}
@@ -665,8 +666,9 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel }: {
         </label>
       </td>
       <td className={`${td} text-right`}>
-        <input type="number" step="1" min={0} value={days} onChange={(e) => setDays(e.target.value)}
-          aria-label={t('costpos.shopDays')} className={`${fieldCls} w-16 tabular-nums text-right`} />
+        <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
+          aria-label={t('costpos.totalDays')} title={t('costpos.daysMin')}
+          className={`${fieldCls} w-16 tabular-nums text-right ${days !== '' && !(Number(days) >= 1) ? 'border-red-600' : ''}`} />
       </td>
       <td className={`${td} text-right`}>
         <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
@@ -679,7 +681,7 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel }: {
       </td>
       <td className={`${td} whitespace-nowrap`}>
         <button type="button" className={btnSm.primary} data-testid={`shop-quote-save-${positionId}-${shop}`}
-          disabled={!(Number(cost) > 0) || save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
+          disabled={!(Number(cost) > 0) || !(Number(days) >= 1) || save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
         <button type="button" className="ml-1 text-[11px] underline text-slate-400" onClick={onCancel}>{t('achk.cancel')}</button>
       </td>
     </tr>
@@ -704,7 +706,7 @@ function EstimateQuickRow({ changeId, position: p, onChanged }: {
     onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
     onError: (e: unknown) => toastError(e, 'Could not save the estimate'),
   })
-  const thin = !(num(cost) && num(cost)! > 0) || basis.trim().length < 5
+  const thin = !(num(cost) && num(cost)! > 0) || basis.trim().length < 5 || !(Number(days) >= 1)
   return (
     <div className={`flex flex-wrap items-center gap-2 rounded border px-2 py-1 ${thin
       ? 'border-red-700/70 bg-red-950/20' : 'border-slate-700'}`}>
@@ -713,8 +715,8 @@ function EstimateQuickRow({ changeId, position: p, onChanged }: {
         data-testid={`est-cost-${p.id}`}
         aria-label={t('costpos.shopTotal')} placeholder={t('costpos.shopTotal')}
         className={`${fieldCls} w-28 tabular-nums text-right`} />
-      <input type="number" step="1" min={0} value={days} onChange={(e) => setDays(e.target.value)}
-        data-testid={`est-days-${p.id}`}
+      <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
+        data-testid={`est-days-${p.id}`} title={t('costpos.daysMin')}
         aria-label={t('costpos.shopDays')} placeholder={t('costpos.shopDays')}
         className={`${fieldCls} w-24 tabular-nums text-right`} />
       <input value={basis} onChange={(e) => setBasis(e.target.value)}
@@ -722,7 +724,7 @@ function EstimateQuickRow({ changeId, position: p, onChanged }: {
         aria-label={t('costpos.estBasis')} placeholder={t('costpos.estBasis')}
         className={`${fieldCls} flex-1 min-w-[12rem]`} />
       <button type="button" className={btnSm.primary} data-testid={`est-save-${p.id}`}
-        disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
+        disabled={!dirty || save.isPending || (days !== '' && !(Number(days) >= 1))} onClick={() => save.mutate()}>{t('common.save')}</button>
     </div>
   )
 }

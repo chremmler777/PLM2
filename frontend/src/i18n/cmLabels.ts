@@ -695,6 +695,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.tag.hours_missing': { de: 'STUNDEN FEHLEN', en: 'HOURS MISSING' },
   'costing.tag.empty': { de: 'LEER', en: 'EMPTY' },
   'costing.tag.other': { de: 'OFFEN', en: 'OPEN' },
+  'costpos.daysMin': { de: 'Mindestens 1 Tag (Lieferzeit inkl. Versand)', en: 'At least 1 day (lead time incl. shipping)' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },
