@@ -142,8 +142,8 @@ describe('CostingBuckets', () => {
     buckets({ myDepartmentIds: [2] })
     fireEvent.click(screen.getByTestId('costing-toggle-2'))
     expect(await screen.findByTestId('costpos-section-2')).toBeTruthy()
-    // Their own department during costing: the add form is there.
-    expect(await screen.findByTestId('costpos-new-2')).toBeTruthy()
+    // Their own department during costing: the add form is a click away.
+    expect(await screen.findByTestId('costpos-add-open-2')).toBeTruthy()
   })
 
   it('lets PM see the figures and which buckets are still empty', async () => {
@@ -156,7 +156,7 @@ describe('CostingBuckets', () => {
     expect(screen.getByTestId('costing-readonly-4')).toBeTruthy()
     // Sales and the lead read another department's positions, never write them.
     expect(await screen.findByTestId('costpos-readonly-4')).toBeTruthy()
-    expect(screen.queryByTestId('costpos-new-4')).toBeNull()
+    expect(screen.queryByTestId('costpos-add-open-4')).toBeNull()
   })
 
   it('gives PM in another department\'s bucket what the backend lets PM do (A3-12)', async () => {

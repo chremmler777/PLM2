@@ -31,7 +31,7 @@ import { requestBookHours } from '../../api/hours'
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Star, X } from 'lucide-react'
+import { Send, Star, X } from 'lucide-react'
 import { changesApi } from '../../api/changes'
 import { costSheetMachinesApi } from '../../api/costSheetMachines'
 import ConfirmDialog from '../common/ConfirmDialog'
@@ -39,7 +39,6 @@ import { btnIcon, btnSm } from '../common/buttonStyles'
 import { toastError } from '../../lib/apiError'
 import AttachmentDropzone from './AttachmentDropzone'
 import { DownloadIcons } from './AttachmentRow'
-import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
 import { PositionBasis } from './costing/PositionBasis'
 import { machineClassOriginDetail, machineClassOriginText } from './machineClassOrigin'
@@ -48,7 +47,7 @@ import { formatDate, formatHours, formatMoney, formatNumber } from '../../lib/fo
 import type { Attachment } from '../../types/change'
 import type {
   CostCategory, CostEntryType, CostPosition, CostPositionKind, CostPositionPricing,
-  CostingContext, CostingOffer, LeadTimeUnit,
+  CostingContext, CostingOffer, LeadTimeUnit, SupplierWait,
 } from '../../types/change'
 
 const UNITS: LeadTimeUnit[] = ['calendar_days', 'business_days']
@@ -242,203 +241,6 @@ function UnitSelect({ testId, value, onChange }: {
   )
 }
 
-/** Full quote (alternative) or partial quote (part): the one fact that decides
-    whether the offer competes or adds up. */
-function ScopeToggle({ testId, partial, onChange }: {
-  testId: string; partial: boolean; onChange: (partial: boolean) => void
-}) {
-  return (
-    <span data-testid={testId} role="group" aria-label={t('costpos.scopeHint')} title={t('costpos.scopeHint')}
-      className="inline-flex rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600">
-      {([false, true] as const).map((v) => (
-        <button key={String(v)} type="button" data-testid={`${testId}-${v ? 'partial' : 'full'}`}
-          aria-pressed={partial === v} onClick={() => onChange(v)}
-          className={`px-2 h-6 text-[11px] whitespace-nowrap ${
-            partial === v ? 'bg-slate-600 text-slate-100' : 'bg-slate-900 text-slate-500 hover:text-slate-200'}`}>
-          {t(v ? 'costpos.scope.partial' : 'costpos.scope.full')}
-        </button>
-      ))}
-    </span>
-  )
-}
-
-export function OfferRow({
-  changeId, positionId, offer, currency, editable, onChanged,
-}: {
-  changeId: number; positionId: number; offer: CostingOffer
-  /** The position's currency; offers carry none of their own. */
-  currency: string | null
-  editable: boolean; onChanged: () => void
-}) {
-  const qc = useQueryClient()
-  const [vendor, setVendor] = useState(offer.vendor_name)
-  const [cost, setCost] = useState(String(offer.cost))
-  const [included, setIncluded] = useState(!!offer.shipping_included)
-  const [ship, setShip] = useState(offer.shipping_cost != null ? String(offer.shipping_cost) : '')
-  const [lead, setLead] = useState(offer.lead_time_days != null ? String(offer.lead_time_days) : '')
-  const [unit, setUnit] = useState<LeadTimeUnit>(offer.lead_time_unit ?? DEFAULT_UNIT)
-  const [partial, setPartial] = useState(!!offer.is_partial)
-
-  const save = useMutation({
-    mutationFn: async () => {
-      await ensureVendor(qc, vendor)
-      return changesApi.updateCostingOffer(changeId, offer.id, {
-        vendor_name: vendor, cost: Number(cost) || 0,
-        shipping_included: included,
-        shipping_cost: included ? null : num(ship),
-        lead_time_days: num(lead), lead_time_unit: unit,
-        is_partial: partial,
-      })
-    },
-    onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
-    onError: (e: unknown) => toastError(e, 'Could not save the offer'),
-  })
-
-  // The vote is exclusive, so the sibling stars go dark the moment this one
-  // lights up — the server does the same thing to the record.
-  const favorite = useMutation({
-    mutationFn: () => changesApi.updateCostingOffer(changeId, offer.id, { favorite: true }),
-    onMutate: () => {
-      qc.setQueryData<CostPosition[]>(['costing-positions', changeId], (old) =>
-        (old ?? []).map((p) => p.id !== positionId ? p : {
-          ...p,
-          offers: (p.offers ?? []).map((o) => ({ ...o, favorite: o.id === offer.id })),
-        }))
-    },
-    onSuccess: onChanged,
-    onError: (e: unknown) => {
-      toastError(e, 'Could not set the favorite')
-      onChanged()
-    },
-  })
-
-  const remove = useMutation({
-    mutationFn: () => changesApi.deleteCostingOffer(changeId, offer.id),
-    onSuccess: onChanged,
-  })
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const vendorName = offer.vendor_name.trim() || t('costpos.vendor')
-
-  const dirty = vendor !== offer.vendor_name
-    || Number(cost) !== offer.cost
-    || included !== !!offer.shipping_included
-    || (!included && num(ship) !== (offer.shipping_cost ?? null))
-    || num(lead) !== (offer.lead_time_days ?? null)
-    || unit !== (offer.lead_time_unit ?? DEFAULT_UNIT)
-    || partial !== !!offer.is_partial
-
-  const counted = !!offer.is_partial || !!offer.favorite
-  return (
-    <li data-testid={`offer-row-${offer.id}`}
-      // What is counted is lit: a part always, an alternative when starred.
-      className={`flex flex-wrap items-center gap-2 py-1.5 border-t border-slate-700/60 first:border-t-0 ${
-        counted ? 'bg-amber-950/20 border-l border-l-amber-500 pl-2' : ''}`}>
-      {/* A part is always counted, so it carries no star — the star is the
-          choice among alternatives. */}
-      {offer.is_partial ? (
-        <span data-testid={`offer-part-${offer.id}`} title={t('costpos.scopeHint')}
-          className="rounded bg-slate-700 text-slate-300 px-1 py-0 text-[11px] leading-tight">
-          {t('costpos.partBadge')}
-        </span>
-      ) : editable ? (
-        <button type="button" data-testid={`offer-fav-${offer.id}`}
-          title={t('costpos.favoriteHint')} aria-pressed={!!offer.favorite}
-          aria-label={`${t('costpos.favorite')}: ${vendorName}`}
-          onClick={() => { if (!offer.favorite) favorite.mutate() }}
-          className={`inline-flex h-6 w-6 items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
-            offer.favorite ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`}>
-          <Star aria-hidden="true" size={14} fill={offer.favorite ? 'currentColor' : 'none'} />
-        </button>
-      ) : (
-        <span data-testid={`offer-fav-${offer.id}`} title={t('costpos.favorite')}
-          className={`inline-flex h-6 w-6 items-center justify-center ${offer.favorite ? 'text-amber-300' : 'text-slate-600'}`}>
-          <Star aria-hidden="true" size={14} fill={offer.favorite ? 'currentColor' : 'none'} />
-          <span className="sr-only">{offer.favorite ? t('costpos.favorite') : ''}</span>
-        </span>
-      )}
-
-      {editable ? (
-        <>
-          <VendorField testId={`offer-vendor-${offer.id}`} value={vendor} onChange={setVendor} />
-          <input data-testid={`offer-cost-${offer.id}`} type="number" step="0.01" value={cost}
-            aria-label={t('costpos.cost')}
-            onChange={(e) => setCost(e.target.value)} className={`${fieldCls} w-24 tabular-nums`} />
-          <label className="flex items-center gap-1 text-xs text-slate-400">
-            <input type="checkbox" data-testid={`offer-shipping-included-${offer.id}`}
-              checked={included} onChange={(e) => setIncluded(e.target.checked)} />
-            {t('costpos.shippingIncluded')}
-          </label>
-          {!included && (
-            <span className="flex items-center gap-1 text-xs text-slate-400">
-              <input data-testid={`offer-shipping-cost-${offer.id}`} type="number" step="0.01"
-                value={ship} aria-label={t('costpos.shipping')}
-                onChange={(e) => setShip(e.target.value)} className={`${fieldCls} w-20 tabular-nums`} />
-              {t('costpos.shippingSeparate')}
-            </span>
-          )}
-          <input data-testid={`offer-lead-${offer.id}`} type="number" min={0} value={lead}
-            aria-label={t('costpos.leadTime')} placeholder={t('costpos.leadTime')}
-            onChange={(e) => setLead(e.target.value)} className={`${fieldCls} w-20 tabular-nums`} />
-          <UnitSelect testId={`offer-unit-${offer.id}`} value={unit} onChange={setUnit} />
-          <ScopeToggle testId={`offer-scope-${offer.id}`} partial={partial} onChange={setPartial} />
-          <button type="button" data-testid={`offer-save-${offer.id}`}
-            disabled={!dirty || save.isPending} onClick={() => save.mutate()}
-            className={btnSm.primary}>
-            {t('common.save')}
-          </button>
-          <button type="button" data-testid={`offer-delete-${offer.id}`}
-            onClick={() => setConfirmDelete(true)} title={t('costpos.delete')}
-            aria-label={`Delete the offer from ${vendorName}`}
-            className={`${btnIcon} h-7 w-7 hover:text-red-300`}>
-            <X aria-hidden="true" size={14} />
-          </button>
-          <DialogHost><ConfirmDialog open={confirmDelete} danger
-            title={`Delete the offer from ${vendorName}?`}
-            body="The offer and its attached quote leave this cost line. If it was the favorite, the line needs a new pick before it has a price."
-            confirmLabel="Delete offer" errorFallback="Could not delete the offer"
-            onConfirm={() => remove.mutateAsync()} onClose={() => setConfirmDelete(false)}
-            data-testid={`offer-delete-confirm-${offer.id}`} /></DialogHost>
-        </>
-      ) : (
-        <>
-          <span data-testid={`offer-vendor-${offer.id}`} className="text-slate-200 text-sm">
-            {offer.vendor_name}
-          </span>
-          <span data-testid={`offer-cost-${offer.id}`} className="text-slate-300 text-sm tabular-nums">
-            {money(offer.cost, currency)}
-          </span>
-          <span data-testid={`offer-shipping-${offer.id}`} className="text-xs text-slate-400">
-            {t('costpos.shipping')}: {offer.shipping_included
-              ? t('costpos.shippingIncluded')
-              : `${money(offer.shipping_cost ?? 0, currency)} ${t('costpos.shippingSeparate')}`}
-          </span>
-          {offer.lead_time_days != null && (
-            <span data-testid={`offer-lead-${offer.id}`} className="text-xs text-slate-400">
-              {leadTimeText(offer.lead_time_days, offer.lead_time_unit)}
-            </span>
-          )}
-        </>
-      )}
-
-      {/* The written offer itself lives with the row that quotes it. */}
-      <span className="w-full pl-5 space-y-1">
-        {(offer.attachments ?? []).length > 0 && (
-          <ul className="text-sm">
-            {(offer.attachments ?? []).map((att) => (
-              <AttachmentRow key={att.id} changeId={changeId} attachment={att} />
-            ))}
-          </ul>
-        )}
-        {editable && (
-          <AttachmentDropzone changeId={changeId} compact kind="vendor_quote"
-            costingOfferId={offer.id} label={t('costpos.quoteDoc')}
-            onUploaded={onChanged} />
-        )}
-      </span>
-    </li>
-  )
-}
-
 /** Christoph 2026-11-08: a quoted supplier line as a table, one line per
  *  supplier: Supplier · Status · Quote file · Days · Price · favourite.
  *  An asked shop waits until "Quote received", then its line takes the file,
@@ -473,16 +275,18 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
     .filter((v) => !offers.some((o) => key(o.vendor_name) === key(v)))
   const [received, setReceived] = useState<Set<string>>(new Set())
   const [shop, setShop] = useState('')
-  const spare = /spare part/i.test(`${p.notes ?? ''} ${p.label}`)
+  const spare = isSpareLine(p)
+  const group = lineGroupOf(p)
+  const qty = spare && perPieceOf(p) > 0 && p.quantity_unit === 'pcs' ? (p.quantity ?? null) : null
   const [item, setItem] = useState('')
   const [itemQty, setItemQty] = useState('1')
   // Christoph 2026-11-08: several spare parts, each its own line; the add sits under the last one
   const spares = (allPositions ?? []).filter((x) => x.department_id === p.department_id
-    && x.kind === 'external' && /spare part/i.test(`${x.notes ?? ''} ${x.label}`))
+    && isSpareLine(x))
   const lastSpare = spares.length === 0 || spares[spares.length - 1].id === p.id
   const addItem = useMutation({
     mutationFn: () => changesApi.createCostPosition(changeId, {
-      department_id: p.department_id, label: `${SPARE_PREFIX}${item.trim()}`, kind: 'external', pricing: 'estimate',
+      department_id: p.department_id, label: item.trim(), kind: 'external', pricing: 'estimate',
       quantity: num(itemQty) ?? 1, quantity_unit: 'pcs', notes: 'From the assessment: Spare part required',
     }),
     onSuccess: () => { setItem(''); setItemQty('1'); refresh() },
@@ -515,11 +319,14 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
   const th = 'px-2 py-1 text-left text-[11px] font-medium uppercase tracking-wide text-slate-500'
   const td = 'px-2 py-1 text-xs align-middle'
   return (
-    <div className="mt-1 rounded-lg border border-slate-600 bg-slate-800/60 p-2"
-      data-missing={lineMissing ? 'yes' : 'no'}>
+    <div className={`mt-1 rounded-lg border ${GROUP_STYLE[group].border} bg-slate-800/60 p-2`}
+      data-missing={lineMissing ? 'yes' : 'no'} data-group={group}>
     <p className="mb-1 text-xs font-semibold text-slate-200">
-      <span className={`mr-2 rounded px-1.5 text-[11px] font-semibold ${estimate
-        ? 'bg-amber-700 text-amber-50' : 'bg-sky-700 text-white'}`}>
+      {/* Christoph 2026-11-08: what the box is, in its type colour, before how it is priced */}
+      <span data-testid={`supplier-type-${p.id}`}
+        className={`mr-2 inline-flex items-center gap-1 rounded px-1.5 text-[11px] font-semibold ${GROUP_STYLE[group].chip}`}>
+        {t(GROUP_STYLE[group].labelKey)}</span>
+      <span className="mr-2 rounded border border-slate-500 px-1.5 text-[11px] font-semibold text-slate-200">
         {estimate ? t('costpos.bannerEstimate') : t('costpos.bannerQuotes')}</span>
       {offers.filter((x) => !x.is_partial).length > 1 && !offers.some((x) => x.favorite) && (
         <span className="mr-2 rounded bg-red-800 px-1.5 text-[11px] font-semibold text-red-100">{t('costpos.pickFavoriteBanner')}</span>
@@ -541,20 +348,21 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
         <tr>
           <th className={th}>{t('costpos.supplier')}</th><th className={th}>{t('costpos.status')}</th>
           <th className={th}>{t('costpos.shopFile')}</th><th className={`${th} text-right`} title={t('costpos.totalDays')}>{t('costpos.daysShort')}</th>
-          <th className={`${th} text-right`}>{t('costpos.price')}</th>
+          <th className={`${th} text-right`}>{t(spare ? 'costpos.pricePerPc' : 'costpos.price')}</th>
           <th className={`${th} text-right`}>{t('costpos.transport')}</th><th className={th} />
         </tr>
       </thead>
       <tbody>
         {estimate && (
           <EstimateLine changeId={changeId} position={p} td={td} editable={editable}
-            currency={currency} onChanged={refresh} spare={spare} />
+            currency={currency} onChanged={refresh} spare={spare} qty={qty} />
         )}
         {names.length === 0 && offers.length === 0 && !estimate && (
           <tr><td className={`${td} text-slate-600`} colSpan={7}>{t('costpos.rfqNone')}</td></tr>
         )}
         {offers.map((o) => (
-          <ReceivedLine key={`o${o.id}`} changeId={changeId} positionId={p.id} offer={o} td={td} fileOptional={spare}
+          <ReceivedLine key={`o${o.id}`} changeId={changeId} positionId={p.id} offer={o} td={td} fileOptional={spare} qty={qty}
+            wait={asked.find((w) => key(w.vendor_name) === key(o.vendor_name))}
             editable={editable} currency={currency} onChanged={onChanged}
             onStar={() => star.mutate(o.id)} starring={star.isPending} />
         ))}
@@ -563,7 +371,7 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
           // marked "quote in" elsewhere without the quote: enter it now
           if (w && editable && (received.has(n) || (!w.is_open && w.close_reason === 'received'))) {
             return <ShopQuoteLine key={n} changeId={changeId} positionId={p.id} shop={n} td={td}
-              fileOptional={spare} onDone={refresh} onCancel={async () => {
+              fileOptional={spare} qty={qty} currency={currency} onDone={refresh} onCancel={async () => {
                 const r = new Set(received); r.delete(n); setReceived(r)
                 try { await changesApi.reopenSupplierWait(changeId, w.id) } catch (e) { toastError(e, 'Could not undo') }
                 refresh()
@@ -586,10 +394,7 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
                   <span className={`rounded px-1.5 ${w?.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
                     {t('wait.sup.badge.open')}{w ? ` · ${w.chip}` : ''}</span>
                 )}
-                {w && (
-                  <span className="mt-0.5 block text-[11px] text-slate-400" data-testid={`rfq-dates-${w.id}`}>
-                    {t('costpos.rfqDates').replace('{a}', formatDate(w.asked_on)).replace('{e}', formatDate(w.expected_by))}</span>
-                )}
+                {w && <RfqDates w={w} />}
               </td>
               <td className={td} colSpan={5}>
                 {editable && w?.is_open && (
@@ -607,32 +412,35 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
             </tr>
           )
         })}
-        {editable && (
-          <tr className="border-t border-slate-700/60">
-            <td className={td} colSpan={7}>
-              <span className="inline-flex items-center gap-1">
-                <input value={shop} onChange={(e) => setShop(e.target.value)}
-                  data-testid={`rfq-shop-new-${p.id}`} placeholder={t('costpos.rfqAddShop')}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && canAsk) ask.mutate() }}
-                  className={`${fieldCls} w-44`} />
-                <label className="ml-1 text-[11px] text-slate-400">{t('wait.sup.askedOn')}
-                  <input type="date" value={askedOn} max={iso(new Date())} onChange={(e) => setAskedOn(e.target.value)}
-                    data-testid={`rfq-asked-${p.id}`} className={`${fieldCls} ml-1`} /></label>
-                <label className="ml-1 text-[11px] text-slate-400">{t('wait.sup.expectedBy')}
-                  <input type="date" value={expectedBy} min={askedOn} onChange={(e) => setExpectedBy(e.target.value)}
-                    data-testid={`rfq-expected-${p.id}`}
-                    className={`${fieldCls} ml-1 ${shop.trim().length >= 2 && !expectedBy ? 'border-red-600' : ''}`} /></label>
-                <button type="button" className={btnSm.secondary} data-testid={`rfq-shop-add-${p.id}`}
-                  disabled={!canAsk || ask.isPending} onClick={() => ask.mutate()}>
-                  {t('costpos.rfqAdd')}</button>
-              </span>
-            </td>
-          </tr>
-        )}
       </tbody>
     </table>
+    {editable && (
+      // Christoph 2026-11-08: the request is an action, not another quote row:
+      // its own strip below the table, the same in every box
+      <div data-testid={`rfq-request-${p.id}`}
+        className="mt-2 flex flex-wrap items-end gap-x-3 gap-y-2 rounded-md border border-dashed border-slate-600 bg-slate-900/70 px-3 py-2">
+        <span className="inline-flex items-center gap-1.5 self-center text-xs font-semibold text-slate-100">
+          <Send aria-hidden="true" size={14} className="text-slate-300" />{t('costpos.requestQuote')}</span>
+        <label className="flex flex-col gap-0.5 text-[11px] text-slate-300">{t('costpos.supplier')}
+          <input value={shop} onChange={(e) => setShop(e.target.value)}
+            data-testid={`rfq-shop-new-${p.id}`} placeholder={t('costpos.rfqAddShop')}
+            onKeyDown={(e) => { if (e.key === 'Enter' && canAsk) ask.mutate() }}
+            className={`${fieldCls} w-48`} /></label>
+        <label className="flex flex-col gap-0.5 text-[11px] text-slate-300">{t('wait.sup.askedOn')}
+          <input type="date" value={askedOn} max={iso(new Date())} onChange={(e) => setAskedOn(e.target.value)}
+            data-testid={`rfq-asked-${p.id}`} className={fieldCls} /></label>
+        <label className="flex flex-col gap-0.5 text-[11px] text-slate-300">{t('wait.sup.expectedBy')}
+          <input type="date" value={expectedBy} min={askedOn} onChange={(e) => setExpectedBy(e.target.value)}
+            data-testid={`rfq-expected-${p.id}`}
+            className={`${fieldCls} ${shop.trim().length >= 2 && !expectedBy ? 'border-red-600' : ''}`} /></label>
+        <button type="button" data-testid={`rfq-shop-add-${p.id}`}
+          className="rounded border border-sky-500 px-2.5 py-1 text-xs font-semibold text-sky-100 hover:bg-sky-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!canAsk || ask.isPending} onClick={() => ask.mutate()}>
+          {t('costpos.addRequest')}</button>
+      </div>
+    )}
     {spare && editable && lastSpare && (
-      <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-slate-700/60 pt-2" data-testid={`spare-add-${p.id}`}>
+      <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-slate-600 bg-slate-900/70 px-3 py-2" data-testid={`spare-add-${p.id}`}>
         <input value={item} onChange={(e) => setItem(e.target.value)} placeholder={t('costpos.itemName')}
           data-testid={`spare-new-${p.id}`} className={`${fieldCls} w-64`} />
         <input type="number" step="1" min={1} value={itemQty} onChange={(e) => setItemQty(e.target.value)}
@@ -645,6 +453,27 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
       </div>
     )}
     </div>
+  )
+}
+
+/** Christoph 2026-11-08: when the quote was asked, and when it is expected
+ *  (red + overdue while still waiting past it) or when it came in. */
+function RfqDates({ w }: { w: SupplierWait }) {
+  const asked = formatDate(w.asked_on)
+  const received = !w.is_open && w.close_reason === 'received'
+  const late = w.is_open && w.overdue
+  return (
+    <span className="mt-1 block pb-0.5 text-xs leading-snug text-slate-200 tabular-nums" data-testid={`rfq-dates-${w.id}`}>
+      {t('costpos.rfqAsked')} {asked}
+      {' · '}
+      {received ? (
+        <>{t('costpos.rfqReceivedOn')} {w.closed_at ? formatDate(w.closed_at) : '-'}</>
+      ) : (
+        <span className={late ? 'font-semibold text-red-300' : undefined}>
+          {t('costpos.rfqExpected')} {formatDate(w.expected_by)}{late ? ` · ${t('costpos.rfqOverdue')}` : ''}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -697,11 +526,13 @@ function QuoteFileCell({ changeId, offerId, file: a, editable, onChanged }: {
 
 /** Christoph 2026-11-08: the estimate as a row of the same supplier table:
  *  vendor, ESTIMATE + what it is based on, days total, price, (transport). */
-function EstimateLine({ changeId, position: p, td, editable, currency, onChanged, spare = false }: {
+function EstimateLine({ changeId, position: p, td, editable, currency, onChanged, spare = false, qty = null }: {
   changeId: number; position: CostPosition; td: string; editable: boolean
   currency: string | null; onChanged: () => void
   /** a spare part: the estimate is the catalogue price */
   spare?: boolean
+  /** a spare part's amount: the price is per piece */
+  qty?: number | null
 }) {
   const [vendor, setVendor] = useState(p.vendor_name ?? '')
   const [basis, setBasis] = useState(p.basis_ref ?? '')
@@ -731,7 +562,7 @@ function EstimateLine({ changeId, position: p, td, editable, currency, onChanged
           : <span className="font-medium text-slate-100">{p.vendor_name ?? '-'}</span>}
       </td>
       <td className={td}>
-        <span className="rounded bg-amber-700 px-1.5 text-[11px] font-semibold text-amber-50">{t('costpos.bannerEstimate')}</span>
+        <span className="rounded border border-slate-500 px-1.5 text-[11px] font-semibold text-slate-200">{t('costpos.bannerEstimate')}</span>
         {editable ? <input value={basis} onChange={(e) => setBasis(e.target.value)}
           placeholder={t(spare ? 'costpos.spareBasis' : 'costpos.estBasisShort')} title={t('costpos.estBasis')} aria-label={t('costpos.estBasis')}
           className={`${fieldCls} mt-0.5 block w-full ${noBasis ? 'border-red-600' : ''}`} />
@@ -752,8 +583,10 @@ function EstimateLine({ changeId, position: p, td, editable, currency, onChanged
         {editable ? <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
           aria-label={t('costpos.price')} data-testid={`est-cost-${p.id}`} className={`${f} ${noPrice ? 'border-red-600' : ''}`} />
           : money(p.est_cost, currency)}
+        <PerPieceNote qty={qty} price={num(cost)} currency={currency} />
       </td>
-      <td className={`${td} text-right text-slate-500`}>{t('costpos.noTransport')}</td>
+      {/* an estimate has no transport field: it is in the price */}
+      <td className={`${td} text-right text-slate-400`} data-testid={`est-transport-${p.id}`}>{t('costpos.transportInPrice')}</td>
       <td className={`${td} whitespace-nowrap`}>
         {editable && dirty && (
           <button type="button" className={btnSm.primary} data-testid={`est-save-${p.id}`}
@@ -765,24 +598,32 @@ function EstimateLine({ changeId, position: p, td, editable, currency, onChanged
 }
 
 /** A received quote, editable in its line (Christoph 2026-11-08): quote no.,
- *  file, days, price, transport (empty = no transport costs), favourite. */
-function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, onChanged, onStar, starring, fileOptional = false }: {
+ *  file, days, price, transport (empty = not entered yet, red; 0 = none), favourite. */
+function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, onChanged, onStar, starring, fileOptional = false, qty = null, wait }: {
   changeId: number; positionId: number; offer: CostingOffer; td: string; editable: boolean
   currency: string | null; onChanged: () => void; onStar: () => void; starring: boolean
   fileOptional?: boolean
+  /** a spare part's amount: the price is per piece */
+  qty?: number | null
+  /** the shop's request, when the quote was asked through one */
+  wait?: SupplierWait
 }) {
   const [ref, setRef] = useState(o.quote_ref ?? '')
   const [days, setDays] = useState(o.lead_time_days != null ? String(o.lead_time_days) : '')
   const [cost, setCost] = useState(String(o.cost ?? ''))
-  const [ship, setShip] = useState(!o.shipping_included && o.shipping_cost != null ? String(o.shipping_cost) : '')
+  // Christoph 2026-11-08: "transport none is not ok, mark red but 0 is allowed"
+  const stored = shipOf(o)
+  const [ship, setShip] = useState(stored != null ? String(stored) : '')
   const shipNum = num(ship)
+  const noShip = shipNum == null || !(shipNum >= 0)
   const dirty = ref.trim() !== (o.quote_ref ?? '') || num(days) !== (o.lead_time_days ?? null)
-    || Number(cost) !== Number(o.cost) || (shipNum ?? null) !== (!o.shipping_included ? (o.shipping_cost ?? null) : null)
+    || Number(cost) !== Number(o.cost) || (shipNum ?? null) !== stored
   const save = useMutation({
     mutationFn: () => changesApi.updateCostingOffer(changeId, o.id, {
       quote_ref: ref.trim() || null, lead_time_days: num(days), lead_time_unit: 'calendar_days',
       cost: Number(cost) || 0,
-      shipping_included: !(shipNum && shipNum > 0), shipping_cost: shipNum && shipNum > 0 ? shipNum : null,
+      ...(noShip ? { shipping_included: true, shipping_cost: null }
+        : { shipping_included: false, shipping_cost: shipNum }),
     }),
     onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
     onError: (e: unknown) => toastError(e, 'Could not save the quote'),
@@ -790,7 +631,7 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
   const files = o.attachments ?? []
   // Christoph 2026-11-08: only the row that misses something is red
   const refThin = (o.quote_ref ?? '').trim().length < 5
-  const rowMissing = !fileOptional && (files.length === 0 || (!!o.favorite && refThin))
+  const rowMissing = (!fileOptional && (files.length === 0 || (!!o.favorite && refThin))) || noShip
   const f = `${fieldCls} tabular-nums text-right`
   const [askDel, setAskDel] = useState(false)
   const delOffer = useMutation({
@@ -817,6 +658,11 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
         {files.length > 0 && o.favorite && refThin && (
           <span className="mt-0.5 block text-[11px] text-red-300">{t('costpos.whyRefShort')}</span>
         )}
+        {wait && <RfqDates w={wait} />}
+        {noShip && (
+          <span className="mt-0.5 block text-[11px] text-red-300" data-testid={`transport-missing-${o.id}`}>
+            {t('costpos.transportMissing')}</span>
+        )}
         {editable ? null
           : (o.quote_ref ? <span className="ml-1 text-slate-400">#{o.quote_ref}</span> : null)}
       </td>
@@ -839,11 +685,13 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
       <td className={`${td} text-right`}>
         {editable ? <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
           aria-label={t('costpos.price')} className={`${f} w-full`} /> : money(o.cost, currency)}
+        <PerPieceNote qty={qty} price={num(cost)} currency={currency} />
       </td>
       <td className={`${td} text-right`}>
         {editable ? <input type="number" step="0.01" min={0} value={ship} onChange={(e) => setShip(e.target.value)}
-          placeholder={t('costpos.noTransport')} aria-label={t('costpos.transport')} className={`${f} w-full`} />
-          : (!o.shipping_included && o.shipping_cost ? money(o.shipping_cost, currency) : t('costpos.noTransport'))}
+          placeholder={t('costpos.transportPlaceholder')} aria-label={t('costpos.transport')}
+          aria-invalid={noShip} className={`${f} w-full ${noShip ? 'border-red-600' : ''}`} />
+          : stored == null ? <span className="text-red-300">{t('costpos.missingWord')}</span> : money(stored, currency)}
       </td>
       <td className={`${td} whitespace-nowrap`}>
         {editable && dirty && (
@@ -852,11 +700,11 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
         )}
         {o.favorite ? (
           <span data-testid={`supplier-star-${o.id}`} title={t('costpos.favoriteLineHint')}
-            className="ml-1 rounded bg-amber-700 px-1.5 text-[11px] font-semibold text-amber-50">★ {t('costpos.favorite')}</span>
+            className="ml-1 rounded bg-slate-200 px-1.5 text-[11px] font-semibold text-slate-900">★ {t('costpos.favorite')}</span>
         ) : editable ? (
           <button type="button" data-testid={`supplier-star-${o.id}`} disabled={starring}
             title={t('costpos.favoriteLineHint')} onClick={onStar}
-            className="ml-1 rounded border border-amber-700/70 px-1.5 text-[11px] text-amber-200 hover:bg-amber-900/40">
+            className="ml-1 rounded border border-slate-500 px-1.5 text-[11px] text-slate-200 hover:bg-slate-700">
             ☆ {t('costpos.makeFavorite')}</button>
         ) : null}
         {editable && !askDel && (
@@ -888,11 +736,14 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
 }
 
 /** The line of a shop whose quote just came in: file, days, price, quote no. */
-function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel, fileOptional = false }: {
+function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel, fileOptional = false, qty = null, currency = null }: {
   changeId: number; positionId: number; shop: string; td: string
   onDone: () => void; onCancel: () => void
   /** a spare part may be a catalogue buy: no quote file needed */
   fileOptional?: boolean
+  /** a spare part's amount: the price is per piece */
+  qty?: number | null
+  currency?: string | null
 }) {
   const [cost, setCost] = useState('')
   const [days, setDays] = useState('')
@@ -903,8 +754,8 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel, fileO
     mutationFn: async () => {
       const offer = await changesApi.addCostingOffer(changeId, positionId, {
         vendor_name: shop, cost: Number(cost) || 0,
-        // empty transport = no transport costs (Christoph 2026-11-08)
-        shipping_included: !(num(ship) && num(ship)! > 0), shipping_cost: num(ship) && num(ship)! > 0 ? num(ship) : null,
+        // transport is always entered, 0 = none (Christoph 2026-11-08)
+        shipping_included: false, shipping_cost: num(ship) ?? 0,
         lead_time_days: num(days), lead_time_unit: 'calendar_days',
         ...(ref.trim() ? { quote_ref: ref.trim() } : {}),
       })
@@ -914,12 +765,17 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel, fileO
     onSuccess: () => { toast.success(t('costpos.shopQuoteSaved').replace('{x}', shop)); onDone() },
     onError: (e: unknown) => toastError(e, 'Could not save the quote'),
   })
+  const noShip = num(ship) == null || !(Number(ship) >= 0)
   return (
-    <tr data-testid={`shop-quote-${positionId}-${shop}`} className="border-t border-slate-700/60 bg-amber-950/20">
-      <td className={`${td} font-medium text-amber-100`}>{shop}</td>
+    <tr data-testid={`shop-quote-${positionId}-${shop}`} className="border-t border-slate-700/60 bg-slate-900/50">
+      <td className={`${td} font-medium text-slate-100`}>{shop}</td>
       <td className={td}>
         <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={t(fileOptional ? 'costpos.spareRef' : 'costpos.shopRef')}
           aria-label={t('costpos.shopRef')} className={`${fieldCls} w-full`} />
+        {noShip && (
+          <span className="mt-0.5 block text-[11px] text-red-300" data-testid={`shop-transport-missing-${positionId}-${shop}`}>
+            {t('costpos.transportMissing')}</span>
+        )}
       </td>
       <td className={td}>
         <label className={`cursor-pointer rounded border px-1.5 py-0.5 text-[11px] hover:bg-slate-700/60 ${file || fileOptional
@@ -937,16 +793,17 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel, fileO
       <td className={`${td} text-right`}>
         <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
           aria-label={t('costpos.price')} className={`${fieldCls} w-full tabular-nums text-right`} />
+        <PerPieceNote qty={qty} price={num(cost)} currency={currency} />
       </td>
       <td className={`${td} text-right`}>
         <input type="number" step="0.01" min={0} value={ship} onChange={(e) => setShip(e.target.value)}
-          placeholder={t('costpos.noTransport')} aria-label={t('costpos.transport')}
-          className={`${fieldCls} w-full tabular-nums text-right`} />
+          placeholder={t('costpos.transportPlaceholder')} aria-label={t('costpos.transport')} aria-invalid={noShip}
+          className={`${fieldCls} w-full tabular-nums text-right ${noShip ? 'border-red-600' : ''}`} />
       </td>
       <td className={`${td} whitespace-nowrap`}>
         <button type="button" className={btnSm.primary} data-testid={`shop-quote-save-${positionId}-${shop}`}
-          disabled={!(Number(cost) > 0) || !(Number(days) >= 1) || (!file && !fileOptional) || save.isPending}
-          title={!file ? t('costpos.fileFirst') : undefined}
+          disabled={!(Number(cost) > 0) || !(Number(days) >= 1) || (!file && !fileOptional) || noShip || save.isPending}
+          title={noShip ? t('costpos.transportMissing') : !file ? t('costpos.fileFirst') : undefined}
           onClick={() => save.mutate()}>{t('common.save')}</button>
         <button type="button" className="ml-1 text-[11px] underline text-slate-400" onClick={onCancel}
           title={t('costpos.undoReceivedHint')}>{t('costpos.undoReceived')}</button>
@@ -991,8 +848,8 @@ function CaseDocs({ changeId, position: p }: { changeId: number; position: CostP
         {t(kind === 'internal' ? 'costpos.caseDocsInternal' : 'costpos.caseDocsExternal')}</span>
       {docs.map((d) => (
         <span key={d.id} className="block">
-          <span className={`mr-1 rounded px-1 text-[10px] font-semibold ${d.kind === 'rfq'
-            ? 'bg-violet-800 text-violet-100' : 'bg-sky-800 text-sky-100'}`}>
+          {/* neutral: the type colours (teal, sky, violet) name line types only */}
+          <span className="mr-1 rounded border border-slate-500 px-1 text-[10px] font-semibold text-slate-200">
             {d.kind === 'rfq' ? t('costpos.docRfq') : t('costpos.docPpt')}</span>
           <DownloadIcons changeId={changeId} attachments={[d]} />
         </span>
@@ -1001,10 +858,83 @@ function CaseDocs({ changeId, position: p }: { changeId: number; position: CostP
   )
 }
 
-/** Spare part lines carry their item in the label: "Spare part: <name / part no.>". */
+/** Old spare part lines carry their item as "Spare part: <name / part no.>";
+ *  newer ones (seeded from the assessment, or added below a spare box) carry
+ *  the plain name and say what they are in the notes. */
 const SPARE_PREFIX = 'Spare part: '
 
-const spareName = (label: string) => label.startsWith(SPARE_PREFIX) ? label.slice(SPARE_PREFIX.length) : ''
+/** The item's name, without the old "Spare part: " prefix. */
+export const spareName = (label: string) => label.startsWith(SPARE_PREFIX) ? label.slice(SPARE_PREFIX.length) : label
+
+/** The notes say it is a spare part ("From the assessment: Spare part required"). */
+const spareByNotes = (p: CostPosition) => /spare part|ersatzteil/i.test(p.notes ?? '')
+
+/** Christoph 2026-11-08: a spare part line, by its notes, or by the old label prefix. */
+export const isSpareLine = (p: CostPosition): boolean =>
+  p.kind === 'external' && (spareByNotes(p) || p.label.startsWith(SPARE_PREFIX))
+
+/** Christoph 2026-11-08: the four kinds of line a department costs, each with
+ *  its own colour everywhere (section header dot, box chip, box border).
+ *  Amber/orange/red never name a type: they only mean "needs attention". */
+export type LineGroup = 'time' | 'internal' | 'external' | 'spare'
+
+export const lineGroupOf = (p: CostPosition): LineGroup =>
+  p.kind !== 'external' ? 'time'
+    : isSpareLine(p) ? 'spare'
+      : /internal modification|interne änderung/i.test(p.notes ?? '') ? 'internal' : 'external'
+
+const GROUP_STYLE: Record<LineGroup, { dot: string; chip: string; border: string; labelKey: string }> = {
+  time: { dot: 'bg-slate-400', chip: 'bg-slate-700 text-slate-100', border: 'border-slate-600', labelKey: 'costpos.grp.time' },
+  internal: { dot: 'bg-teal-400', chip: 'bg-teal-800 text-teal-50', border: 'border-teal-600/80', labelKey: 'costpos.grp.internal' },
+  external: { dot: 'bg-sky-400', chip: 'bg-sky-800 text-sky-50', border: 'border-sky-600/80', labelKey: 'costpos.grp.external' },
+  spare: { dot: 'bg-violet-400', chip: 'bg-violet-800 text-violet-50', border: 'border-violet-600/80', labelKey: 'costpos.grp.spare' },
+}
+
+const TypeDot = ({ group }: { group: LineGroup }) => (
+  <span aria-hidden="true" className={`inline-block h-2 w-2 shrink-0 rounded-full ${GROUP_STYLE[group].dot}`} />
+)
+
+/** Spare parts are priced per piece: the line counts amount x price (transport once). */
+const perPieceOf = (p: CostPosition): number =>
+  p.kind === 'external' && p.quantity_unit === 'pcs' && (p.quantity ?? 0) > 0 ? Number(p.quantity) : 1
+
+/** Transport as entered: null = not entered yet (red), 0 = none. */
+const shipOf = (o: CostingOffer): number | null =>
+  !o.shipping_included && o.shipping_cost != null ? Number(o.shipping_cost) : null
+
+/** An offer's total on its line: amount x price + transport once. */
+const offerLineTotal = (p: CostPosition, o: CostingOffer): number =>
+  Number(o.cost) * perPieceOf(p) + (shipOf(o) ?? 0)
+
+/** From-to over a set of supplier lines (cheapest to dearest quote), and the favourites' sum. */
+function supplierRange(lines: CostPosition[]) {
+  let low = 0, high = 0, fav = 0
+  let complete = true
+  for (const p of lines) {
+    if (p.pricing === 'quote') {
+      const vals = (p.offers ?? []).filter((o) => !o.is_partial).map((o) => offerLineTotal(p, o))
+      if (!vals.length) { complete = false; continue }
+      low += Math.min(...vals); high += Math.max(...vals)
+      const f = (p.offers ?? []).find((o) => o.favorite)
+      if (f) fav += offerLineTotal(p, f); else complete = false
+    } else if (p.est_cost) {
+      const v = Number(p.est_cost) * perPieceOf(p)
+      low += v; high += v; fav += v
+    } else complete = false
+  }
+  return { low, high, fav, complete }
+}
+
+/** "10 × 1,000.00 = 10,000.00" under a spare part's per-piece price. */
+function PerPieceNote({ qty, price, currency }: { qty: number | null | undefined; price: number | null; currency: string | null }) {
+  if (!qty || !(price != null && price > 0)) return null
+  return (
+    <span className="mt-0.5 block text-right text-[11px] leading-tight tabular-nums text-slate-400" data-testid="per-piece-note">
+      <span className="block">{formatNumber(qty)} × {formatNumber(price, { min: 2, max: 2 })}</span>
+      <span className="block text-slate-300">= {money(qty * price, currency)}</span>
+    </span>
+  )
+}
 
 /** Christoph 2026-11-08: a spare part line names its item (name or part no.)
  *  and its amount (pcs); the supplier table below prices it like any external line. */
@@ -1014,8 +944,10 @@ function SpareAmount({ changeId, position: p, editable, onChanged }: {
   const [name, setName] = useState(spareName(p.label))
   const [qty, setQty] = useState(p.quantity != null ? String(p.quantity) : '')
   const save = useMutation({
+    // the plain name; an old row keeps its prefix only while its notes do not
+    // say "spare part" (that prefix is what still marks it as one)
     mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
-      label: `${SPARE_PREFIX}${name.trim()}`, quantity: num(qty), quantity_unit: 'pcs' }),
+      label: spareByNotes(p) ? name.trim() : `${SPARE_PREFIX}${name.trim()}`, quantity: num(qty), quantity_unit: 'pcs' }),
     onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
     onError: (e: unknown) => toastError(e, 'Could not save the spare part'),
   })
@@ -1107,261 +1039,6 @@ function InternalQuickRow({ changeId, position: p, onChanged }: {
       <button type="button" className={btnSm.primary} data-testid={`int-save-${p.id}`}
         disabled={!dirty || save.isPending || (days !== '' && !(Number(days) >= 1))}
         onClick={() => save.mutate()}>{t('common.save')}</button>
-    </div>
-  )
-}
-
-/** An estimated supplier line, same shape as a shop's quote: total cost,
- *  days, what the figure is based on (earlier tool, supplier figure + date). */
-export function EstimateQuickRow({ changeId, position: p, onChanged }: {
-  changeId: number; position: CostPosition; onChanged: () => void
-}) {
-  // Christoph 2026-11-08: a bought item (spare part) states amount, price,
-  // vendor and delivery time; the days feed the offer timing
-  const part = /spare part/i.test(p.label)
-  const [qty, setQty] = useState(p.quantity != null ? String(p.quantity) : '1')
-  const [cost, setCost] = useState(p.est_cost != null ? String(p.est_cost) : '')
-  const [vendor, setVendor] = useState(p.vendor_name ?? '')
-  const [days, setDays] = useState(p.lead_time_days != null ? String(p.lead_time_days) : '')
-  const [basis, setBasis] = useState(p.basis_ref ?? '')
-  const dirty = num(cost) !== (p.est_cost ?? null) || num(days) !== (p.lead_time_days ?? null)
-    || basis.trim() !== (p.basis_ref ?? '') || vendor.trim() !== (p.vendor_name ?? '')
-    || (!part && num(qty) !== (p.quantity ?? null))
-  const save = useMutation({
-    mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
-      est_cost: num(cost), lead_time_days: num(days), lead_time_unit: 'calendar_days',
-      basis: 'estimate', basis_ref: basis.trim() || null,
-      vendor_name: vendor.trim() || null,
-      ...(part ? {} : { quantity: num(qty), quantity_unit: p.quantity_unit ?? 'job' }),
-    }),
-    onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
-    onError: (e: unknown) => toastError(e, 'Could not save the estimate'),
-  })
-  const thin = !(num(cost) && num(cost)! > 0) || basis.trim().length < 5 || !(Number(days) >= 1)
-    || (part && vendor.trim().length < 2)
-  const f = `${fieldCls} tabular-nums text-right`
-  return (
-    <div className={`flex flex-wrap items-center gap-2 rounded border px-2 py-1 ${thin
-      ? 'border-red-700/70 bg-red-950/20' : 'border-slate-700'}`} data-testid={`est-row-${p.id}`}>
-      <span className="w-28 text-xs font-medium text-slate-200">{t('costpos.type.estimate')}</span>
-      {!part && (
-        <label className="text-[11px] text-slate-400">{t('costpos.qty')}
-          <input type="number" step="1" min={1} value={qty} onChange={(e) => setQty(e.target.value)}
-            data-testid={`est-qty-${p.id}`} className={`${f} ml-1 w-16`} /></label>
-      )}
-      <label className="text-[11px] text-slate-400">{t('costpos.price')}
-        <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
-          data-testid={`est-cost-${p.id}`} className={`${f} ml-1 w-28`} /></label>
-      <label className="text-[11px] text-slate-400">{t('costpos.vendor')}
-        <input value={vendor} onChange={(e) => setVendor(e.target.value)}
-          data-testid={`est-vendor-${p.id}`} className={`${fieldCls} ml-1 w-32`} /></label>
-      <label className="text-[11px] text-slate-400">{part ? t('costpos.deliveryDays') : t('costpos.daysShort')}
-        <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
-          data-testid={`est-days-${p.id}`} title={t('costpos.daysMin')} className={`${f} ml-1 w-16`} /></label>
-      <input value={basis} onChange={(e) => setBasis(e.target.value)}
-        data-testid={`est-basis-${p.id}`}
-        aria-label={t('costpos.estBasis')} placeholder={t('costpos.estBasis')}
-        className={`${fieldCls} flex-1 min-w-[12rem]`} />
-      <button type="button" className={btnSm.primary} data-testid={`est-save-${p.id}`}
-        disabled={!dirty || save.isPending || (days !== '' && !(Number(days) >= 1))} onClick={() => save.mutate()}>{t('common.save')}</button>
-    </div>
-  )
-}
-
-/** One asked shop's quote, name given: total cost, lead time (days), the
- *  quote number and the quote file; Save files the quote with its file. */
-function ShopQuoteRow({ changeId, positionId, shop, onDone }: {
-  changeId: number; positionId: number; shop: string; onDone: () => void
-}) {
-  const [cost, setCost] = useState('')
-  const [days, setDays] = useState('')
-  const [ref, setRef] = useState('')
-  const [file, setFile] = useState<File | null>(null)
-  const save = useMutation({
-    mutationFn: async () => {
-      const offer = await changesApi.addCostingOffer(changeId, positionId, {
-        vendor_name: shop, cost: Number(cost) || 0, shipping_included: true,
-        lead_time_days: num(days), lead_time_unit: 'calendar_days',
-        ...(ref.trim() ? { quote_ref: ref.trim() } : {}),
-      })
-      if (file) {
-        await changesApi.uploadAttachment(changeId, file, { kind: 'vendor_quote', costingOfferId: offer.id })
-      }
-      return offer
-    },
-    onSuccess: () => { toast.success(t('costpos.shopQuoteSaved').replace('{x}', shop)); onDone() },
-    onError: (e: unknown) => toastError(e, 'Could not save the quote'),
-  })
-  return (
-    <div data-testid={`shop-quote-${positionId}-${shop}`}
-      className="basis-full flex flex-wrap items-center gap-2 rounded border border-amber-700/60 bg-amber-950/20 px-2 py-1">
-      <span className="w-36 truncate text-xs font-medium text-amber-100" title={shop}>{shop}</span>
-      <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
-        aria-label={t('costpos.shopTotal')} placeholder={t('costpos.shopTotal')}
-        className={`${fieldCls} w-28 tabular-nums text-right`} />
-      <input type="number" step="1" min={0} value={days} onChange={(e) => setDays(e.target.value)}
-        aria-label={t('costpos.shopDays')} placeholder={t('costpos.shopDays')}
-        className={`${fieldCls} w-24 tabular-nums text-right`} />
-      <input value={ref} onChange={(e) => setRef(e.target.value)}
-        aria-label={t('costpos.shopRef')} placeholder={t('costpos.shopRef')}
-        className={`${fieldCls} w-28`} />
-      <label className="cursor-pointer rounded border border-slate-600 px-1.5 py-0.5 text-[11px] text-slate-200 hover:bg-slate-700/60">
-        {file ? file.name : t('costpos.shopFile')}
-        <input type="file" className="sr-only" accept=".pdf,.xlsx,.xls,.doc,.docx,.msg,.eml"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-      </label>
-      <button type="button" className={btnSm.primary} data-testid={`shop-quote-save-${positionId}-${shop}`}
-        disabled={!(Number(cost) > 0) || save.isPending} onClick={() => save.mutate()}>
-        {t('common.save')}</button>
-    </div>
-  )
-}
-
-/** Christoph 2026-11-08: the shops this line's RFQ went to, each a supplier
- *  wait on the line (asked today, expected in 14 days); its quote closes it. */
-export function RfqShops({ changeId, position: p, editable, onChanged }: {
-  changeId: number; position: CostPosition; editable: boolean; onChanged: () => void
-}) {
-  const qc = useQueryClient()
-  const { data: waits } = useQuery({
-    queryKey: ['change', changeId, 'supplier-waits'],
-    queryFn: () => changesApi.listSupplierWaits(changeId),
-  })
-  const mine = (waits ?? []).filter((w) => w.position_id === p.id)
-  const [shop, setShop] = useState('')
-  // the shops still owing their quote: one row each, the name is given
-  const quoted = new Set((p.offers ?? []).map((o) => o.vendor_name.trim().toLowerCase()))
-  const owing = mine.filter((w) => w.is_open && !quoted.has(w.vendor_name.trim().toLowerCase()))
-  // Christoph 2026-11-08: a quote is filed only after "Quote received"
-  const [received, setReceived] = useState<Set<number>>(new Set())
-  const iso = (d: Date) => d.toISOString().slice(0, 10)
-  const add = useMutation({
-    mutationFn: () => {
-      const today = new Date()
-      const due = new Date(today.getTime() + 14 * 86400000)
-      return changesApi.startSupplierWait(changeId, {
-        department_id: p.department_id, vendor_name: shop.trim(),
-        asked_on: iso(today), expected_by: iso(due), position_id: p.id })
-    },
-    onSuccess: () => {
-      setShop('')
-      qc.invalidateQueries({ queryKey: ['change', changeId] })
-      onChanged()
-    },
-    onError: (e: unknown) => toastError(e, 'Could not record the RFQ'),
-  })
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 py-1" data-testid={`rfq-shops-${p.id}`}>
-      <span className="text-[11px] text-slate-500">{t('costpos.rfqSentTo')}</span>
-      {mine.length === 0 && <span className="text-[11px] text-slate-600">{t('costpos.rfqNone')}</span>}
-      {mine.map((w) => (
-        <span key={w.id} data-testid={`rfq-shop-${w.id}`}
-          title={w.is_open ? `${w.chip}` : (w.closed_at ?? '')}
-          className={`rounded px-1.5 text-[11px] ${!w.is_open
-            ? 'bg-emerald-900/60 text-emerald-100' : w.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
-          {w.vendor_name} · {w.is_open ? t('costpos.rfqWaiting') : t('costpos.rfqIn')}
-        </span>
-      ))}
-      {owing.length > 0 && (
-        <div className="basis-full space-y-1" data-testid={`rfq-waiting-${p.id}`}>
-          <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('costpos.waitingQuotes')}</p>
-          {owing.map((w) => (
-            received.has(w.id) && editable ? (
-              <ShopQuoteRow key={w.id} changeId={changeId} positionId={p.id} shop={w.vendor_name}
-                onDone={() => { qc.invalidateQueries({ queryKey: ['change', changeId] }); onChanged() }} />
-            ) : (
-              <div key={w.id} className="flex items-center gap-2 text-xs text-slate-300">
-                <span className="w-36 truncate font-medium">{w.vendor_name}</span>
-                <span className={`rounded px-1.5 ${w.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
-                  {w.chip}</span>
-                {editable && (
-                  <button type="button" className={btnSm.secondary} data-testid={`rfq-received-${w.id}`}
-                    onClick={() => setReceived(new Set([...received, w.id]))}>{t('costpos.quoteReceived')}</button>
-                )}
-              </div>
-            )
-          ))}
-        </div>
-      )}
-      {editable && (
-        <span className="inline-flex items-center gap-1">
-          <input value={shop} onChange={(e) => setShop(e.target.value)}
-            data-testid={`rfq-shop-new-${p.id}`} placeholder={t('costpos.rfqAddShop')}
-            onKeyDown={(e) => { if (e.key === 'Enter' && shop.trim().length >= 2) add.mutate() }}
-            className={`${fieldCls} w-36`} />
-          <button type="button" className={btnSm.secondary} data-testid={`rfq-shop-add-${p.id}`}
-            disabled={shop.trim().length < 2 || add.isPending} onClick={() => add.mutate()}>
-            {t('costpos.rfqAdd')}</button>
-        </span>
-      )}
-    </div>
-  )
-}
-
-export function NewOfferForm({ changeId, positionId, onAdded, suggest = [] }: {
-  changeId: number; positionId: number; onAdded: () => void
-  /** shops the RFQ went to (open waits on this line): one click fills the supplier */
-  suggest?: string[]
-}) {
-  const [vendor, setVendor] = useState('')
-  const [cost, setCost] = useState('')
-  const [included, setIncluded] = useState(false)
-  const [ship, setShip] = useState('')
-  const [lead, setLead] = useState('')
-  const [unit, setUnit] = useState<LeadTimeUnit>(DEFAULT_UNIT)
-  const [partial, setPartial] = useState(false)
-  const qc = useQueryClient()
-  const add = useMutation({
-    mutationFn: async () => {
-      await ensureVendor(qc, vendor)
-      return changesApi.addCostingOffer(changeId, positionId, {
-        vendor_name: vendor.trim(), cost: Number(cost) || 0,
-        shipping_included: included, shipping_cost: included ? null : num(ship),
-        lead_time_days: num(lead), lead_time_unit: unit,
-        is_partial: partial,
-      })
-    },
-    onSuccess: () => {
-      setVendor(''); setCost(''); setShip(''); setLead(''); setIncluded(false); setPartial(false)
-      onAdded()
-    },
-    onError: (e: unknown) => toastError(e, 'Could not add the offer'),
-  })
-  return (
-    <div data-testid={`offer-new-${positionId}`}
-      className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-slate-700/60">
-      {suggest.map((v) => (
-        <button key={v} type="button" data-testid={`offer-suggest-${positionId}-${v}`}
-          onClick={() => setVendor(v)}
-          className={`rounded border px-1.5 text-[11px] ${vendor === v
-            ? 'border-sky-500 bg-sky-900/60 text-sky-100' : 'border-slate-600 text-slate-300 hover:bg-slate-700/60'}`}>
-          {v}
-        </button>
-      ))}
-      <VendorField testId={`offer-new-vendor-${positionId}`} value={vendor} onChange={setVendor} />
-      <input data-testid={`offer-new-cost-${positionId}`} type="number" step="0.01" value={cost}
-        aria-label={t('costpos.cost')} placeholder={t('costpos.cost')}
-        onChange={(e) => setCost(e.target.value)} className={`${fieldCls} w-24 tabular-nums`} />
-      <label className="flex items-center gap-1 text-xs text-slate-400">
-        <input type="checkbox" data-testid={`offer-new-shipping-included-${positionId}`}
-          checked={included} onChange={(e) => setIncluded(e.target.checked)} />
-        {t('costpos.shippingIncluded')}
-      </label>
-      {!included && (
-        <input data-testid={`offer-new-shipping-cost-${positionId}`} type="number" step="0.01"
-          value={ship} aria-label={t('costpos.shipping')} placeholder={t('costpos.shipping')}
-          onChange={(e) => setShip(e.target.value)} className={`${fieldCls} w-24 tabular-nums`} />
-      )}
-      <input data-testid={`offer-new-lead-${positionId}`} type="number" min={0} value={lead}
-        aria-label={t('costpos.leadTime')} placeholder={t('costpos.leadTime')}
-        onChange={(e) => setLead(e.target.value)} className={`${fieldCls} w-20 tabular-nums`} />
-      <UnitSelect testId={`offer-new-unit-${positionId}`} value={unit} onChange={setUnit} />
-      <ScopeToggle testId={`offer-new-scope-${positionId}`} partial={partial} onChange={setPartial} />
-      <button type="button" data-testid={`offer-add-${positionId}`}
-        disabled={vendor.trim() === '' || add.isPending} onClick={() => add.mutate()}
-        className={btnSm.secondary}>
-        {t('costpos.addOffer')}
-      </button>
     </div>
   )
 }
@@ -1603,7 +1280,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
               className={`${fieldCls} w-full`} />
           ) : (
             <>
-              <span data-testid={`costpos-label-${p.id}`} className="text-slate-100">{p.label}</span>
+              <span data-testid={`costpos-label-${p.id}`} className="text-slate-100">{isSpareLine(p) ? spareName(p.label) : p.label}</span>
               {p.quantity != null && p.quantity_unit && (
                 <span data-testid={`costpos-qty-${p.id}`} className="ml-1.5 text-xs text-slate-400 tabular-nums">
                   {p.quantity} {p.quantity_unit}
@@ -1642,7 +1319,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
                   disabled={setPricing.isPending || p.pricing === v}
                   onClick={() => setPricing.mutate(v)}
                   className={`px-1.5 py-0.5 text-[11px] ${p.pricing === v
-                    ? 'bg-sky-700 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+                    ? 'bg-slate-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
                   {t(v === 'estimate' ? 'costpos.type.estimate' : 'costpos.supplierQuotes')}
                 </button>
               ))}
@@ -2424,6 +2101,111 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
   )
 }
 
+/** One line of the department total: what it is, and its amount. */
+function TotalLine({ label, amount, testId }: { label: string; amount: string; testId?: string }) {
+  return (
+    <>
+      <span className="min-w-0 pl-4 text-slate-300">{label}</span>
+      <span className="text-right text-slate-100" data-testid={testId}>{amount}</span>
+    </>
+  )
+}
+
+/** A block's heading in the total: type dot, name, block subtotal. */
+function TotalGroup({ group, title, sum, testId, label }: {
+  group: LineGroup; title: string; sum: string; testId?: string; label?: string
+}) {
+  return (
+    <>
+      <span className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+        <TypeDot group={group} />{title}</span>
+      <span className="mt-2 text-right text-xs font-semibold text-slate-200" data-testid={testId}>
+        {label ? <span className="sr-only">{label}: </span> : null}{sum}</span>
+    </>
+  )
+}
+
+/** Christoph 2026-11-08: a supplier-priced block in the total, line by line:
+ *  favourite vendor + price incl. transport (from-to while none is picked), or
+ *  the estimate; a spare part as amount x price/pc + transport = total. */
+function TotalBlock({ group, lines, currency, rangeText }: {
+  group: LineGroup; lines: CostPosition[]; currency: string; rangeText: string
+}) {
+  const row = (p: CostPosition): { label: string; amount: string } => {
+    const name = group === 'spare' ? spareName(p.label) : p.label
+    const qty = group === 'spare' ? perPieceOf(p) : 1
+    const pcs = (price: number) => (group === 'spare' ? `${formatNumber(qty)} × ${money(price, currency)}` : '')
+    if (p.pricing === 'quote') {
+      const offers = (p.offers ?? []).filter((o) => !o.is_partial)
+      const fav = offers.find((o) => o.favorite) ?? (offers.length === 1 ? offers[0] : undefined)
+      if (fav) {
+        const ship = shipOf(fav)
+        const parts = [fav.vendor_name, pcs(Number(fav.cost)),
+          ship != null && ship > 0 ? `+ ${t('costpos.transport')} ${money(ship, currency)}` : ''].filter(Boolean)
+        return { label: `${name}: ${parts.join(' ')}`, amount: money(offerLineTotal(p, fav), currency) }
+      }
+      if (offers.length) {
+        const vals = offers.map((o) => offerLineTotal(p, o))
+        return { label: `${name}: ${offers.length} ${t('costpos.grp.quotesNoFav')}`,
+          amount: `${money(Math.min(...vals), currency)} – ${money(Math.max(...vals), currency)}` }
+      }
+      return { label: `${name}: ${t('costpos.grp.noQuoteYet')}`, amount: '-' }
+    }
+    if (p.est_cost) {
+      const parts = [p.vendor_name ?? t('costpos.type.estimate'), pcs(Number(p.est_cost))].filter(Boolean)
+      return { label: `${name}: ${parts.join(' ')}`, amount: money(Number(p.est_cost) * qty, currency) }
+    }
+    return { label: `${name}: ${t('costpos.grp.noPriceYet')}`, amount: '-' }
+  }
+  return (
+    <>
+      {/* one line: no block sum repeating its number */}
+      <TotalGroup group={group} title={t(GROUP_STYLE[group].labelKey)} sum={lines.length > 1 ? rangeText : ''} />
+      {lines.map((p) => {
+        const r = row(p)
+        return <TotalLine key={p.id} label={r.label} amount={r.amount} testId={`costpos-total-line-${p.id}`} />
+      })}
+    </>
+  )
+}
+
+/** Christoph 2026-11-08: a section of the department's table: the type dot(s)
+ *  and name, how many lines, and the section's subtotal on the right. */
+function SectionHeader({ testId, title, kinds, subtotal, first = false }: {
+  testId: string; title: string
+  /** the line types in the section, with their counts (a type with 0 lines is left out) */
+  kinds: [LineGroup, number][]
+  subtotal?: React.ReactNode
+  first?: boolean
+}) {
+  const shown = kinds.filter(([, c]) => c > 0)
+  const count = shown.reduce((a, [, c]) => a + c, 0)
+  return (
+    <tr data-testid={testId}>
+      <td colSpan={4} className={`px-2 ${first ? 'pt-3' : 'pt-8'} pb-1.5 border-b border-slate-600`}>
+        <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="text-sm font-semibold text-slate-100">{title}</span>
+          {shown.length === 1 && kinds.length === 1 ? (
+            <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
+              <TypeDot group={shown[0][0]} />
+              {count === 1 ? t('costpos.grp.line1') : t('costpos.grp.lines').replace('{n}', String(count))}
+            </span>
+          ) : shown.map(([g, c]) => (
+            <span key={g} className="inline-flex items-center gap-1.5 text-xs text-slate-300">
+              <TypeDot group={g} />{t(GROUP_STYLE[g].labelKey)} · {c}
+            </span>
+          ))}
+        </span>
+      </td>
+      <td className={`px-2 ${first ? 'pt-3' : 'pt-8'} pb-1.5 border-b border-slate-600 ${numCls} whitespace-nowrap text-sm text-slate-100`}
+        data-testid={`${testId}-subtotal`}>
+        {subtotal}
+      </td>
+      <td colSpan={2} className={`${first ? 'pt-3' : 'pt-8'} pb-1.5 border-b border-slate-600`} />
+    </tr>
+  )
+}
+
 export default function CostPositions({
   changeId, departmentId, editable, departmentName, partWeightG, v2 = false, basisParts = [],
 }: {
@@ -2477,7 +2259,6 @@ export default function CostPositions({
     qc.invalidateQueries({ queryKey: ['change', changeId] })
     qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
   }
-  const standingCount = EFFORT_FIELDS.length + 1 + (isToolEngineer ? 1 : 0)
   // The department's total, per currency (never added across currencies):
   // money lines plus every priced hours/trials value. Lines without a rate
   // are counted out loud, not as 0.
@@ -2499,19 +2280,30 @@ export default function CostPositions({
   const internalLines = mine.filter((p) => p.kind !== 'external')
   const internalHours = internalLines.reduce((n, p) => n + (p.kind === 'machine_time' || p.kind === 'sampling' ? 0 : (p.hours ?? 0)), 0)
   const internalMoney = internalLines.reduce((n, p) => n + (p.line_value != null && quantityOf(p) > 0 ? p.line_value : 0), 0)
-  const offerTotal = (o: CostingOffer) => Number(o.cost) + (!o.shipping_included && o.shipping_cost ? Number(o.shipping_cost) : 0)
-  let extLow = 0, extHigh = 0, extFav = 0
-  let extComplete = true
-  for (const p of mine.filter((x) => x.kind === 'external')) {
-    if (p.pricing === 'quote') {
-      const vals = (p.offers ?? []).filter((o) => !o.is_partial).map(offerTotal)
-      if (!vals.length) { extComplete = false; continue }
-      extLow += Math.min(...vals); extHigh += Math.max(...vals)
-      const fav = (p.offers ?? []).find((o) => o.favorite)
-      if (fav) extFav += offerTotal(fav); else extComplete = false
-    } else if (p.est_cost) {
-      extLow += Number(p.est_cost); extHigh += Number(p.est_cost); extFav += Number(p.est_cost)
-    } else extComplete = false
+  // spare parts count amount x price per piece, transport once (Christoph 2026-11-08)
+  const { low: extLow, high: extHigh, fav: extFav, complete: extComplete } =
+    supplierRange(mine.filter((x) => x.kind === 'external'))
+  // Christoph 2026-11-08: fixed sections, in this order: our time, tool
+  // change (internal, then external), spare parts, other
+  const ownLines = listed.filter((p) => lineGroupOf(p) === 'time')
+  const internalChanges = listed.filter((p) => lineGroupOf(p) === 'internal')
+  const externalChanges = listed.filter((p) => lineGroupOf(p) === 'external')
+  const toolChanges = [...internalChanges, ...externalChanges]
+  const spareLines = listed.filter((p) => lineGroupOf(p) === 'spare')
+  const rangeText = (lines: CostPosition[]) => {
+    const r = supplierRange(lines)
+    return r.high === 0 ? '-' : r.low === r.high ? money(r.low, cur0) : `${money(r.low, cur0)} – ${money(r.high, cur0)}`
+  }
+  const [adding, setAdding] = useState(false)
+  const standingRows = EFFORT_FIELDS.length + 1
+  let n = standingRows
+  const rowOf = (p: CostPosition) => {
+    n += 1
+    return (
+      <PositionRow key={p.id} changeId={changeId} position={p} categories={categories}
+        v2={v2} basisParts={basisParts}
+        editable={editable} index={n} onChanged={invalidate} ctx={ctx} />
+    )
   }
   // the department's lead time: the longest line (favourite quote's days on quoted lines)
   const leadMax = Math.max(0, ...mine.map((p) => {
@@ -2540,6 +2332,9 @@ export default function CostPositions({
             </tr>
           </thead>
           <tbody data-testid={`costpos-effort-${departmentId}`}>
+            <SectionHeader testId={`costpos-group-time-${departmentId}`} first
+              title={t('costpos.grp.ourTime')} kinds={[['time', ownLines.length + standingRows]]}
+              subtotal={<>{formatHours(internalHours)} · {money(internalMoney, cur0)}</>} />
             {EFFORT_FIELDS.map(({ kind, labelKey, rowKey, descKey }, i) => {
               const bound = mine.find((p) => p.kind === kind)
               return (
@@ -2554,76 +2349,117 @@ export default function CostPositions({
             })}
             <CostingEffortStanding changeId={changeId} departmentId={departmentId}
               position={costingEffort} editable={editable} index={EFFORT_FIELDS.length + 1} />
-            {isToolEngineer && (
-              <PartWeightRow key={`weight-${partWeightG ?? 'new'}`}
-                changeId={changeId} departmentId={departmentId}
-                weightG={partWeightG} editable={editable} index={standingCount}
-                onSaved={weightSaved} />
-            )}
+            {ownLines.map(rowOf)}
           </tbody>
           <tbody data-testid={`costpos-list-${departmentId}`}>
-            {listed.length === 0 ? (
-              <tr className="border-t border-slate-700/70">
+            {toolChanges.length > 0 && (
+              <SectionHeader testId={`costpos-group-tool-${departmentId}`}
+                title={t('costpos.grp.toolChange')}
+                kinds={[['internal', internalChanges.length], ['external', externalChanges.length]]}
+                subtotal={toolChanges.length > 1 ? rangeText(toolChanges) : undefined} />
+            )}
+            {toolChanges.map(rowOf)}
+            {spareLines.length > 0 && (
+              <SectionHeader testId={`costpos-group-spare-${departmentId}`}
+                title={t('costpos.grp.spareParts')} kinds={[['spare', spareLines.length]]}
+                subtotal={spareLines.length > 1 ? rangeText(spareLines) : undefined} />
+            )}
+            {spareLines.map(rowOf)}
+            {toolChanges.length === 0 && spareLines.length === 0 && (
+              <tr>
                 <td />
-                <td colSpan={6} className={`${cellCls} text-xs text-slate-600`}
+                <td colSpan={6} className={`${cellCls} text-xs text-slate-500`}
                   data-testid={`costpos-empty-${departmentId}`}>
                   {t('costpos.noExternal')}
                 </td>
               </tr>
-            ) : listed.map((p, i) => (
-              <PositionRow key={p.id} changeId={changeId} position={p} categories={categories}
-                v2={v2} basisParts={basisParts}
-                editable={editable} index={standingCount + i + 1} onChanged={invalidate} ctx={ctx} />
-            ))}
-          </tbody>
-          <tfoot>
-            {editable && (
-              <AddLine changeId={changeId} departmentId={departmentId} categories={categories}
-                ctx={ctx} onAdded={invalidate} v2={v2}
-                onCategoriesChanged={() => qc.invalidateQueries({ queryKey: ['costing-tags', departmentId] })} />
             )}
-            <tr className="border-t border-slate-600">
+          </tbody>
+          {isToolEngineer && (
+            <tbody data-testid={`costpos-other-${departmentId}`}>
+              <SectionHeader testId={`costpos-group-other-${departmentId}`}
+                title={t('costpos.grp.other')} kinds={[]} />
+              <PartWeightRow key={`weight-${partWeightG ?? 'new'}`}
+                changeId={changeId} departmentId={departmentId}
+                weightG={partWeightG} editable={editable} index={n + 1}
+                onSaved={weightSaved} />
+            </tbody>
+          )}
+          <tfoot>
+            {editable && (adding ? (
+              <>
+                <AddLine changeId={changeId} departmentId={departmentId} categories={categories}
+                  ctx={ctx} onAdded={invalidate} v2={v2}
+                  onCategoriesChanged={() => qc.invalidateQueries({ queryKey: ['costing-tags', departmentId] })} />
+                <tr>
+                  <td />
+                  <td colSpan={6} className={`${cellCls} pt-0`}>
+                    <button type="button" className={btnSm.ghost} data-testid={`costpos-add-close-${departmentId}`}
+                      onClick={() => setAdding(false)}>{t('common.close')}</button>
+                  </td>
+                </tr>
+              </>
+            ) : (
+              <tr>
+                <td />
+                <td colSpan={6} className={`${cellCls} pt-5 pb-3`}>
+                  <button type="button" className={btnSm.secondary} data-testid={`costpos-add-open-${departmentId}`}
+                    onClick={() => setAdding(true)}>{t('costpos.addCostLine')}</button>
+                </td>
+              </tr>
+            ))}
+            {/* Christoph 2026-11-08: the total lists every block line by line,
+                in the sections' order and colours, then the grand total */}
+            <tr className="border-t-2 border-slate-500">
               <td />
-              <td colSpan={3} className={`${cellCls} text-xs uppercase tracking-wide text-slate-500`}>
-                {t('costpos.total')}
-              </td>
-              <td className={`${cellCls} ${numCls} text-slate-100 whitespace-nowrap`}
-                data-testid={`costpos-total-${departmentId}`}>
-                <span className="block text-xs text-slate-400" data-testid={`costpos-total-spent-${departmentId}`}>
-                  {t('costpos.totSpent')}: {formatHours(spentHours)}</span>
-                <span className="block" data-testid={`costpos-total-internal-${departmentId}`}>
-                  <span className="text-xs text-slate-400">{t('costpos.totInternal')} ({formatHours(internalHours)}): </span>
-                  {money(internalMoney, cur0)}</span>
-                {/* Christoph 2026-11-08: where the internal money comes from, line by line */}
-                {internalLines.filter((p) => (p.hours ?? 0) > 0 || (p.line_value ?? 0) > 0).map((p) => (
-                  <span key={p.id} className="block text-[11px] text-slate-500">
-                    {p.label.replace(/ \(h\)$/, '')}: {p.hours != null ? formatHours(p.hours) : ''}
-                    {p.rate != null ? ` × ${money(p.rate, p.rate_currency ?? cur0)}/h` : ''}
-                    {p.line_value != null ? ` = ${money(p.line_value, p.rate_currency ?? cur0)}` : ` (${t('costpos.noRate')})`}
+              <td colSpan={4} className={`${cellCls} pt-3 pb-4`} data-testid={`costpos-total-${departmentId}`}>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{t('costpos.total')}</p>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-8 gap-y-0.5 text-sm tabular-nums">
+                  <TotalGroup group="time" title={t('costpos.grp.ourTime')}
+                    sum={`${formatHours(internalHours)} · ${money(internalMoney, cur0)}`}
+                    testId={`costpos-total-internal-${departmentId}`}
+                    label={`${t('costpos.totInternal')} (${formatHours(internalHours)})`} />
+                  {internalLines.filter((p) => (p.hours ?? 0) > 0 || (p.line_value ?? 0) > 0).map((p) => (
+                    <TotalLine key={p.id}
+                      label={`${p.label.replace(/ \(h\)$/, '')}: ${p.hours != null ? formatHours(p.hours) : ''}${p.rate != null ? ` × ${money(p.rate, p.rate_currency ?? cur0)}/h` : ''}`}
+                      amount={p.line_value != null ? money(p.line_value, p.rate_currency ?? cur0) : t('costpos.noRate')} />
+                  ))}
+                  {([['internal', internalChanges], ['external', externalChanges], ['spare', spareLines]] as [LineGroup, CostPosition[]][])
+                    .filter(([, lines]) => lines.length > 0).map(([g, lines]) => (
+                      <TotalBlock key={g} group={g} lines={lines} currency={cur0} rangeText={rangeText(lines)} />
+                    ))}
+                  <span className="col-span-2 mt-2 border-t border-slate-600" />
+                  <span className="text-slate-300">{t('costpos.totSpent')}</span>
+                  <span className="text-right text-slate-300" data-testid={`costpos-total-spent-${departmentId}`}>
+                    {formatHours(spentHours)}</span>
+                  <span className="font-semibold text-slate-100">{t('costpos.totInternal')}</span>
+                  <span className="text-right font-semibold text-slate-100">{formatHours(internalHours)} · {money(internalMoney, cur0)}</span>
+                  <span className="font-semibold text-slate-100">{t('costpos.totExternal')}</span>
+                  <span className="text-right font-semibold text-slate-100" data-testid={`costpos-total-external-${departmentId}`}>
+                    {/* from–to over the quotes, always */}
+                    {extHigh === 0 ? '-' : extLow === extHigh ? money(extLow, cur0)
+                      : `${money(extLow, cur0)} – ${money(extHigh, cur0)}`}
+                    {extHigh > 0 && extComplete && extFav > 0 && extLow !== extHigh && (
+                      <span className="block text-xs font-normal text-slate-300">{t('costpos.favShort')}: {money(extFav, cur0)}</span>
+                    )}
                   </span>
-                ))}
-                {leadMax > 0 && (
-                  <span className="block text-xs text-slate-400" data-testid={`costpos-total-lead-${departmentId}`}>
-                    {t('costpos.leadLongest')}: {leadMax} d</span>
-                )}
-                <span className="block" data-testid={`costpos-total-external-${departmentId}`}>
-                  <span className="text-xs text-slate-400">{t('costpos.totExternal')}: </span>
-                  {/* Christoph 2026-11-08: from–to over the quotes, always */}
-                  {extHigh === 0 ? '-' : extLow === extHigh ? money(extLow, cur0)
-                    : `${money(extLow, cur0)} – ${money(extHigh, cur0)}`}
-                  {extHigh > 0 && extComplete && extFav > 0 && extLow !== extHigh && (
-                    <span className="block text-[11px] text-slate-500">{t('costpos.favShort')}: {money(extFav, cur0)}</span>
+                  {leadMax > 0 && (
+                    <>
+                      <span className="text-slate-300">{t('costpos.leadLongest')}</span>
+                      <span className="text-right text-slate-200" data-testid={`costpos-total-lead-${departmentId}`}>
+                        {leadMax} d</span>
+                    </>
                   )}
-                </span>
-                {totals.length > 1 && totals.map(([cur, v]) => (
-                  <span key={cur || '-'} className="block text-[11px] text-slate-500">{money(v, cur)}</span>
-                ))}
-                {unpriced > 0 && (
-                  <span data-testid={`costpos-unpriced-${departmentId}`}
-                    className="block text-[11px] text-amber-300" title={t('costpos.noRateHint')}>
-                    {t('costpos.unpricedInTotal').replace('{n}', String(unpriced))}
-                  </span>
-                )}
+                  {totals.length > 1 && totals.map(([cur, v]) => (
+                    <span key={cur || '-'} className="col-span-2 text-right text-xs text-slate-300">{money(v, cur)}</span>
+                  ))}
+                  {unpriced > 0 && (
+                    <span data-testid={`costpos-unpriced-${departmentId}`}
+                      className="col-span-2 text-right text-xs text-amber-300" title={t('costpos.noRateHint')}>
+                      {t('costpos.unpricedInTotal').replace('{n}', String(unpriced))}
+                    </span>
+                  )}
+                </div>
               </td>
               <td colSpan={2} />
             </tr>

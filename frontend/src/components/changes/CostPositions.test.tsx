@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, within, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import CostPositions, { NewOfferForm, OfferRow } from './CostPositions'
+import CostPositions from './CostPositions'
 import { changesApi } from '../../api/changes'
 import { costSheetMachinesApi } from '../../api/costSheetMachines'
 import { t } from '../../i18n/cmLabels'
@@ -82,6 +82,12 @@ const wrap = (ui: React.ReactElement) =>
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     {ui}
   </QueryClientProvider>)
+
+/** 2026-11-08: the add row opens from "+ Add a cost line". */
+const openAdd = async (dept = 2) => {
+  fireEvent.click(await screen.findByTestId(`costpos-add-open-${dept}`))
+  return screen.findByTestId(`costpos-new-${dept}`)
+}
 
 const positions = (props: Record<string, unknown> = {}) =>
   wrap(<CostPositions changeId={7} departmentId={2} editable {...props} />)
@@ -237,7 +243,7 @@ describe('CostPositions', () => {
 
   it('adds an external position — the only kind left to add', async () => {
     positions()
-    await screen.findByTestId('costpos-new-2')
+    await openAdd()
     // The kind picker is gone; what remains is what an external position needs.
     expect(screen.queryByTestId('costpos-new-kind-2')).toBeNull()
     expect(screen.getByTestId('costpos-new-hours-2').getAttribute('aria-label'))
@@ -264,7 +270,7 @@ describe('CostPositions', () => {
 
   it('a money line says how many of what under ASSESSMENT_V2 (A3-07)', async () => {
     positions({ v2: true })
-    await screen.findByTestId('costpos-new-2')
+    await openAdd()
     fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Insert re-cut' } })
     fireEvent.change(screen.getByTestId('costpos-new-est-2'), { target: { value: '4100' } })
     const add = screen.getByTestId('costpos-add-2') as HTMLButtonElement
@@ -295,7 +301,7 @@ describe('CostPositions', () => {
 
   it('swaps the estimate for a vendor table when the price is quoted', async () => {
     positions()
-    await screen.findByTestId('costpos-new-2')
+    await openAdd()
     expect(screen.getByTestId('costpos-new-est-2')).toBeTruthy()
     fireEvent.click(screen.getByTestId('costpos-new-pricing-2-quote'))
     expect(screen.queryByTestId('costpos-new-est-2')).toBeNull()
@@ -305,7 +311,7 @@ describe('CostPositions', () => {
 
   it('makes a time category an own-time line: hours only, no money', async () => {
     positions()
-    await screen.findByTestId('costpos-new-2')
+    await openAdd()
     await waitFor(() => expect(screen.getByTestId('costpos-new-tag-2').textContent)
       .toContain('Trial support (hours)'))
     // The own-time "Sampling" category is not offered next to the cost sheet's
@@ -330,7 +336,7 @@ describe('CostPositions', () => {
 
   it('lets the department add its own category, typed, and remove it again', async () => {
     positions()
-    await screen.findByTestId('costpos-new-2')
+    await openAdd()
     const select = screen.getByTestId('costpos-new-tag-2') as HTMLSelectElement
     await waitFor(() => expect([...select.options].map((o) => o.value)).toContain('__add_category'))
     fireEvent.change(select, { target: { value: '__add_category' } })
@@ -353,7 +359,7 @@ describe('CostPositions', () => {
 
   it('offers the Suppliers list under the vendor field and stores a new name on save', async () => {
     positions()
-    await screen.findByTestId('costpos-new-2')
+    await openAdd()
     fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'tool_change' } })
     fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'insert' } })
     // Known suppliers are offered; a new one typed here is created on add.
@@ -397,15 +403,6 @@ describe('CostPositions', () => {
     // 0b6529d8: a quote is filed via 'Quote received' from an asked shop, the
     // free new-offer form is gone from the line
     expect(screen.queryByTestId('offer-new-11')).toBeNull()
-    cleanup()
-    // The new-offer form (still exported) asks which kind it is and sends it along.
-    wrap(<NewOfferForm changeId={7} positionId={11} onAdded={() => {}} />)
-    fireEvent.change(screen.getByTestId('offer-new-vendor-11'), { target: { value: 'Vendor P' } })
-    fireEvent.change(screen.getByTestId('offer-new-cost-11'), { target: { value: '100' } })
-    fireEvent.click(screen.getByTestId('offer-new-scope-11-partial'))
-    fireEvent.click(screen.getByTestId('offer-add-11'))
-    await waitFor(() => expect(changesApi.addCostingOffer).toHaveBeenCalledWith(7, 11,
-      expect.objectContaining({ vendor_name: 'Vendor P', is_partial: true })))
   })
 
   it('sums the department’s money and hours at the foot of the table', async () => {
@@ -480,22 +477,6 @@ describe('CostPositions', () => {
     expect(screen.queryByTestId('costpos-lead-11')).toBeNull()
   })
 
-  it('adds the next vendor to a quoted position (NewOfferForm on its own since 0b6529d8)', async () => {
-    wrap(<NewOfferForm changeId={7} positionId={11} onAdded={() => {}} />)
-    await screen.findByTestId('offer-new-11')
-    fireEvent.change(screen.getByTestId('offer-new-vendor-11'), { target: { value: 'Vendor C' } })
-    fireEvent.change(screen.getByTestId('offer-new-cost-11'), { target: { value: '4800' } })
-    fireEvent.click(screen.getByTestId('offer-new-shipping-included-11'))
-    fireEvent.change(screen.getByTestId('offer-new-lead-11'), { target: { value: '15' } })
-    fireEvent.change(screen.getByTestId('offer-new-unit-11'), { target: { value: 'business_days' } })
-    fireEvent.click(screen.getByTestId('offer-add-11'))
-    await waitFor(() => expect(changesApi.addCostingOffer).toHaveBeenCalledWith(7, 11,
-      expect.objectContaining({
-        vendor_name: 'Vendor C', cost: 4800, shipping_included: true, shipping_cost: null,
-        lead_time_days: 15, lead_time_unit: 'business_days',
-      })))
-  })
-
   it('keeps exactly one favourite when the department votes', async () => {
     positions()
     // The server clears the siblings; the list it hands back afterwards agrees.
@@ -533,15 +514,12 @@ describe('CostPositions', () => {
     await waitFor(() => expect(changesApi.deleteCostPosition).toHaveBeenCalledWith(7, 11))
   })
 
-  it('deletes a vendor offer only after a confirm (OfferRow, exported, no longer on the line)', async () => {
+  it('deletes a received quote only after a Yes, in its supplier line', async () => {
     vi.mocked(changesApi.deleteCostingOffer).mockClear()
-    wrap(<OfferRow changeId={7} positionId={11} offer={external.offers[1] as never}
-      currency="USD" editable onChanged={() => {}} />)
-    const del = await screen.findByTestId('offer-delete-92')
-    expect(del.getAttribute('aria-label')).toBe('Delete the offer from Vendor B')
-    fireEvent.click(del)
+    positions()
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete the quote from Vendor B' }))
     expect(changesApi.deleteCostingOffer).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete offer' }))
+    fireEvent.click(screen.getByTestId('supplier-del-yes-92'))
     await waitFor(() => expect(changesApi.deleteCostingOffer).toHaveBeenCalledWith(7, 92))
   })
 
@@ -569,8 +547,9 @@ describe('CostPositions', () => {
     expect(a.textContent).toContain('Vendor A')
     expect(a.textContent).toContain('30')
     expect(within(a).queryAllByRole('spinbutton')).toHaveLength(0)
+    // 2026-11-08: transport not entered reads as missing, never as "none"
     expect(screen.getByTestId('supplier-line-11-Vendor B').textContent)
-      .toContain(t('costpos.noTransport'))
+      .toContain(t('costpos.missingWord'))
     // The effort answers read as plain text for someone who may not write them.
     expect(screen.getByTestId('costpos-effort-value-internal_effort-2').textContent).toBe('12 h')
     expect(screen.getByTestId('costpos-effort-value-support_effort-2').textContent).toBe('-')
@@ -599,7 +578,8 @@ describe('CostPositions — part weight', () => {
       (screen.getByTestId('costpos-weight-2') as HTMLInputElement).value,
     ).toBe('412'))
     // The label carries the caveat: it is a guess until somebody validates it.
-    expect(screen.getByTestId('costpos-effort-2').textContent)
+    // 2026-11-08: the weight sits in the "Other" section
+    expect(screen.getByTestId('costpos-other-2').textContent)
       .toContain(t('costpos.partWeightField'))
   })
 
@@ -778,6 +758,7 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
   it('adds a machine time line on the change’s class and a sampling line by trials', async () => {
     positions()
     await screen.findByTestId('costpos-row-20')
+    await openAdd()
     fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: '__machine_time' } })
     await waitFor(() => expect(
       (screen.getByTestId('costpos-new-class-2') as HTMLSelectElement).value).toBe('3'))
@@ -824,6 +805,7 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
   it('offers no labour position on an own-time line: one rate per department', async () => {
     positions()
     await screen.findByTestId('costpos-row-20')
+    await openAdd()
     fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'trial_support' } })
     expect(screen.queryByTestId('costpos-new-position-2')).toBeNull()
     fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Check' } })
@@ -834,5 +816,163 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
     const calls = vi.mocked(changesApi.createCostPosition).mock.calls
     const body = calls[calls.length - 1][1] as unknown as Record<string, unknown>
     expect('labour_position' in body).toBe(false)
+  })
+})
+
+describe('CostPositions — sections by line type (Christoph 2026-11-08)', () => {
+  const own = {
+    id: 20, department_id: 2, label: 'support sampling', tag: null, kind: 'own_time', pricing: 'estimate',
+    est_cost: null, hours: 4, lead_time_days: null, notes: null, effective_cost: null, offers: [],
+  }
+  const internalChange = {
+    ...external, id: 30, label: 'Re-cut insert', pricing: 'estimate', est_cost: 800, offers: [],
+    notes: 'From the assessment: Internal modification',
+  }
+  const spare = {
+    ...external, id: 31, label: 'Ejector pin 6 mm', pricing: 'quote', est_cost: null, hours: null,
+    quantity: 10, quantity_unit: 'pcs', notes: 'From the assessment: Spare part required',
+    offers: [{ id: 95, vendor_name: 'Hasco', cost: 1000, shipping_cost: 0, shipping_included: false,
+      lead_time_days: 5, lead_time_unit: 'calendar_days', favorite: true }],
+  }
+  const oldSpare = { ...spare, id: 32, label: 'Spare part: Guide bush', notes: 'From the assessment: x', offers: [] }
+
+  beforeEach(() => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue(
+      [spare, external, own, effort, internalChange] as never)
+    vi.mocked(changesApi.costingTags).mockResolvedValue(TAGS as never)
+    vi.mocked(changesApi.listSupplierWaits).mockResolvedValue([])
+    vi.mocked(changesApi.updateCostPosition).mockClear()
+    vi.mocked(changesApi.createCostPosition).mockClear()
+    vi.mocked(changesApi.addCostingOffer).mockClear()
+  })
+  afterEach(() => cleanup())
+
+  it('orders the lines: our time, tool change (internal, then external), spare parts', async () => {
+    positions()
+    await screen.findByTestId('costpos-row-31')
+    const rows = [...document.querySelectorAll('[data-testid^="costpos-row-"], [data-testid^="costpos-group-"]')]
+      .map((x) => x.getAttribute('data-testid')).filter((x) => !x!.endsWith('-subtotal'))
+    expect(rows).toEqual(['costpos-group-time-2', 'costpos-row-20', 'costpos-group-tool-2',
+      'costpos-row-30', 'costpos-row-11', 'costpos-group-spare-2', 'costpos-row-31'])
+    const tool = screen.getByTestId('costpos-group-tool-2').textContent
+    expect(tool).toContain(t('costpos.grp.internal'))
+    expect(tool).toContain(t('costpos.grp.external'))
+    // each box says what it is
+    expect(screen.getByTestId('supplier-type-30').textContent).toBe(t('costpos.grp.internal'))
+    expect(screen.getByTestId('supplier-type-11').textContent).toBe(t('costpos.grp.external'))
+    expect(screen.getByTestId('supplier-type-31').textContent).toBe(t('costpos.grp.spare'))
+    // one spare line: no subtotal repeating its number; two tool changes: from-to
+    expect(screen.getByTestId('costpos-group-spare-2-subtotal').textContent).toBe('')
+    expect(screen.getByTestId('costpos-group-tool-2-subtotal').textContent).toContain('6,000.00')
+    // 800 internal + 5,200 cheapest external + 10 x 1,000 spare
+    expect(screen.getByTestId('costpos-total-external-2').textContent).toContain('16,000.00')
+  })
+
+  it('lists every block in the total, line by line (spare: amount x price/pc + transport)', async () => {
+    positions()
+    await screen.findByTestId('costpos-row-31')
+    const total = screen.getByTestId('costpos-total-2').textContent ?? ''
+    for (const k of ['costpos.grp.ourTime', 'costpos.grp.internal', 'costpos.grp.external', 'costpos.grp.spare']) {
+      expect(total).toContain(t(k))
+    }
+    expect(total.indexOf(t('costpos.grp.internal'))).toBeLessThan(total.indexOf(t('costpos.grp.spare')))
+    expect(screen.getByTestId('costpos-total-line-30').textContent).toContain('800.00')
+    expect(screen.getByTestId('costpos-total-line-11').textContent).toContain('5,200.00')
+    expect(screen.getByTestId('costpos-total-line-31').textContent).toContain('10,000.00')
+  })
+
+  it('opens the add row only from "+ Add a cost line"', async () => {
+    positions()
+    await screen.findByTestId('costpos-row-31')
+    expect(screen.queryByTestId('costpos-new-2')).toBeNull()
+    fireEvent.click(screen.getByTestId('costpos-add-open-2'))
+    expect(screen.getByTestId('costpos-new-2')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('costpos-add-close-2'))
+    expect(screen.queryByTestId('costpos-new-2')).toBeNull()
+  })
+
+  it('names a spare part without the prefix and prices it per piece', async () => {
+    positions()
+    const name = await screen.findByTestId('spare-name-31') as HTMLInputElement
+    expect(name.value).toBe('Ejector pin 6 mm')
+    expect(screen.getByTestId('supplier-lines-31').textContent).toContain(t('costpos.pricePerPc'))
+    expect(within(screen.getByTestId('supplier-lines-31')).getByTestId('per-piece-note').textContent)
+      .toContain('10,000.00')
+    fireEvent.change(name, { target: { value: 'Ejector pin 8 mm' } })
+    fireEvent.click(screen.getByTestId('spare-save-31'))
+    await waitFor(() => expect(changesApi.updateCostPosition).toHaveBeenCalledWith(7, 31,
+      expect.objectContaining({ label: 'Ejector pin 8 mm' })))
+    // stored transport 0 reads as 0, not as missing
+    expect((within(screen.getByTestId('supplier-line-31-Hasco')).getByLabelText(t('costpos.transport')) as HTMLInputElement).value)
+      .toBe('0')
+    expect(screen.queryByTestId('transport-missing-95')).toBeNull()
+  })
+
+  it('adds another spare part under its plain name', async () => {
+    positions()
+    fireEvent.change(await screen.findByTestId('spare-new-31'), { target: { value: 'Guide pillar' } })
+    fireEvent.click(screen.getByTestId('spare-new-add-31'))
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
+      expect.objectContaining({ label: 'Guide pillar', notes: 'From the assessment: Spare part required' })))
+  })
+
+  it('keeps an old "Spare part: " row a spare part, shown without the prefix', async () => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([oldSpare] as never)
+    positions()
+    expect((await screen.findByTestId('spare-name-32') as HTMLInputElement).value).toBe('Guide bush')
+    expect(screen.getByTestId('costpos-label-32').textContent).toBe('Guide bush')
+    expect(screen.getByTestId('costpos-group-spare-2')).toBeTruthy()
+    fireEvent.change(screen.getByTestId('spare-name-32'), { target: { value: 'Guide bush 20' } })
+    fireEvent.click(screen.getByTestId('spare-save-32'))
+    // its notes do not say "spare part": the prefix is what keeps it one
+    await waitFor(() => expect(changesApi.updateCostPosition).toHaveBeenCalledWith(7, 32,
+      expect.objectContaining({ label: 'Spare part: Guide bush 20' })))
+  })
+
+  it('marks transport not entered red (0 allowed) and blocks a new quote without it', async () => {
+    vi.mocked(changesApi.listSupplierWaits).mockResolvedValue([{
+      id: 5, position_id: 11, department_id: 2, vendor_name: 'Vendor C', is_open: false,
+      close_reason: 'received', asked_on: '2026-11-01', expected_by: '2026-11-10', chip: '', overdue: false,
+    }] as never)
+    positions()
+    // Vendor B: shipping_included with no cost = not entered
+    expect((await screen.findByTestId('transport-missing-92')).textContent).toBe(t('costpos.transportMissing'))
+    expect(screen.getByTestId('supplier-line-11-Vendor B').getAttribute('data-missing')).toBe('yes')
+    const line = await screen.findByTestId('shop-quote-11-Vendor C')
+    fireEvent.change(within(line).getByLabelText(t('costpos.price')), { target: { value: '700' } })
+    fireEvent.change(within(line).getByLabelText(t('costpos.totalDays')), { target: { value: '12' } })
+    fireEvent.change(line.querySelector('input[type="file"]')!, { target: { files: [new File(['x'], 'q.pdf')] } })
+    const save = screen.getByTestId('shop-quote-save-11-Vendor C') as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    expect(screen.getByTestId('shop-transport-missing-11-Vendor C')).toBeTruthy()
+    fireEvent.change(within(line).getByLabelText(t('costpos.transport')), { target: { value: '0' } })
+    expect(save.disabled).toBe(false)
+    fireEvent.click(save)
+    await waitFor(() => expect(changesApi.addCostingOffer).toHaveBeenCalledWith(7, 11,
+      expect.objectContaining({ vendor_name: 'Vendor C', cost: 700, shipping_included: false, shipping_cost: 0 })))
+  })
+
+  it('shows when each quote was asked, expected (red when overdue) or received, and the same request row in every box', async () => {
+    vi.mocked(changesApi.listSupplierWaits).mockResolvedValue([
+      { id: 6, position_id: 30, department_id: 2, vendor_name: 'Toolshop B', is_open: true, overdue: true,
+        close_reason: null, asked_on: '2026-10-01', expected_by: '2026-10-10', chip: 'day 9 of 9' },
+      { id: 7, position_id: 31, department_id: 2, vendor_name: 'Hasco', is_open: false, overdue: false,
+        close_reason: 'received', asked_on: '2026-10-01', expected_by: '2026-10-10', closed_at: '2026-10-05', chip: '' },
+    ] as never)
+    positions()
+    const late = await screen.findByTestId('rfq-dates-6')
+    expect(late.textContent).toContain(t('costpos.rfqOverdue'))
+    expect(late.querySelector('.text-red-300')).toBeTruthy()
+    const got = await screen.findByTestId('rfq-dates-7')
+    expect(got.textContent).toContain(t('costpos.rfqReceivedOn'))
+    expect(got.textContent).not.toContain(t('costpos.rfqOverdue'))
+    for (const id of [30, 11, 31]) {
+      expect(screen.getByTestId(`rfq-request-${id}`).textContent).toContain(t('costpos.requestQuote'))
+    }
+  })
+
+  it('says an estimate carries its transport in the price', async () => {
+    positions()
+    expect((await screen.findByTestId('est-transport-30')).textContent).toBe(t('costpos.transportInPrice'))
   })
 })
