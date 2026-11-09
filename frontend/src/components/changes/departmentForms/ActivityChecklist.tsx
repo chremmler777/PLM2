@@ -300,6 +300,16 @@ export default function ActivityChecklist({
     enabled: changeId != null,
   })
   const [flagging, setFlagging] = useState<string | null>(null)
+  // Christoph 2026-11-08: a row (or case) going away with documents filed on
+  // it asks first, then deletes them: {row id, case index or null}
+  const [askDrop, setAskDrop] = useState<{ id: string; n: number | null } | null>(null)
+  const dropDocs = async (ids: number[]) => {
+    if (changeId == null) return
+    for (const x of ids) {
+      try { await changesApi.deleteAttachment(changeId, x) } catch (e) { toastError(e, t('attach.deleteFailed')) }
+    }
+    onUploaded?.()
+  }
   // The department's risk vocabulary, for naming the row's risks (shared
   // cache with the risk form).
   const hasRowRisks = (concerns as ChangeConcern[]).some((c) =>
@@ -353,6 +363,8 @@ export default function ActivityChecklist({
     const setAnswer = (answer: 'yes' | 'no') => put(answer === 'yes'
       ? { ...own, answer, impacted: true }
       : { ...(item.key ? { key: item.key } : { label: item.label }), answer, impacted: false })
+    const caseIds = new Set(casesOf(item).map((c) => c.id).filter(Boolean))
+    const rowDocs = attachments.filter((x) => x.case_ref && caseIds.has(x.case_ref))
     const open = !item.answer && !id.startsWith('free:')
     return (
       <li key={id} id={`check-row-${id}`} data-open={String(open)}
@@ -363,7 +375,8 @@ export default function ActivityChecklist({
             {(['no', 'yes'] as const).map((ans) => (
               <button key={ans} type="button" data-testid={`check-${ans}-${id}`}
                 aria-pressed={item.answer === ans}
-                onClick={() => setAnswer(ans)}
+                onClick={() => (ans === 'no' && item.answer === 'yes' && rowDocs.length
+                  ? setAskDrop({ id, n: null }) : setAnswer(ans))}
                 className={`px-2 py-0.5 text-xs ${item.answer === ans
                   ? (ans === 'yes' ? 'bg-sky-700 text-white' : 'bg-slate-600 text-slate-100')
                   : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
@@ -384,6 +397,18 @@ export default function ActivityChecklist({
             </button>
           )}
         </div>
+        {askDrop?.id === id && askDrop.n === null && (
+          <div data-testid={`check-dropdocs-${id}`}
+            className="mt-1 ml-6 flex flex-wrap items-center gap-2 rounded border border-red-700/70 bg-red-950/30 px-2 py-1 text-xs text-red-100">
+            {t('check.dropDocs', lang).replace('{n}', String(rowDocs.length))}
+            <button type="button" data-testid={`check-dropdocs-yes-${id}`}
+              className="rounded bg-red-800 px-1.5 text-white hover:bg-red-700"
+              onClick={() => { const ids = rowDocs.map((x) => x.id); setAskDrop(null); setAnswer('no'); void dropDocs(ids) }}>
+              {t('risk.yes')}</button>
+            <button type="button" className="rounded border border-slate-600 px-1.5 text-slate-200"
+              onClick={() => setAskDrop(null)}>{t('risk.no')}</button>
+          </div>
+        )}
         {/* The row's risks, compact: the full card (proposal, resolve,
             delete) lives in the department's risk panel — click to go there. */}
         {openRisksFor(id).length > 0 && (
@@ -439,10 +464,10 @@ export default function ActivityChecklist({
               return (
                 <div className="space-y-1.5" data-testid={`check-cases-${id}`}>
                   {cases.map((c, n) => (
-                    <div key={n} className="rounded border border-slate-700 bg-slate-900/40 p-1.5 space-y-1"
+                    <div key={n} className="rounded border border-slate-700 border-l-4 border-l-amber-600 bg-slate-900/40 p-1.5 space-y-1"
                       data-testid={`check-case-box-${id}-${n}`}>
                       <div className="flex items-center gap-1">
-                        <span className="text-[11px] text-slate-500 w-12 flex-shrink-0">{t('check.case', lang)} {n + 1}</span>
+                        <span className="rounded bg-amber-900/60 px-1.5 text-[11px] font-semibold text-amber-100 flex-shrink-0">{t('check.case', lang)} {n + 1}</span>
                         <input type="text" data-testid={n === 0 ? `check-remark-${id}` : `check-case-${id}-${n}`}
                           value={c.text}
                           onChange={(e) => putCases(cases.map((x, m) => (m === n ? { ...x, text: e.target.value } : x)))}
@@ -452,9 +477,24 @@ export default function ActivityChecklist({
                         {cases.length > 1 && (
                           <button type="button" className="text-xs text-slate-400 hover:text-red-300 px-1"
                             aria-label={t('check.caseRemove', lang)}
-                            onClick={() => putCases(cases.filter((_, m) => m !== n))}>×</button>
+                            onClick={() => (attachments.some((x) => x.case_ref && x.case_ref === c.id)
+                              ? setAskDrop({ id, n }) : putCases(cases.filter((_, m) => m !== n)))}>×</button>
                         )}
                       </div>
+                      {askDrop?.id === id && askDrop.n === n && (() => {
+                        const docsOfCase = attachments.filter((x) => x.case_ref && x.case_ref === c.id)
+                        return (
+                          <div data-testid={`check-dropcase-${id}-${n}`}
+                            className="flex flex-wrap items-center gap-2 rounded border border-red-700/70 bg-red-950/30 px-2 py-1 text-xs text-red-100">
+                            {t('check.dropCase', lang).replace('{n}', String(docsOfCase.length))}
+                            <button type="button" className="rounded bg-red-800 px-1.5 text-white hover:bg-red-700"
+                              onClick={() => { setAskDrop(null); putCases(cases.filter((_, m) => m !== n)); void dropDocs(docsOfCase.map((x) => x.id)) }}>
+                              {t('risk.yes')}</button>
+                            <button type="button" className="rounded border border-slate-600 px-1.5 text-slate-200"
+                              onClick={() => setAskDrop(null)}>{t('risk.no')}</button>
+                          </div>
+                        )
+                      })()}
                       {/* each case files its own documents (2026-11-08) */}
                       {c.id && !c.id.startsWith('legacy') && c.text.trim() && caseDocs.map((doc) => {
                         const filed = attachments.filter((x) => x.kind === doc.kind && x.case_ref === c.id)
@@ -470,6 +510,7 @@ export default function ActivityChecklist({
                             {filed.length > 0 && changeId != null && (
                               <ul className="text-sm">
                                 {filed.map((x) => <AttachmentRow key={x.id} changeId={changeId} attachment={x} confirm
+                                  tag={`${t('check.case', lang)} ${n + 1} · ${c.text.slice(0, 40)}`}
                                   onDelete={!(isAdmin || (userId != null && ownerIds.includes(userId)) || (!ownerIds.length && x.uploaded_by === userId)) ? undefined : (att) => { changesApi.deleteAttachment(changeId, att.id)
                                     .then(() => onUploaded?.()).catch((e: unknown) => toastError(e, t('attach.deleteFailed'))) }} />)}
                               </ul>

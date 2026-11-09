@@ -763,7 +763,7 @@ export default function AssessmentBuckets({
                             <p className="text-xs font-medium text-slate-200">{g.head}</p>
                             {g.docs.length > 0 ? (
                               <ul className="text-sm">
-                                {g.docs.map((att) => <AttachmentRow key={att.id} changeId={changeId} attachment={att} />)}
+                                {g.docs.map((att) => <AttachmentRow key={att.id} changeId={changeId} attachment={att} tag={g.head.split(': ')[0]} />)}
                               </ul>
                             ) : <p className="text-[11px] text-slate-500">{t('bucket.noCaseDocs')}</p>}
                           </div>
@@ -774,7 +774,7 @@ export default function AssessmentBuckets({
                       data-testid={`bucket-docs-${row.id}`}>
                       {/* Keeps its historic test id: the PPT slot grew out of the
                           old evidence block and its tests. */}
-                      {slot(`bucket-evidence-${row.id}`, t('bucket.changePpt'),
+                      {slot(`bucket-evidence-${row.id}`, t('bucket.otherDocs'),
                         [...ofKind('change_ppt'), ...legacy], t('bucket.changePptHint'),
                         // While the form owes the deck, its one drop zone sits
                         // next to Submit; this slot points there, not a second zone.

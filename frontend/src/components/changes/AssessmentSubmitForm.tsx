@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { toastError } from '../../lib/apiError'
 import { btnPrimary } from '../common/buttonStyles'
 import { changesApi } from '../../api/changes'
-import { hoursApi, hoursKey } from '../../api/hours'
+import { hoursApi, hoursKey, requestBookHours } from '../../api/hours'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment } from '../../types/change'
 import { DEPARTMENT_FIELDS } from './departmentForms'
@@ -100,7 +100,6 @@ export default function AssessmentSubmitForm({
   const [verdict, setVerdict] = useState(initial?.verdict ?? '')
   const [failure, setFailure] = useState<string | null>(null)
   const needsChangePpt = verdict === 'not_feasible' && changePptCount === 0
-  const [effort, setEffort] = useState('')
   const [conditions, setConditions] = useState(initial?.conditions ?? '')
   const [notes, setNotes] = useState(initial?.notes ?? '')
   // Whatever this department's own questionnaire collects, verbatim.
@@ -160,18 +159,12 @@ export default function AssessmentSubmitForm({
   const missingDocs = notImpacted || questionnaireOpen ? [] : missingDocuments(defs, details, evidence)
   const submit = useMutation({
     mutationFn: async () => {
-      // one place for the hours (2026-11-08): what is typed here is booked on
-      // the change like "Book hours", then the submit goes
-      const typed = parseFloat(effort)
-      if (showEffort && typed > 0) {
-        await hoursApi.book(changeId, { department_id: departmentId, hours: typed, source: 'typed',
-          note: 'Assessment' })
-      }
       return changesApi.submitAssessment(changeId, {
       department_id: departmentId,
       // "Not impacted" is feasible by definition — nothing changes for us.
       verdict: notImpacted ? 'feasible' : verdict,
-      ...(showEffort && parseFloat(effort) > 0 ? { effort_hours: parseFloat(effort) } : {}),
+      // hours come from the bookings (one place: Book hours, 2026-11-08)
+      ...(showEffort && bookedSum > 0 ? { effort_hours: bookedSum } : {}),
       conditions: conditions || undefined, notes: notes || undefined,
       // One envelope for everything the department answered: the checklist and,
       // where it has one, its own questionnaire.
@@ -206,18 +199,26 @@ export default function AssessmentSubmitForm({
   })
   const ourBookings = (hoursState?.bookings ?? []).filter((b) => b.department_id === departmentId)
   const bookedSum = ourBookings.reduce((n, b) => n + (Number(b.hours) || 0), 0)
-  const hoursOk = !showEffort || parseFloat(effort) > 0 || bookedSum > 0
+  const hoursOk = !showEffort || bookedSum > 0
   const ready = !needsChangePpt && missingDocs.length === 0 && checklistDone
     && !(evidenceNeed && evidenceNeed.missing.length) && !conditionMissing && hoursOk
     && (notImpacted || (verdict !== ''
     && (!Fields || details.impacted !== undefined)))
   const effortField = (
     <div data-testid={`effort-block-${departmentId}`} className="space-y-1">
-      <p className={`text-xs ${hoursOk ? 'text-slate-500' : 'text-red-300'}`}>
-        {bookedSum > 0
-          ? t('effort.alreadyBooked').replace('{h}', String(bookedSum))
-          : t('effort.hoursRequired')}
-      </p>
+      <div className="flex items-center gap-2">
+        <p className={`text-xs ${hoursOk ? 'text-slate-400' : 'text-red-300'}`}>
+          {bookedSum > 0 ? t('effort.alreadyBooked').replace('{h}', String(bookedSum))
+            : t('effort.noneBooked')}
+        </p>
+        <button type="button" data-testid={`effort-book-${departmentId}`}
+          onClick={() => requestBookHours({ departmentId })}
+          className={hoursOk
+            ? 'inline-flex h-7 items-center rounded-lg border border-slate-600 px-2.5 text-xs text-slate-200 hover:bg-slate-700/60'
+            : 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100 hover:bg-red-800/60'}>
+          {t('hours.title')}
+        </button>
+      </div>
       {ourBookings.length > 0 && (
         <ul className="text-[11px] text-slate-400" data-testid={`effort-bookings-${departmentId}`}>
           {ourBookings.map((b) => (
@@ -228,17 +229,20 @@ export default function AssessmentSubmitForm({
           ))}
         </ul>
       )}
-      <label htmlFor={`effort-${departmentId}`} className="sr-only">{t('effort.bookNow')}</label>
-      <div className="flex items-center gap-2">
-        <input id={`effort-${departmentId}`} type="number" min="0" step="0.25"
-          value={effort} onChange={(e) => setEffort(e.target.value)}
-          placeholder={t('effort.bookNow')}
-          className={`w-36 bg-slate-800 border rounded-lg px-3 py-1.5 text-sm text-slate-100 ${
-            hoursOk ? 'border-slate-600' : 'border-red-600'}`} />
-        <span className="text-[11px] text-slate-500">{t('effort.bookNowHint')}</span>
-      </div>
     </div>
   )
+  // Christoph 2026-11-08: say why Submit is grey, every reason
+  const whyNot: string[] = ready ? [] : [
+    ...(!notImpacted && verdict === '' ? [t('why.verdict')] : []),
+    ...(!checklistDone && !questionnaireOpen ? [t('why.rows').replace('{n}', String(progress.total - progress.answered))] : []),
+    ...(questionnaireOpen ? [t('why.questionnaire')] : []),
+    ...(Fields && !notImpacted && details.impacted === undefined && !questionnaireOpen ? [t('why.questionnaire')] : []),
+    ...missingDocs.map((m) => t('why.doc').replace('{d}', docLabel(m.doc, 'en')).replace('{r}', m.item.label_en)),
+    ...(needsChangePpt ? [t('why.notFeasiblePpt')] : []),
+    ...(evidenceNeed && evidenceNeed.missing.length ? [t('why.evidence').replace('{r}', evidenceNeed.missing.join(', '))] : []),
+    ...(conditionMissing ? [t('why.condition')] : []),
+    ...(!hoursOk ? [t('why.hours')] : []),
+  ]
   return (
     <div className="border border-slate-700 rounded-lg p-3 space-y-2 text-sm">
       {Fields && <Fields value={details} onChange={setDetails} />}
@@ -379,6 +383,11 @@ export default function AssessmentSubmitForm({
           {progress.total - progress.answered === 1 ? t('check.openRowsOne')
             : t('check.openRows').replace('{n}', String(progress.total - progress.answered))}
         </button>
+      )}
+      {whyNot.length > 0 && (
+        <ul data-testid="assessment-why-not" className="mt-1 space-y-0.5 text-xs text-red-300">
+          {whyNot.map((w, n) => <li key={n}>• {w}</li>)}
+        </ul>
       )}
       {savedAt && (
         <span data-testid="assessment-draft-state" className="ml-2 text-[11px] text-slate-500">

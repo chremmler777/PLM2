@@ -42,13 +42,15 @@ export function KindChip({ kind }: { kind?: string | null }) {
   )
 }
 
-export function AttachmentRow({ changeId, attachment: a, onDelete, confirm = false }: {
+export function AttachmentRow({ changeId, attachment: a, onDelete, confirm = false, tag }: {
   changeId: number
   attachment: Attachment
   /** Omitted where the file may not be deleted (frozen baseline, read-only view). */
   onDelete?: (a: Attachment) => void
   /** Ask "Delete? Yes / No" before deleting (Christoph 2026-11-08). */
   confirm?: boolean
+  /** What the file belongs to, as a chip (e.g. "Case 1 · Re-cut insert LH"). */
+  tag?: string
 }) {
   const [asking, setAsking] = useState(false)
   return (
@@ -85,6 +87,12 @@ export function AttachmentRow({ changeId, attachment: a, onDelete, confirm = fal
             {a.filename}
           </a>{' '}
           <KindChip kind={a.kind} />
+          {tag && (
+            <span data-testid={`attach-tag-${a.id}`}
+              className="ml-1 inline-flex items-center rounded bg-amber-900/60 px-1 py-px text-[11px] leading-tight font-medium text-amber-100">
+              {tag}
+            </span>
+          )}
         </span>
         {/* Who put it there and when — the provenance every file list owes. */}
         <UploadedBy name={a.uploaded_by_name} at={a.created_at} className="block" />
