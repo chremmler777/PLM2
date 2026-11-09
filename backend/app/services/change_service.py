@@ -7303,6 +7303,18 @@ class ChangeService:
             field_name="verdict", new_value=verdict,
             for_department_id=department_id,
         )
+        if cm_switches.on("ASSESSMENT_V2"):
+            # Christoph 2026-11-08: each modification case is a costing line
+            from app.services.checklist_positions import carry_cases
+            from app.models.workflow import Department as _Dept
+            _d = await session.get(_Dept, department_id)
+            n = await carry_cases(session, change, a, _d.name if _d else None, user_id)
+            if n:
+                await ChangeService.append_changelog(
+                    session, change, "cost_lines_seeded",
+                    f"{n} costing line{'s' if n != 1 else ''} carried from the "
+                    f"assessment of dept {department_id}", user_id,
+                    for_department_id=department_id)
         if advanced:
             # Completing the task may have started the next stage: a
             # deviation-added row there gets its task now.

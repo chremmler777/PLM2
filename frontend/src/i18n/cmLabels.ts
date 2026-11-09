@@ -612,6 +612,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Answer every row Yes or No. Yes is pre-seeded into cost input; if you '
       + 'see a risk, flag it right on the row.',
   },
+  'check.case': { de: 'Fall', en: 'Case' },
+  'check.casePlaceholder': { de: 'Was genau, z. B. Einsatz LH nacharbeiten (Zeichnung/Anzahl)', en: 'What exactly, e.g. re-cut insert LH (drawing / count)' },
+  'check.caseAdd': { de: '+ weiterer Fall', en: '+ another case' },
+  'check.caseRemove': { de: 'Fall entfernen', en: 'Remove case' },
+  'check.caseHint': { de: 'Jeder Fall wird eine eigene Zeile in der Kalkulation.', en: 'Each case becomes its own costing line.' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

@@ -485,3 +485,36 @@ async def test_summation_carries_the_department_by_plant_matrix(
     assert by_plant[home_id]["one_time_internal"] == 130.0
     assert by_plant[usa_id]["lifecycle_internal"] == 50.0
     assert summ["totals"]["grand_total"] == 780.0
+
+
+async def test_modification_cases_become_costing_lines(
+        client, admin_auth, tab, session_factory):
+    """Christoph 2026-11-08: each case of an Internal / External modification
+    is its own costing line after submit, carried once."""
+    from app.models.change_cost import CostingPosition
+    impacts = answered("Tool Engineer",
+                       yes={"modification_external", "modification_internal"},
+                       remarks={"modification_external": "Re-cut insert LH; new ejector",
+                                "modification_internal": "Polish 2 cavities"})
+    for i in impacts:
+        if i.get("key") == "modification_external":
+            i["cases"] = ["Re-cut insert LH", "New ejector plate"]
+    await _file_external_docs(client, admin_auth, tab)
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 200, res.text
+
+    async def lines():
+        async with session_factory() as s:
+            return sorted((p.kind, p.label) for p in (await s.execute(
+                select(CostingPosition).where(
+                    CostingPosition.change_id == tab["change_id"]))).scalars())
+    assert await lines() == [("external", "New ejector plate"),
+                             ("external", "Re-cut insert LH"),
+                             ("own_time", "Polish 2 cavities")]
+    # carried once: running the carry again adds nothing
+    from app.models.change import ChangeAssessment, ChangeRequest
+    from app.services.checklist_positions import carry_cases
+    async with session_factory() as s:
+        a = await s.get(ChangeAssessment, tab["assessment_id"])
+        ch = await s.get(ChangeRequest, tab["change_id"])
+        assert await carry_cases(s, ch, a, "Tool Engineer", 1) == 0

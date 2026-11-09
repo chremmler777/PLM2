@@ -286,13 +286,27 @@ def _entry(item: tuple, extra: bool) -> dict:
     return out
 
 
+# A common item worded for one department (same key, so stored answers and
+# cost lines keep working). Christoph 2026-11-08: for APQP the document
+# update is the quality work instruction.
+COMMON_LABELS_BY_DEPARTMENT = {
+    ("APQP", "work_instruction_update"): (
+        "Qualitäts-Arbeitsanweisung", "Quality work instruction"),
+}
+
+
+def _common_label(item: tuple, department_name: str | None) -> tuple:
+    over = COMMON_LABELS_BY_DEPARTMENT.get((department_name or "", item[0]))
+    return (item[0], over[0], over[1], item[3]) if over else item
+
+
 def items_for(department_name: str | None) -> list[dict]:
     """The full checklist a department answers: the common items, then its own.
 
     An unknown department still gets the common set — a department nobody
     thought to configure has questions to answer just like everyone else.
     """
-    items = [_entry(i, False) for i in COMMON_ITEMS]
+    items = [_entry(_common_label(i, department_name), False) for i in COMMON_ITEMS]
     items += [_entry(i, True)
               for i in DEPARTMENT_ITEMS.get(department_name or "", [])]
     return items

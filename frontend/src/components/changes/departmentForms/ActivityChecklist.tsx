@@ -33,12 +33,18 @@ export interface ImpactItem {
   bulk?: boolean
   impacted: boolean
   remark?: string
+  /** Internal / External modification: one line per case (2026-11-08); each
+   *  becomes its own costing line on submit. `remark` mirrors them. */
+  cases?: string[]
   /** Spec §4: with no Yes, the reference that shows this No. */
   ref?: string
   choice?: string
   /** Legacy shape: answers stored against the activity catalog. */
   activity_id?: number | null
 }
+
+/** Rows that take several cases, each a costing line (backend CASE_KEYS). */
+export const CASE_KEYS = new Set(['modification_internal', 'modification_external'])
 
 export const impactsOf = (
   value: Record<string, unknown> | null | undefined,
@@ -394,11 +400,42 @@ export default function ActivityChecklist({
                 })}
               </div>
             )}
+            {item.key && CASE_KEYS.has(item.key) ? (() => {
+              const cases = item.cases?.length ? item.cases : [item.remark ?? '']
+              const putCases = (next: string[]) => put({ ...item, cases: next,
+                remark: next.map((c) => c.trim()).filter(Boolean).join('; ') })
+              return (
+                <div className="space-y-1" data-testid={`check-cases-${id}`}>
+                  {cases.map((c, n) => (
+                    <div key={n} className="flex items-center gap-1">
+                      <input type="text" data-testid={n === 0 ? `check-remark-${id}` : `check-case-${id}-${n}`}
+                        value={c}
+                        onChange={(e) => putCases(cases.map((x, m) => (m === n ? e.target.value : x)))}
+                        placeholder={t('check.casePlaceholder', lang)}
+                        aria-label={`${t('check.case', lang)} ${n + 1}`}
+                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+                      {cases.length > 1 && (
+                        <button type="button" className="text-xs text-slate-400 hover:text-red-300 px-1"
+                          aria-label={t('check.caseRemove', lang)}
+                          onClick={() => putCases(cases.filter((_, m) => m !== n))}>×</button>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-3">
+                    <button type="button" data-testid={`check-case-add-${id}`}
+                      className="text-[11px] text-sky-300 hover:text-sky-200"
+                      onClick={() => putCases([...cases, ''])}>{t('check.caseAdd', lang)}</button>
+                    <span className="text-[11px] text-slate-500">{t('check.caseHint', lang)}</span>
+                  </div>
+                </div>
+              )
+            })() : (
             <input type="text" data-testid={`check-remark-${id}`}
               value={item.remark ?? ''}
               onChange={(e) => put({ ...item, remark: e.target.value })}
               placeholder={t('check.remarkPlaceholder', lang)} aria-label={t('check.remark', lang)}
               className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+            )}
             {/* Supplier work is presented (the change presentation) and
                 priced (the change RFQ): each document has its own slot here,
                 where the Yes was given. Submit waits for both. */}
