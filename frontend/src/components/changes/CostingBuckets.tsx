@@ -71,6 +71,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
     basis_missing: 'bg-red-700 text-white', hours_missing: 'bg-red-700 text-white',
     empty: 'bg-slate-600 text-white', other: 'bg-slate-600 text-white',
     received: 'bg-emerald-700 text-white', waiting_info: 'bg-sky-800 text-sky-100',
+    book_hours: 'bg-red-700 text-white',
   }
   const items = check?.items ?? reasons.map((r) => ({ tag: 'other', text: r }))
   return (

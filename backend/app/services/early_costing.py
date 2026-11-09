@@ -246,6 +246,8 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
     empty, _ = await _empty_lines(session, change, department_id)
     if empty:
         raise EarlyCostingError(". ".join(empty))
+    if await _costing_hours_missing(session, change, department_id):
+        raise EarlyCostingError("Book the hours you spent on costing first (Book hours)")
     if not await _has_answer(session, change, department_id):
         raise EarlyCostingError(
             "Nothing to finalize yet: enter hours or an amount on at least one "
@@ -390,6 +392,25 @@ async def _empty_lines(session: AsyncSession, change: ChangeRequest,
     return why, [p.id for p in price + hours]
 
 
+async def _costing_hours_missing(session: AsyncSession, change: ChangeRequest,
+                                 department_id: int) -> bool:
+    """Christoph 2026-11-08: costing is work too: at least one booking of the
+    department after its assessment was submitted (switch
+    ASSESSMENT_HOURS_REQUIRED)."""
+    from app.services import cm_switches
+    from app.models.change_impl import ImplementationBooking
+    if not cm_switches.ASSESSMENT_HOURS_REQUIRED:
+        return False
+    since = max((a.submitted_at for a in _rows(change, department_id) if a.submitted_at),
+                default=None)
+    q = select(func.count(ImplementationBooking.id)).where(
+        ImplementationBooking.change_id == change.id,
+        ImplementationBooking.department_id == department_id)
+    if since is not None:
+        q = q.where(ImplementationBooking.booked_at >= since)
+    return not ((await session.execute(q)).scalar() or 0)
+
+
 async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
                            department_id: int) -> dict:
     """Christoph 2026-11-08: what still stops the department's Finalize, one
@@ -456,6 +477,8 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
             ids.append(p.id)
     if not items and not await _has_answer(session, change, department_id):
         items.append({"tag": "empty", "text": "Nothing entered yet: hours or an amount on one line"})
+    if await _costing_hours_missing(session, change, department_id):
+        items.append({"tag": "book_hours", "text": "Book the hours you spent on costing (Book hours)"})
     # Christoph 2026-11-08: the quote status per line as info (no blocker):
     # received quotes, and shops still out on a line that already has one
     info: list[dict] = []

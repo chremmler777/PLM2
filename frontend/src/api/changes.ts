@@ -264,6 +264,8 @@ export const changesApi = {
     department_id: number; vendor_name: string; asked_on: string; expected_by: string;
     position_id?: number; note?: string }) =>
     client.post<SupplierWait[]>(`/v1/changes/${id}/supplier-waits`, body).then((r) => r.data),
+  reopenSupplierWait: (id: number, waitId: number) =>
+    client.post<SupplierWait[]>(`/v1/changes/${id}/supplier-waits/${waitId}/reopen`).then((r) => r.data),
   closeSupplierWait: (id: number, waitId: number,
     body: { reason: 'received' | 'price_on_estimate' | 'not_needed'; note?: string }) =>
     client.post<SupplierWait[]>(`/v1/changes/${id}/supplier-waits/${waitId}/close`, body)

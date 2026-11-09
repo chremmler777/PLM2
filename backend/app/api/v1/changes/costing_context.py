@@ -240,6 +240,39 @@ async def start_supplier_wait(change_id: int, body: SupplierWaitIn,
     return await _waits(db, change)
 
 
+@router.post("/{change_id}/supplier-waits/{wait_id}/reopen")
+async def reopen_supplier_wait(change_id: int, wait_id: int,
+                               current_user: User = Depends(get_current_user),
+                               db: AsyncSession = Depends(get_db)):
+    """Christoph 2026-11-08: undo 'Quote received' / 'not needed' clicked by
+    accident: the wait is open again (only while no quote of that shop is
+    filed on its line)."""
+    from app.models.change_cost import SupplierWait, CostingPosition
+    from app.services import supplier_wait_service as waits
+    from app.services.change_service import ChangeService
+    change = await _change(db, change_id, current_user)
+    w = await db.get(SupplierWait, wait_id)
+    if w is None or w.change_id != change.id:
+        raise HTTPException(status_code=404, detail="Supplier wait not found")
+    if not await waits._may_act(db, change, w.department_id, current_user):
+        raise HTTPException(status_code=403, detail="Only that department, PM or an admin")
+    if w.position_id is not None:
+        pos = await db.get(CostingPosition, w.position_id)
+        if pos and any(o.vendor_name.strip().lower() == w.vendor_name.strip().lower() for o in pos.offers):
+            raise HTTPException(status_code=400,
+                                detail="A quote of this shop is filed: delete that quote first")
+    old = w.close_reason
+    w.closed_at = None
+    w.closed_by = None
+    w.close_reason = None
+    await ChangeService.append_changelog(
+        db, change, "supplier_wait_reopened",
+        f"Waiting on {w.vendor_name} again (was: {old})", current_user.id,
+        for_department_id=w.department_id)
+    await db.commit()
+    return await _waits(db, change)
+
+
 @router.post("/{change_id}/supplier-waits/{wait_id}/close")
 async def close_supplier_wait(change_id: int, wait_id: int, body: SupplierWaitCloseIn,
                               current_user: User = Depends(get_current_user),

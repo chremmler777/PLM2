@@ -538,12 +538,21 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
           // marked "quote in" elsewhere without the quote: enter it now
           if (w && editable && (received.has(n) || (!w.is_open && w.close_reason === 'received'))) {
             return <ShopQuoteLine key={n} changeId={changeId} positionId={p.id} shop={n} td={td}
-              onDone={refresh} onCancel={() => { const r = new Set(received); r.delete(n); setReceived(r) }} />
+              onDone={refresh} onCancel={async () => {
+                const r = new Set(received); r.delete(n); setReceived(r)
+                try { await changesApi.reopenSupplierWait(changeId, w.id) } catch (e) { toastError(e, 'Could not undo') }
+                refresh()
+              }} />
           }
           return (
             <tr key={n} data-testid={`supplier-line-${p.id}-${n}`} className="border-t border-slate-700/60">
               <td className={`${td} font-medium text-slate-200`}>{n}</td>
               <td className={td}>
+                {w && !w.is_open && editable && w.close_reason !== 'not_received' && (
+                  <button type="button" className="mr-1 text-[11px] underline text-slate-400"
+                    onClick={async () => { try { await changesApi.reopenSupplierWait(changeId, w.id) } catch (e) { toastError(e, 'Could not undo') } refresh() }}>
+                    {t('costpos.undo')}</button>
+                )}
                 {w && !w.is_open ? (
                   <span className={`rounded px-1.5 font-semibold ${w.close_reason === 'not_received'
                     ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
@@ -557,11 +566,12 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
                 {editable && w?.is_open && (
                   <button type="button" className={btnSm.secondary} data-testid={`rfq-received-${w.id}`}
                     onClick={async () => {
-                      if (estimate) {
-                        await changesApi.updateCostPosition(changeId, p.id, { pricing: 'quote' })
-                        onChanged()
-                      }
+                      try {
+                        if (estimate) await changesApi.updateCostPosition(changeId, p.id, { pricing: 'quote' })
+                        await changesApi.closeSupplierWait(changeId, w.id, { reason: 'received' })
+                      } catch (e) { toastError(e, 'Could not mark the quote received') }
                       setReceived(new Set([...received, n]))
+                      refresh()
                     }}>{t('costpos.quoteReceived')}</button>
                 )}
               </td>
@@ -817,7 +827,8 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel }: {
           disabled={!(Number(cost) > 0) || !(Number(days) >= 1) || !file || save.isPending}
           title={!file ? t('costpos.fileFirst') : undefined}
           onClick={() => save.mutate()}>{t('common.save')}</button>
-        <button type="button" className="ml-1 text-[11px] underline text-slate-400" onClick={onCancel}>{t('achk.cancel')}</button>
+        <button type="button" className="ml-1 text-[11px] underline text-slate-400" onClick={onCancel}
+          title={t('costpos.undoReceivedHint')}>{t('costpos.undoReceived')}</button>
       </td>
     </tr>
   )
@@ -1637,6 +1648,13 @@ function EffortRow({
   editable: boolean; index: number; onChanged: () => void; ctx?: CostingContext
 }) {
   const [hours, setHours] = useState(position?.hours != null ? String(position.hours) : '')
+  // Christoph 2026-11-08: red until the department booked its costing hours
+  const { data: fc } = useQuery({
+    queryKey: ['change', changeId, 'finalize-check', departmentId],
+    queryFn: () => changesApi.finalizeCheck(changeId, departmentId),
+    enabled: editable && kind === 'internal_effort',
+  })
+  const bookMissing = !!fc?.items?.some((i) => i.tag === 'book_hours')
   // Blur and the Save click (or Enter, then blur) arrive in the same moment,
   // and isPending is only true after a render. One save at a time: a change
   // made while one is out (a second hours commit, a labour position pick) is
@@ -1738,8 +1756,12 @@ function EffortRow({
             </span>
             {editable && (
               <button type="button" data-testid={`costpos-effort-book-${departmentId}`}
+                data-missing={bookMissing ? 'yes' : 'no'}
+                title={bookMissing ? t('costpos.bookCostingHours') : undefined}
                 onClick={() => requestBookHours({ departmentId })}
-                className={btnSm.secondary}>{t('hours.title')}</button>
+                className={bookMissing
+                  ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100 hover:bg-red-800/60'
+                  : btnSm.secondary}>{t('hours.title')}</button>
             )}
           </span>
         ) : editable ? (
