@@ -456,6 +456,7 @@ async def _costing_hours_missing(session: AsyncSession, change: ChangeRequest,
 async def _support_hours_missing(session: AsyncSession, change, department_id: int) -> bool:
     """Christoph 2026-11-08: the implementation support estimate is mandatory
     (red until entered; 0 is an answer)."""
+    from app.models.change_cost import CostingPosition
     hours = (await session.execute(select(CostingPosition.hours).where(
         CostingPosition.change_id == change.id,
         CostingPosition.department_id == department_id,
