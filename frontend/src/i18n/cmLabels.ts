@@ -771,6 +771,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.rfqOverdue': { de: 'überfällig', en: 'overdue' },
   'costpos.requestQuote': { de: 'Angebot anfragen', en: 'Request a quote' },
   'costpos.addRequest': { de: 'Anfrage eintragen', en: 'Add request' },
+  'costpos.supportMissing': { de: 'Stunden fehlen (0 erlaubt)', en: 'Hours missing (0 allowed)' },
   'costpos.spareItem': { de: 'Ersatzteil', en: 'Spare part' },
   'costpos.spareBasis': { de: 'Katalog / Teile-Nr. des Lieferanten', en: 'Catalogue / vendor part no.' },
   'costpos.spareRef': { de: 'Teile-Nr. / Angebots-Nr.', en: 'Part no. / quote no.' },

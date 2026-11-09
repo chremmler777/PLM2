@@ -1614,6 +1614,8 @@ function EffortRow({
     },
   })
   const dirty = num(hours) !== (position?.hours ?? null)
+  // Christoph 2026-11-08: implementation support is red until its hours are entered (0 allowed)
+  const supportMissing = kind === 'support_effort' && position?.hours == null && hours.trim() === ''
   const run = (p: Patch) => {
     if (inFlight.current) {
       queued.current = { ...queued.current, ...p }
@@ -1629,7 +1631,8 @@ function EffortRow({
     if (inFlight.current || num(hoursRef.current) !== savedHours.current) run({ hours: true })
   }
   return (
-    <tr className="border-t border-slate-700/70">
+    <tr className={`border-t border-slate-700/70 ${supportMissing ? 'bg-red-950/40 outline outline-1 outline-red-700/70' : ''}`}
+      data-missing={supportMissing ? 'yes' : 'no'}>
       <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
       <td className={cellCls}>
         <span className="text-slate-200">{t(rowKey)}</span>
@@ -1670,8 +1673,9 @@ function EffortRow({
               onChange={(e) => setHours(e.target.value)}
               onBlur={commit}
               onKeyDown={(e) => { if (e.key === 'Enter') commit() }}
-              className={`${fieldCls} w-20 tabular-nums text-right`} />
+              className={`${fieldCls} w-20 tabular-nums text-right ${supportMissing ? 'border-red-600' : ''}`} />
             <span className="text-xs text-slate-500">h</span>
+            {supportMissing && <span className="text-[11px] text-red-300">{t('costpos.supportMissing')}</span>}
             <button type="button" data-testid={`costpos-effort-save-${kind}-${departmentId}`}
               disabled={!dirty || save.isPending} onClick={commit}
               className={btnSm.secondary}>

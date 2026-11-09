@@ -249,6 +249,8 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
         raise EarlyCostingError(". ".join(empty))
     if await _costing_hours_missing(session, change, department_id):
         raise EarlyCostingError("Book the hours you spent on costing first (Book hours)")
+    if await _support_hours_missing(session, change, department_id):
+        raise EarlyCostingError("Enter the implementation support hours first (0 is allowed)")
     if not await _has_answer(session, change, department_id):
         raise EarlyCostingError(
             "Nothing to finalize yet: enter hours or an amount on at least one "
@@ -451,6 +453,16 @@ async def _costing_hours_missing(session: AsyncSession, change: ChangeRequest,
     return not ((await session.execute(q)).scalar() or 0)
 
 
+async def _support_hours_missing(session: AsyncSession, change, department_id: int) -> bool:
+    """Christoph 2026-11-08: the implementation support estimate is mandatory
+    (red until entered; 0 is an answer)."""
+    hours = (await session.execute(select(CostingPosition.hours).where(
+        CostingPosition.change_id == change.id,
+        CostingPosition.department_id == department_id,
+        CostingPosition.kind == "support_effort"))).scalars().all()
+    return not any(h is not None for h in hours)
+
+
 async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
                            department_id: int) -> dict:
     """Christoph 2026-11-08: what still stops the department's Finalize, one
@@ -529,6 +541,8 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
         items.append({"tag": "empty", "text": "Nothing entered yet: hours or an amount on one line"})
     if await _costing_hours_missing(session, change, department_id):
         items.append({"tag": "book_hours", "text": "Book the hours you spent on costing (Book hours)"})
+    if await _support_hours_missing(session, change, department_id):
+        items.append({"tag": "support_hours", "text": "Implementation support: enter the hours (0 allowed)"})
     # Christoph 2026-11-08: the quote status per line as info (no blocker):
     # received quotes, and shops still out on a line that already has one
     info: list[dict] = []
