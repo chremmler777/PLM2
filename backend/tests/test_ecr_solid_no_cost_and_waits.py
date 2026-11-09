@@ -245,3 +245,38 @@ async def test_no_costing_wait_for_a_department_that_owes_none(
     assert res.status_code == 400 and "owes no costing input" in res.json()["detail"], res.text
     # still fine for a department that owes its costing
     assert (await _wait(client, ec, ec["dale"], ec["shop"])).status_code == 200
+
+
+async def test_one_quote_on_a_line_finalizes_and_closes_the_shop_still_out(
+        client, ec, session_factory):
+    """Christoph 2026-11-08 (5f4233b5): a quoted line needs one quote; an open
+    wait for another shop on the same line does not hold the finalize and is
+    closed 'not_received' by it."""
+    from app.models.change_cost import SupplierWait
+    pos = await client.post(_u(ec, "/costing/positions"), json={
+        "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
+        "pricing": "quote", "quantity": 1, "quantity_unit": "pcs"}, headers=ec["dale"])
+    assert pos.status_code == 201, pos.text
+    pid = pos.json()["id"]
+    res = await _wait(client, ec, ec["dale"], ec["shop"], position_id=pid)
+    assert res.status_code == 200, res.text
+    wid = res.json()[0]["id"]
+    res = await client.post(_u(ec, f"/costing/positions/{pid}/offers"), json={
+        "vendor_name": "Hasco", "cost": 900.0, "shipping_included": True,
+        "quote_ref": "HA-Q-4410", "lead_time_days": 10,
+        "lead_time_unit": "calendar_days"}, headers=ec["dale"])
+    assert res.status_code in (200, 201), res.text
+    oid = res.json()["id"]
+    res = await client.post(_u(ec, "/attachments"),
+                            files={"file": ("quote.pdf", b"%PDF-1.4 q", "application/pdf")},
+                            data={"kind": "vendor_quote", "costing_offer_id": str(oid)},
+                            headers=ec["dale"])
+    assert res.status_code in (200, 201), res.text
+    async with session_factory() as s:
+        assert (await s.get(SupplierWait, wid)).closed_at is None   # FZ still out
+    res = await client.post(_u(ec, f"/costing/departments/{ec['shop']}/finalize"),
+                            headers=ec["dale"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        w = await s.get(SupplierWait, wid)
+        assert w.closed_at is not None and w.close_reason == "not_received"
