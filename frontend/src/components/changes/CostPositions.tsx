@@ -1356,7 +1356,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
         hours: type === 'sampling' ? null : num(hours),
         est_cost: type === 'estimate' ? num(est) : null,
         vendor_name: type === 'estimate' ? (vendor.trim() || null) : null,
-        lead_time_days: num(lead), lead_time_unit: unit,
+        lead_time_days: type === 'time' ? null : num(lead), lead_time_unit: unit,
         notes: notes.trim() || null,
         ...(isMachine
           ? { machine_class_id: classId, machine_id: machineId,
@@ -1529,7 +1529,8 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           )}
         </td>
         <td className={`${cellCls} whitespace-nowrap`}>
-          {editing && !isQuote ? (
+          {/* own time is hours only, no days (Christoph 2026-11-09) */}
+          {editing && !isQuote && type !== 'time' ? (
             <span className="inline-flex items-center gap-1">
               <input data-testid={`costpos-edit-lead-${p.id}`} type="number" min={0} value={lead}
                 aria-label={t('costpos.leadTime')} placeholder={t('costpos.leadTime')}
@@ -2033,7 +2034,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
         hours: num(hours),
         est_cost: lineType === 'estimate' ? num(est) : null,
         vendor_name: lineType === 'estimate' ? (vendor.trim() || null) : null,
-        lead_time_days: num(lead), lead_time_unit: unit,
+        lead_time_days: isTime ? null : num(lead), lead_time_unit: unit,
         ...(needsQty ? { quantity: num(qty), quantity_unit: qtyUnit.trim() } : {}),
       })
     },
@@ -2214,7 +2215,8 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
           </span>
         </td>
         <td className={`${cellCls} whitespace-nowrap`}>
-          {!isQuote && (
+          {/* own time is hours only, no days (Christoph 2026-11-09) */}
+          {!isQuote && !isTime && (
             <span className="inline-flex items-center gap-1">
               <input data-testid={`costpos-new-lead-${departmentId}`} type="number" min={0} value={lead}
                 aria-label={t('costpos.leadTime')} placeholder={t('summation.days')}
