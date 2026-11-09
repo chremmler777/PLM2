@@ -157,7 +157,8 @@ async def _graph_token(client: httpx.AsyncClient) -> str:
     return _token[0]
 
 
-async def graph_send(to: list[str], subject: str, body: str) -> None:
+async def graph_send(to: list[str], subject: str, body: str,
+                     cc: list[str] | None = None) -> None:
     s = get_settings()
     async with httpx.AsyncClient(timeout=15.0) as client:
         token = await _graph_token(client)
@@ -166,7 +167,9 @@ async def graph_send(to: list[str], subject: str, body: str) -> None:
             headers={"Authorization": f"Bearer {token}"},
             json={"message": {"subject": subject,
                               "body": {"contentType": "Text", "content": body},
-                              "toRecipients": [{"emailAddress": {"address": a}} for a in to]},
+                              "toRecipients": [{"emailAddress": {"address": a}} for a in to],
+                              **({"ccRecipients": [{"emailAddress": {"address": a}} for a in cc]}
+                                 if cc else {})},
                   "saveToSentItems": False},
         )
         if r.status_code != 202:

@@ -34,7 +34,7 @@ from __future__ import annotations
 import inspect
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Awaitable, Callable, Optional, Union
 
@@ -81,9 +81,20 @@ class Mail:
     to: list[str]
     subject: str
     body: str
+    cc: list[str] = field(default_factory=list)
 
 
 Sender = Callable[[Mail], Union[None, Awaitable[None]]]
+
+
+#: Informative notices (Christoph 2026-11-09: "all the informative ones
+#: cc"): one mail per event, the project's PM responsible in To, everybody
+#: informed in CC.
+INFO_KINDS = frozenset({
+    "fyi_stage", "stage_entered", "change_ended", "change_closed",
+    "decision_made", "change_info_note", "workflow_completed", "impact_edited",
+})
+_CHANGE_LINK = re.compile(r"^/changes/(\d+)")
 
 
 def mailable(n: Notification) -> bool:
@@ -131,17 +142,23 @@ def display_address(email: Optional[str]) -> Optional[str]:
     return f"{e}@{domain}" if domain else email
 
 
-def compose(n: Notification, to: str) -> Mail:
+def compose(n: Notification, to: str, cc: Optional[list[str]] = None) -> Mail:
     text = (n.body or "").rstrip()
     footer = FOOTER.format(url=plm2_url(n.link))
     return Mail(to=[to], subject=n.title,
-                body=f"{text}\n\n{footer}\n" if text else f"{footer}\n")
+                body=f"{text}\n\n{footer}\n" if text else f"{footer}\n",
+                cc=[a for a in dict.fromkeys(cc or []) if a != to])
 
 
 async def graph_sender(mail: Mail) -> None:
     """Send through part_data_mail's Graph transport, trial mode applied."""
-    to, subject, body, _trial = part_data_mail.apply_trial(mail.to, mail.subject, mail.body)
-    await part_data_mail.graph_send(to, subject, body)
+    trial = get_settings().notify_trial_recipient.strip()
+    if trial:   # trial: one mail to the trial recipient naming To and CC
+        named = list(mail.to) + ([f"cc: {', '.join(mail.cc)}"] if mail.cc else [])
+        to, subject, body, _ = part_data_mail.apply_trial(named, mail.subject, mail.body)
+        await part_data_mail.graph_send(to, subject, body)
+        return
+    await part_data_mail.graph_send(list(mail.to), mail.subject, mail.body, cc=list(mail.cc))
 
 
 def refused(exc: Exception) -> bool:
@@ -156,10 +173,53 @@ def refused(exc: Exception) -> bool:
     return 400 <= status < 500 and status not in _RUN_STOPPERS
 
 
+async def _team_routing(session: AsyncSession, notes) -> tuple[dict, dict, dict]:
+    """For the changes the notifications link to: change -> project, the
+    project team's backups per (project, responsible user), and the PM
+    responsible per project. Christoph 2026-11-09: responsible in To, backup
+    in CC, the informed in CC."""
+    from app.models.change import ChangeRequest
+    from app.models.workflow import Department, ProjectResponsible
+    from app.services.auto_advance import PM_DEPARTMENT
+    change_ids = set()
+    for n in notes:
+        m = _CHANGE_LINK.match(n.link or "")
+        if m:
+            change_ids.add(int(m.group(1)))
+    if not change_ids:
+        return {}, {}, {}
+    project_of = dict((await session.execute(
+        select(ChangeRequest.id, ChangeRequest.project_id)
+        .where(ChangeRequest.id.in_(change_ids)))).all())
+    projects = {p for p in project_of.values() if p is not None}
+    backups: dict[tuple[int, int], set[int]] = {}
+    pm_of: dict[int, int] = {}
+    if projects:
+        rows = (await session.execute(
+            select(ProjectResponsible.project_id, ProjectResponsible.user_id,
+                   ProjectResponsible.backup_user_id, Department.name)
+            .join(Department, Department.id == ProjectResponsible.department_id)
+            .where(ProjectResponsible.project_id.in_(projects)))).all()
+        for pid, uid, bid, dname in rows:
+            if uid is not None and bid is not None and bid != uid:
+                backups.setdefault((pid, uid), set()).add(bid)
+            if dname == PM_DEPARTMENT and uid is not None:
+                pm_of[pid] = uid
+    return project_of, backups, pm_of
+
+
+def _project(n: Notification, project_of: dict) -> Optional[int]:
+    m = _CHANGE_LINK.match(n.link or "")
+    return project_of.get(int(m.group(1))) if m else None
+
+
 async def send_pending(session: AsyncSession, *,
                        sender: Optional[Sender] = None,
                        now: Optional[datetime] = None) -> int:
-    """Mail every notification not mailed yet. Returns how many were sent."""
+    """Mail every notification not mailed yet. Returns how many mails were
+    sent. An action mail goes To the person with the task, CC their backup
+    on the project team; an informative notice goes once per event To the
+    project's PM responsible, CC everybody informed."""
     if not enabled():
         return 0
     send = sender or graph_sender
@@ -169,27 +229,71 @@ async def send_pending(session: AsyncSession, *,
         .join(User, User.id == Notification.user_id)
         .where(Notification.mailed_at.is_(None))
         .order_by(Notification.id).limit(BATCH))).all()
-    sent = 0
-    stamped = 0
+    project_of, backups, pm_of = await _team_routing(session, [r[0] for r in rows])
+    wanted_ids = {b for bs in backups.values() for b in bs} | set(pm_of.values())
+    addr_of: dict[int, Optional[str]] = {}
+    if wanted_ids:
+        for uid, email, active in (await session.execute(
+                select(User.id, User.email, User.is_active)
+                .where(User.id.in_(wanted_ids)))).all():
+            addr_of[uid] = address(email) if active else None
+
+    def live(n, to, active):
+        return not (n.is_read or not active or to is None
+                    or (n.created_at is not None and n.created_at < now - MAX_AGE))
+
+    jobs: list[tuple[list[Notification], Mail]] = []
+    groups: dict[tuple, list] = {}
     for n, stored, active in rows:
         to = address(stored)
-        skip = (n.is_read or not mailable(n) or not active or to is None
-                or (n.created_at is not None and n.created_at < now - MAX_AGE))
-        if not skip:
+        if n.kind in INFO_KINDS and BACKUP_PREFIX() not in (n.body or ""):
+            key = (n.kind, n.subject_key or f"id:{n.id}", n.link)
+            groups.setdefault(key, []).append((n, to if live(n, to, active) else None))
+            continue
+        if live(n, to, active) and mailable(n):
+            pid = _project(n, project_of)
+            cc = [addr_of.get(b) for b in sorted(backups.get((pid, n.user_id), ()))]
+            jobs.append(([n], compose(n, to, [a for a in cc if a])))
+        else:
+            jobs.append(([n], None))
+    for members in groups.values():
+        notes = [n for n, _ in members]
+        informed = [a for _, a in members if a]
+        if not informed:
+            jobs.append((notes, None))
+            continue
+        first = notes[0]
+        pm = pm_of.get(_project(first, project_of))
+        to = addr_of.get(pm) if pm is not None else None
+        if to is None:
+            to = informed[0]
+        jobs.append((notes, compose(first, to, informed)))
+    jobs.sort(key=lambda j: j[0][0].id)
+
+    sent = 0
+    stamped = 0
+    for notes, mail in jobs:
+        if mail is not None:
             try:
-                result = send(compose(n, to))
+                result = send(mail)
                 if inspect.isawaitable(result):
                     await result
                 sent += 1
             except Exception as e:
                 if not refused(e):    # Graph down / refusing us: next run
-                    logger.warning(f"Notification mail {n.id} not sent, transport down: "
+                    logger.warning(f"Notification mail {notes[0].id} not sent, transport down: "
                                    f"{part_data_mail.describe_error(e)}")
                     break
-                logger.warning(f"Notification mail {n.id} refused, skipped: "
+                logger.warning(f"Notification mail {notes[0].id} refused, skipped: "
                                f"{part_data_mail.describe_error(e)}")
-        n.mailed_at = now
-        stamped += 1
+        for n in notes:
+            n.mailed_at = now
+            stamped += 1
     if stamped:
         await session.commit()
     return sent
+
+
+def BACKUP_PREFIX() -> str:
+    from app.services.notification_service import BACKUP_NOTE_PREFIX
+    return BACKUP_NOTE_PREFIX

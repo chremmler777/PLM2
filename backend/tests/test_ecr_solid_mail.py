@@ -141,3 +141,51 @@ async def test_plm2_link_is_on_the_mail_link_base(monkeypatch):
     monkeypatch.setattr(get_settings(), "notify_base_url", "https://ktx.example/plm2")
     assert ecr_mail.plm2_url("/changes/3") == "https://ktx.example/plm2/changes/3"
     assert ecr_mail.plm2_url("changes/3") == "https://ktx.example/plm2/changes/3"
+
+
+async def _team_change(session_factory, seed):
+    """A change on the seed project; team: Tool Engineer responsible eng,
+    backup admin; Project Manager responsible admin."""
+    from app.models.change import ChangeRequest
+    from app.models.workflow import ProjectResponsible
+    from tests.conftest import make_department_member
+    te = await make_department_member(session_factory, seed["engineer_id"], "Tool Engineer")
+    pm = await make_department_member(session_factory, seed["admin_id"], "Project Manager")
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="CR-M-1", project_id=seed["project_id"], title="m",
+                          change_type="physical_part", status="captured",
+                          raised_by=seed["engineer_id"])
+        s.add(c); await s.flush()
+        s.add(ProjectResponsible(project_id=seed["project_id"], department_id=te,
+                                 user_id=seed["engineer_id"], backup_user_id=seed["admin_id"]))
+        s.add(ProjectResponsible(project_id=seed["project_id"], department_id=pm,
+                                 user_id=seed["admin_id"]))
+        await s.commit()
+        return c.id
+
+
+async def test_task_mail_goes_to_the_responsible_cc_the_backup(session_factory, seed, smtp_on):
+    """Christoph 2026-11-09: responsible in To, backup in CC."""
+    cid = await _team_change(session_factory, seed)
+    async with session_factory() as s:
+        await NotificationService.notify_once(
+            s, [seed["engineer_id"]], kind="task_new", subject_key="t:1",
+            title="New task", body="Assess.", link=f"/changes/{cid}?tab=assessments")
+        await s.commit()
+        assert await ecr_mail.send_pending(s, sender=smtp_on.append) == 1
+    assert smtp_on[0].to == ["eng@test.io"]
+    assert smtp_on[0].cc == ["admin@test.io"]
+
+
+async def test_informative_notice_is_one_mail_pm_to_informed_cc(session_factory, seed, smtp_on):
+    """Christoph 2026-11-09: the informative ones in CC, one mail per event."""
+    cid = await _team_change(session_factory, seed)
+    async with session_factory() as s:
+        await NotificationService.notify_once(
+            s, [seed["engineer_id"], seed["admin_id"]], kind="fyi_stage", subject_key="inst:1:stage:2",
+            title="FYI: stage started", body="Nothing to do.", link=f"/changes/{cid}")
+        await s.commit()
+        assert await ecr_mail.send_pending(s, sender=smtp_on.append) == 1
+        assert await ecr_mail.send_pending(s, sender=smtp_on.append) == 0
+    assert smtp_on[0].to == ["admin@test.io"]
+    assert smtp_on[0].cc == ["eng@test.io"]
