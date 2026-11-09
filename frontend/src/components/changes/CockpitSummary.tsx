@@ -748,7 +748,10 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       // A6-06: wraps rather than pushing the primary off the edge at 1280 px
       <div data-testid="cockpit-compact" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {statusPill(true)}
-        {hardBlockers.length > 0 ? (
+        {/* Christoph 2026-11-08: in the assessment the open points sit in
+            each department's container (red frame); a blocker count up here
+            only confuses, the "Waiting on" line names who */}
+        {change.status === 'in_assessment' ? null : hardBlockers.length > 0 ? (
           <button type="button" data-testid="compact-blockers" onClick={onShowOverview}
             className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 text-xs text-amber-200 hover:bg-amber-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">
             <AlertTriangle aria-hidden="true" size={12} />

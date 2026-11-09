@@ -389,6 +389,19 @@ export default function AssessmentBuckets({
           || row.checks
         const state = stateOf(a, row.onHold, row.declined, owed, assesses)
         const isMine = myDepartmentIds.includes(row.id)
+        // Christoph 2026-11-08: each department's open points, in its own
+        // container (red frame) instead of a blocker count in the header
+        const openPoints = [
+          ...(concerns as ChangeConcern[]).filter((c) => ownsCheck(c, row.id) && c.is_open)
+            .map((c) => ({ key: `c${c.id}`, text: t('bucket.openCheck').replace('{n}', String(c.id)).replace('{x}', c.note) })),
+          ...(concerns as ChangeConcern[]).filter((c) => asksFrom(c, row.id) && c.is_open)
+            .map((c) => ({ key: `q${c.id}`, text: t('bucket.openQuestion').replace('{n}', String(c.id)).replace('{x}', c.note) })),
+          ...(assesses && (state === 'waiting' || state === 'in_work' || state === 'on_hold')
+            ? [{ key: 'submit', text: t('bucket.openSubmit') + (a?.due_date
+              ? ` (${t('flag.due').replace('{d}', formatCalendarDate(a.due_date))}${a.overdue ? `, ${t('bucket.overdue')}` : ''})` : '') }]
+            : []),
+        ]
+        const red = openPoints.length > 0
         // Another department's answers are theirs; ordinary members see the
         // status board only. The overview belongs to PM/Sales/lead/admin.
         const mayOpen = isMine || canSeeAll
@@ -419,8 +432,9 @@ export default function AssessmentBuckets({
             </div>
           )}
           <section data-testid={`bucket-${row.id}`}
-            className={`rounded-lg border ${
-              expanded ? 'border-slate-600 bg-slate-800' : 'border-slate-700 bg-slate-800/50'}`}>
+            data-open-points={openPoints.length}
+            className={`rounded-lg border ${red ? 'border-red-600/80 ring-1 ring-red-700/40' : expanded ? 'border-slate-600' : 'border-slate-700'} ${
+              expanded ? 'bg-slate-800' : 'bg-slate-800/50'}`}>
             <button type="button" data-testid={`bucket-toggle-${row.id}`}
               aria-expanded={expanded}
               disabled={!mayOpen}
@@ -447,6 +461,13 @@ export default function AssessmentBuckets({
                 <span data-testid={`bucket-checks-${row.id}`} title={t('bucket.checksFirstHint')}
                   className="rounded border border-sky-800 text-sky-200 px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0">
                   {t('bucket.checksFirst')}
+                </span>
+              )}
+              {red && (
+                <span data-testid={`bucket-open-count-${row.id}`}
+                  title={openPoints.map((p) => p.text).join('\n')}
+                  className="rounded bg-red-900/60 text-red-200 px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0">
+                  {t('bucket.openCount').replace('{n}', String(openPoints.length))}
                 </span>
               )}
               {row.pendingRemoval && <PendingRemovalChip testId={`bucket-removal-${row.id}`} />}
@@ -515,6 +536,16 @@ export default function AssessmentBuckets({
             {expanded && (
               <BucketErrorBoundary name={deptName(row.id)}>
               <div className="border-t border-slate-700 px-3 py-3 space-y-3">
+                {red && (
+                  <div data-testid={`bucket-open-points-${row.id}`}
+                    className="rounded border border-red-700/60 bg-red-950/20 px-2 py-1.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-red-300">
+                      {t('bucket.openPoints').replace('{n}', String(openPoints.length))}</p>
+                    <ul className="mt-0.5 space-y-0.5 text-xs text-red-100">
+                      {openPoints.map((p) => <li key={p.key}>• {p.text}</li>)}
+                    </ul>
+                  </div>
+                )}
                 {sentBack && !a?.submitted_at && (
                   <p data-testid={`bucket-sent-back-${row.id}`}
                     className="rounded border border-amber-700/60 bg-amber-950/20 px-2 py-1.5 text-xs text-amber-200">

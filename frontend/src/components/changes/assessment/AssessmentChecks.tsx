@@ -307,8 +307,10 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
       : q.answer_note
   const settle = () => close.mutate(t('achk.settledByAnswer'))
   return (
-    <div className="rounded border border-sky-800/60 bg-sky-950/20 p-2 space-y-1" data-testid={`achk-q-${q.id}`}>
-      <p className="text-xs text-sky-200 font-semibold" data-testid={`achk-qhead-${q.id}`}>
+    <div className={`rounded border p-2 space-y-1 ${q.is_open
+      ? 'border-red-600/80 bg-red-950/20' : 'border-sky-800/60 bg-sky-950/20'}`} data-testid={`achk-q-${q.id}`}
+      data-open={q.is_open ? 'yes' : 'no'}>
+      <p className={`text-xs font-semibold ${q.is_open ? 'text-red-200' : 'text-sky-200'}`} data-testid={`achk-qhead-${q.id}`}>
         {editable
           ? t('achk.question').replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))
           : t('achk.asks').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
