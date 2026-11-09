@@ -61,6 +61,16 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
   const qc = useQueryClient()
   const [confirming, setConfirming] = useState(false)
   const [keptWorking, setKeptWorking] = useState(false)
+  // Christoph 2026-11-08: "has no cost" only while the department has no cost
+  // line (anything beyond the booked assessment/costing hours)
+  const { data: allPositions } = useQuery({
+    queryKey: ['costing-positions', changeId],
+    queryFn: () => changesApi.listCostPositions(changeId),
+    enabled: v2,
+  })
+  const hasCostLines = (allPositions ?? []).some((p) => p.department_id === departmentId
+    && (p.kind === 'external' || (p.kind !== 'internal_effort' && p.notes !== 'From the bookings'
+      && ((p.hours ?? 0) > 0 || (p.est_cost ?? 0) > 0))))
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['change', changeId] })
     qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
@@ -190,7 +200,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
               Not finalized: the PM sees your department as open.
             </p>
           )}
-          {v2 && placement === 'end' && (
+          {v2 && placement === 'end' && !hasCostLines && (
             <NoCostButton changeId={changeId} departmentId={departmentId} departmentName={departmentName} />
           )}
         </div>
