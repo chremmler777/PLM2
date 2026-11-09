@@ -82,8 +82,9 @@ const rangeText = (low: number, high: number, cur?: string) =>
 
 /** Christoph 2026-11-08: filled is not done; only Finalize says the
  *  department confirmed its costing, so a filled, unfinalized row is red. */
-type Status = 'not_started' | 'in_progress' | 'finalized' | 'no_cost'
+type Status = 'not_started' | 'in_progress' | 'finalized' | 'no_cost' | 'not_owed'
 const STATUS: Record<Status, { label: string; cls: string }> = {
+  not_owed: { label: 'Owes no costing', cls: 'bg-slate-700 text-slate-300' },
   not_started: { label: 'Not started', cls: 'bg-slate-700 text-slate-300' },
   in_progress: { label: 'Not finalized', cls: 'bg-red-900/70 text-red-100' },
   finalized: { label: 'Finalized', cls: 'bg-emerald-900/70 text-emerald-200' },
@@ -239,7 +240,23 @@ export default function PmCostingOverview({
   const waits: SupplierWait[] = (change.open_supplier_waits ?? []).filter((w) => w.is_open && w.phase !== 'implementation')
   const labelOf = (pid?: number | null) => positions.find((p) => p.id === pid)?.label
 
-  const rows = departmentIds.map((id, i) => {
+  // Christoph 2026-11-09 (CR-2026-0033): a department that owes no costing but
+  // booked assessment hours (APQP 200 USD) is in the summation and the offer,
+  // so it is in this table and its total too. Listed after the owing ones.
+  const owed = new Set(departmentIds)
+  const hasCost = (id: number) => {
+    const d = summation?.by_department.find((x) => x.department_id === id)
+    const sum = d ? Math.abs(d.one_time_internal) + Math.abs(d.lifecycle_internal)
+      + Math.abs(d.one_time_external) + Math.abs(d.lifecycle_external) : 0
+    return sum >= 0.005 || positions.some((p) => p.department_id === id)
+  }
+  const extraIds = [...new Set([
+    ...(summation?.by_department ?? []).map((d) => d.department_id),
+    ...positions.map((p) => p.department_id),
+  ])].filter((id): id is number => id != null && !owed.has(id) && hasCost(id))
+  const allIds = [...departmentIds, ...extraIds]
+
+  const rows = allIds.map((id, i) => {
     const lines = positions.filter((p) => p.department_id === id)
     const dep = summation?.by_department.find((d) => d.department_id === id)
     const pos = summation?.positions_by_department?.find((d) => d.department_id === id)
@@ -248,10 +265,10 @@ export default function PmCostingOverview({
     const ext = externalOf(lines.filter((p) => !p.currency || !cur || p.currency === cur))
     const lead = summation?.lead_time_by_department?.find((d) => d.department_id === id)?.lead_time_days ?? null
     const noCost = change.costing_no_cost?.[String(id)]
-    const status: Status = finalized.has(id) ? (noCost ? 'no_cost' : 'finalized')
+    const status: Status = !owed.has(id) ? 'not_owed' : finalized.has(id) ? (noCost ? 'no_cost' : 'finalized')
       : lines.length > 0 || (internal ?? 0) !== 0 ? 'in_progress' : 'not_started'
     const a = change.assessments.find((x) => x.department_id === id)
-    const items: CheckItem[] = finalized.has(id) ? [] : ((checks[i]?.data?.items as CheckItem[] | undefined) ?? [])
+    const items: CheckItem[] = finalized.has(id) || !owed.has(id) ? [] : ((checks[i]?.data?.items as CheckItem[] | undefined) ?? [])
     // waits come from the change's own list (expected date, overdue); the
     // check's "waiting" item says the same, so it is left out here
     const blockers = items.filter((x) => !x.info && x.tag !== 'waiting')
@@ -272,6 +289,7 @@ export default function PmCostingOverview({
   const leadMax = summation?.max_lead_time_days ?? Math.max(0, ...rows.map((r) => r.lead ?? 0))
   const longest = rows.filter((r) => r.lead != null && r.lead === leadMax && leadMax > 0)
   const done = rows.filter((r) => r.status === 'finalized' || r.status === 'no_cost').length
+  const owing = rows.filter((r) => r.status !== 'not_owed').length
   const openPoints = rows.reduce((s, r) => s + r.blockers.length + r.deptWaits.filter((w) => w.overdue).length, 0)
 
   const th = 'px-2 py-1.5 text-left text-[11px] font-normal uppercase tracking-wide text-slate-500'
@@ -288,7 +306,7 @@ export default function PmCostingOverview({
           </span>
         )}
         <span className="text-xs text-slate-400" data-testid="pm-overview-progress">
-          {done} of {rows.length} finalized
+          {done} of {owing} finalized
           {openPoints > 0 && <> · <span className="text-amber-300">{openPoints} open point{openPoints === 1 ? '' : 's'}</span></>}
         </span>
       </header>
@@ -310,7 +328,7 @@ export default function PmCostingOverview({
             {rows.map((r) => {
               const open = !closed.has(r.id)
               const who = r.a?.owner_name ?? r.a?.responsible_name ?? null
-              const due = r.status === 'finalized' || r.status === 'no_cost' ? null : r.a?.due_date ?? null
+              const due = r.status === 'finalized' || r.status === 'no_cost' || r.status === 'not_owed' ? null : r.a?.due_date ?? null
               return (
                 <Fragment key={r.id}>
                   <tr data-testid={`pm-row-${r.id}`} className="border-t border-slate-800">
@@ -334,6 +352,9 @@ export default function PmCostingOverview({
                       </span>
                       {r.status === 'in_progress' && (
                         <span className="mt-0.5 block text-[11px] text-red-300">department not confirmed done</span>
+                      )}
+                      {r.status === 'not_owed' && (
+                        <span className="mt-0.5 block text-[11px] text-slate-400">booked hours count</span>
                       )}
                       {r.status === 'no_cost' && (
                         <span className="ml-1 text-[11px] text-slate-400">{noCostWords(r.noCost)}</span>

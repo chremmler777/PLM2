@@ -233,3 +233,26 @@ describe('Offer sent (Christoph 2026-11-09)', () => {
     expect(screen.queryByTestId('pm-overview-offer-sent')).toBeNull()
   })
 })
+
+describe('A department that owes no costing but booked hours (Christoph 2026-11-09, CR-2026-0033)', () => {
+  it('APQP 200 USD booked assessment hours: own row, counted in the total like the offer', async () => {
+    const withApqp = {
+      ...(summation as object),
+      by_department: [...(summation as { by_department: object[] }).by_department,
+        { department_id: 5, one_time_internal: 200, one_time_external: 0, lifecycle_internal: 0, lifecycle_external: 0 },
+        { department_id: 6, one_time_internal: 0, one_time_external: 0, lifecycle_internal: 0, lifecycle_external: 0 }],
+    } as never
+    show({ summation: withApqp, deptName: (id: number) => ({ ...NAMES, 5: 'APQP', 6: 'Logistics' } as Record<number, string>)[id] })
+    const row = await screen.findByTestId('pm-row-5')
+    expect(within(row).getByText('APQP')).toBeTruthy()
+    expect(screen.getByTestId('pm-status-5').textContent).toBe('Owes no costing')
+    expect(screen.getByTestId('pm-internal-5').textContent).toMatch(/200\.00 USD/)
+    expect(screen.getByTestId('pm-total-internal').textContent).toMatch(/900\.00 USD/)
+    expect(screen.getByTestId('pm-total-row').textContent).toMatch(/Total \(4 departments\)/)
+    // a department without any cost stays out; progress counts only the owing ones
+    expect(screen.queryByTestId('pm-row-6')).toBeNull()
+    expect(screen.getByTestId('pm-overview-progress').textContent).toMatch(/1 of 3 finalized/)
+    // its finalize-check is not asked for (owes nothing)
+    await waitFor(() => expect(changesApi.finalizeCheck).toHaveBeenCalledTimes(2))
+  })
+})
