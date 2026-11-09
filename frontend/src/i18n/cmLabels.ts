@@ -1580,6 +1580,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'attach.infoResponse': { de: 'Antwort', en: 'Response' },
   'attach.rejectionLetter': { de: 'Absageschreiben', en: 'Rejection letter' },
   'attach.rfq': { de: 'RFQ', en: 'RFQ' },
+  'attach.vendorQuote': { de: 'Lieferantenangebot', en: 'Supplier quote' },
+  'attach.customerFileChip': { de: 'Kundendatei', en: 'Customer file' },
   'attach.rfqSlot': {
     de: 'RFQ hochladen: Kosten & Timing beim Lieferanten anfragen',
     en: 'Upload RFQ: request costs & timing from supplier',

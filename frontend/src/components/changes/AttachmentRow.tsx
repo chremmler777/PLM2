@@ -19,6 +19,8 @@ const KIND_LABEL: Record<string, string> = {
   rfq: 'attach.rfq',
   change_ppt: 'bucket.changePpt',
   customer_email: 'attach.customerEmail',
+  vendor_quote: 'attach.vendorQuote',
+  customer_file: 'attach.customerFileChip',
 }
 
 const KIND_STYLE: Record<string, string> = {
@@ -28,6 +30,8 @@ const KIND_STYLE: Record<string, string> = {
   rfq: 'bg-violet-900/70 text-violet-200',
   change_ppt: 'bg-sky-900/70 text-sky-200',
   customer_email: 'bg-teal-900/70 text-teal-200',
+  vendor_quote: 'bg-slate-700 text-slate-100',
+  customer_file: 'bg-teal-900/70 text-teal-200',
 }
 
 export function KindChip({ kind }: { kind?: string | null }) {
@@ -42,7 +46,7 @@ export function KindChip({ kind }: { kind?: string | null }) {
   )
 }
 
-export function AttachmentRow({ changeId, attachment: a, onDelete, confirm = false, tag }: {
+export function AttachmentRow({ changeId, attachment: a, onDelete, confirm = false, tag, origin }: {
   changeId: number
   attachment: Attachment
   /** Omitted where the file may not be deleted (frozen baseline, read-only view). */
@@ -51,6 +55,8 @@ export function AttachmentRow({ changeId, attachment: a, onDelete, confirm = fal
   confirm?: boolean
   /** What the file belongs to, as a chip (e.g. "Case 1 · Re-cut insert LH"). */
   tag?: string
+  /** Christoph 2026-11-09: where the file comes from (department · what it is for). */
+  origin?: { department?: string | null; what?: string | null }
 }) {
   const [asking, setAsking] = useState(false)
   return (
@@ -94,6 +100,15 @@ export function AttachmentRow({ changeId, attachment: a, onDelete, confirm = fal
             </span>
           )}
         </span>
+        {origin && (origin.department || origin.what) && (
+          <span data-testid={`attach-origin-${a.id}`} className="block text-xs text-slate-300">
+            {origin.department && (
+              <span className="mr-1.5 inline-flex items-center rounded border border-slate-600 px-1 py-px text-[11px] font-medium text-slate-100">
+                {origin.department}</span>
+            )}
+            {origin.what}
+          </span>
+        )}
         {/* Who put it there and when — the provenance every file list owes. */}
         <UploadedBy name={a.uploaded_by_name} at={a.created_at} className="block" />
       </span>

@@ -286,6 +286,7 @@ class AttachmentResponse(BaseModel):
     concern_id: Optional[int] = None
     assessment_id: Optional[int] = None
     case_ref: Optional[str] = None
+    costing_offer_id: Optional[int] = None
     validation_issue_id: Optional[int] = None
     created_at: datetime
     uploaded_by: int

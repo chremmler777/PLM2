@@ -7,7 +7,8 @@
  * server rejects their deletion — so the UI hides their delete control too.
  * Later documents land in the "after scoping" list and stay editable.
  */
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useDepartments } from '../../hooks/queries/useWorkflows'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { apiErrorMessage } from '../../lib/apiError'
@@ -39,6 +40,61 @@ export default function ChangeAttachments({ change, readOnly = false, mayDelete 
     }
   }
 
+  // Christoph 2026-11-09: every later file says which department it is from
+  // and what it is for (case, supplier quote of which line, answer to what)
+  const { data: depts = [] } = useDepartments()
+  const { data: positions = [] } = useQuery({
+    queryKey: ['costing-positions', change.id],
+    queryFn: () => changesApi.listCostPositions(change.id),
+  })
+  const { data: concerns = [] } = useQuery({
+    queryKey: ['change', change.id, 'concerns'],
+    queryFn: () => changesApi.listConcerns(change.id),
+  })
+  const deptName = (id?: number | null) =>
+    (depts as { id: number; name: string }[]).find((d) => d.id === id)?.name ?? null
+  const caseText = (ref: string): string | null => {
+    for (const a of change.assessments ?? []) {
+      let det: Record<string, unknown> = {}
+      try { det = typeof a.details === 'string' ? JSON.parse(a.details) : (a.details ?? {}) } catch { det = {} }
+      for (const i of (det.impacts as { cases?: (string | { id: string; text: string })[] }[] | undefined) ?? []) {
+        for (const c of i.cases ?? []) if (typeof c !== 'string' && c.id === ref) return c.text
+      }
+    }
+    return null
+  }
+  const plain = (l: string) => l.replace(/^Spare part: /, '')
+  const originOf = (a: Attachment): { department?: string | null; what?: string | null } | undefined => {
+    if (a.costing_offer_id != null) {
+      for (const p of positions) {
+        const o = (p.offers ?? []).find((x) => x.id === a.costing_offer_id)
+        if (o) {
+          const spare = /spare part/i.test(`${p.notes ?? ''} ${p.label}`)
+          return { department: deptName(p.department_id),
+            what: `Costing: ${o.vendor_name} quote for ${spare ? 'spare part ' : ''}"${plain(p.label)}"` }
+        }
+      }
+      return { what: 'Costing: supplier quote' }
+    }
+    const asm = (change.assessments ?? []).find((x) => x.id === a.assessment_id)
+    const dep = asm ? deptName(asm.department_id) : null
+    if (a.case_ref) {
+      const txt = caseText(a.case_ref)
+      return { department: dep, what: `Assessment${txt ? `, case "${txt}"` : ''}` }
+    }
+    if (asm) return { department: dep, what: 'Assessment evidence' }
+    if (a.concern_id != null) {
+      const c = (concerns as { id: number; note: string; asking_department_name?: string | null;
+        department_id?: number | null }[]).find((x) => x.id === a.concern_id)
+      const q = c ? `"${c.note.slice(0, 60)}${c.note.length > 60 ? '…' : ''}"` : ''
+      return { department: c?.asking_department_name ?? deptName(c?.department_id),
+        what: a.kind === 'info_response' ? `Answer to the question ${q}` : `Question ${q}` }
+    }
+    if (a.kind === 'info_response') return { what: 'Answer to a question' }
+    if (a.kind === 'info_request') return { what: 'Question asked' }
+    return undefined
+  }
+
   const baseline = change.attachments.filter((a) => a.phase !== 'post_scoping')
   const post = change.attachments.filter((a) => a.phase === 'post_scoping')
   // Baseline docs are only deletable while the change is still in scoping.
@@ -53,6 +109,7 @@ export default function ChangeAttachments({ change, readOnly = false, mayDelete 
           onDelete={deletable && mayDelete(b.request) ? del : undefined} />
       ) : (
         <AttachmentRow key={b.plain!.id} changeId={change.id} attachment={b.plain!}
+          origin={originOf(b.plain!)}
           onDelete={deletable && mayDelete(b.plain!) ? del : undefined} />
       ))
 
