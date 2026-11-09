@@ -120,9 +120,9 @@ async def test_last_finalize_moves_the_change_to_quote_creation(
 
 async def test_one_open_row_of_a_later_stage_holds_the_move(
         client, admin_auth, session_factory, seed):
-    # Development consulted in stage 2 has not answered yet
+    # Development responsible in stage 2 has not answered yet
     ids = await _make(session_factory, seed,
-                      extra_rows=[("Development", 2, "C", False)])
+                      extra_rows=[("Development", 2, "R", False)])
     await _finalize_tool(client, session_factory, seed, ids, "auto-tool2@test.io")
     assert await _status(session_factory, ids["change_id"]) == "costing"
     st = (await client.get(f"/api/v1/changes/{ids['change_id']}/stage-state",
@@ -288,3 +288,12 @@ async def test_pm_costing_counts_in_x_of_y_without_a_counted_row(
     assert [(o["department_name"], o["open"]) for o in st["open"]] == [
         ("Project Manager", "costing")]
     assert st["ready"] is False and st["done"] == st["total"] - 1
+
+
+async def test_a_consulted_row_does_not_hold_the_move(client, session_factory, seed):
+    """2026-11-09 night (CR-33): Development C on stage 2 gets no task, so it
+    cannot hold Quote creation."""
+    ids = await _make(session_factory, seed,
+                      extra_rows=[("Development", 2, "C", False)])
+    await _finalize_tool(client, session_factory, seed, ids, "auto-tool10@test.io")
+    assert await _status(session_factory, ids["change_id"]) == "quoting"

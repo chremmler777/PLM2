@@ -15,7 +15,8 @@ act completed it:
    no open check item, no HARD rule). Entering costing wakes the later
    routing stages (Summation & Budget), exactly as the manual close did.
 2. costing -> quoting (customer changes only) once EVERY department with an
-   assessment row on the change has submitted it (all stages, R/A/S/C, PM,
+   assessment row on the change has submitted it (all stages, R/A rows; C/S
+   rows gate nothing and get no task, 2026-11-09 night; PM,
    Sales and consulted rows included; waived rows count as done) and every
    department that owes a costing input finalized it or said "no cost", and
    the hop is free of every guard (C5 costing not finalized, open index
@@ -89,7 +90,14 @@ async def counted_rows(session: AsyncSession, change: ChangeRequest) -> list:
     pm_skip = await _stage_orders(session, change, PM_REVIEW_STAGE_NAMES)
     pm_id = (await session.execute(select(Department.id).where(
         Department.name == PM_DEPARTMENT))).scalar_one_or_none()
+    # 2026-11-09 night: only R/A rows owe a submit. A Consulted/Support row
+    # (Development / Tool Engineer C on 'Summation & Budget') gets no task
+    # (my-tasks and 'Your actions' skip it: it "gates nothing"), so counting
+    # it held CR-33 in costing with nobody told; Christoph's words: "when all
+    # responsible departments finished costing".
+    from app.models.change import BLOCKING_LETTERS
     return [a for a in change.assessments if a.stage_order not in skip
+            and a.rasic_letter in BLOCKING_LETTERS
             and not (a.department_id == pm_id and a.stage_order in pm_skip)]
 
 
