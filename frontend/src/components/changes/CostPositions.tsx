@@ -494,8 +494,7 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged, e
   const th = 'px-2 py-1 text-left text-[11px] font-medium uppercase tracking-wide text-slate-500'
   const td = 'px-2 py-1 text-xs align-middle'
   return (
-    <div className={`mt-1 rounded-lg border p-2 ${lineMissing
-      ? 'border-red-600/80 bg-red-950/20 ring-1 ring-red-700/40' : 'border-slate-600 bg-slate-800/60'}`}
+    <div className="mt-1 rounded-lg border border-slate-600 bg-slate-800/60 p-2"
       data-missing={lineMissing ? 'yes' : 'no'}>
     <p className="mb-1 text-xs font-semibold text-slate-200">
       <span className={`mr-2 rounded px-1.5 text-[11px] font-semibold ${estimate
@@ -660,6 +659,9 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
     onError: (e: unknown) => toastError(e, 'Could not save the quote'),
   })
   const files = o.attachments ?? []
+  // Christoph 2026-11-08: only the row that misses something is red
+  const refThin = (o.quote_ref ?? '').trim().length < 5
+  const rowMissing = files.length === 0 || (!!o.favorite && refThin)
   const f = `${fieldCls} tabular-nums text-right`
   const [askDel, setAskDel] = useState(false)
   const delOffer = useMutation({
@@ -669,14 +671,17 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
   })
   return (
     <>
-    <tr data-testid={`supplier-line-${positionId}-${o.vendor_name}`} className="border-t border-slate-700/60">
+    <tr data-testid={`supplier-line-${positionId}-${o.vendor_name}`}
+      data-missing={rowMissing ? 'yes' : 'no'}
+      className={`border-t border-slate-700/60 ${rowMissing ? 'bg-red-950/40 outline outline-1 outline-red-700/70' : ''}`}>
       <td className={`${td} font-medium text-slate-100`}>{o.vendor_name}</td>
       <td className={td}>
         {(o.attachments ?? []).length > 0
           ? <span className="rounded bg-emerald-900/70 px-1.5 text-[11px] font-semibold text-emerald-100">{t('wait.sup.badge.received')}</span>
           : <span className="rounded bg-red-800 px-1.5 text-[11px] font-semibold text-red-100">{t('costpos.openNoFile')}</span>}
         {editable ? <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={t('costpos.shopRef')}
-          aria-label={t('costpos.shopRef')} className={`${fieldCls} mt-0.5 block w-full`} />
+          aria-label={t('costpos.shopRef')} title={t('costpos.refMin')}
+          className={`${fieldCls} mt-0.5 block w-full ${ref.trim().length < 5 ? 'border-red-600' : ''}`} />
           : (o.quote_ref ? <span className="ml-1 text-slate-400">#{o.quote_ref}</span> : null)}
       </td>
       <td className={td}>
@@ -845,8 +850,9 @@ function CaseDocs({ changeId, position: p }: { changeId: number; position: CostP
         {t(kind === 'internal' ? 'costpos.caseDocsInternal' : 'costpos.caseDocsExternal')}</span>
       {docs.map((d) => (
         <span key={d.id} className="block">
-          <span className="mr-1 rounded bg-slate-700 px-1 text-[10px] text-slate-200">
-            {d.kind === 'rfq' ? 'RFQ' : 'PPT'}</span>
+          <span className={`mr-1 rounded px-1 text-[10px] font-semibold ${d.kind === 'rfq'
+            ? 'bg-violet-800 text-violet-100' : 'bg-sky-800 text-sky-100'}`}>
+            {d.kind === 'rfq' ? t('costpos.docRfq') : t('costpos.docPpt')}</span>
           <DownloadIcons changeId={changeId} attachments={[d]} />
         </span>
       ))}
