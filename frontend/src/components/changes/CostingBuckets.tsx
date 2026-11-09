@@ -283,7 +283,10 @@ export default function CostingBuckets({
       {visible.map((a) => {
         const id = a.department_id
         const isMine = myDepartmentIds.includes(id)
-        const expanded = openDept === id
+        // Christoph 2026-11-08: a department's own costing is always open for
+        // its people (no fold); the overview roles fold as before
+        const ownBucket = myDepartmentIds.includes(id)
+        const expanded = ownBucket || openDept === id
         const total = deptTotal(id)
         const filled = deptCosted(id)
         // Entered, but no cost sheet rate: not "Empty" (the department did
@@ -300,7 +303,7 @@ export default function CostingBuckets({
               expanded ? 'bg-slate-800' : 'bg-slate-800/50'}`}>
             <button type="button" data-testid={`costing-toggle-${id}`}
               aria-expanded={expanded}
-              onClick={() => setOpenDept(expanded ? null : id)}
+              onClick={() => { if (!ownBucket) setOpenDept(expanded ? null : id) }}
               className="w-full flex items-center gap-3 px-3 py-2 text-left">
               <span aria-hidden="true" className="text-slate-500 w-3.5 flex-shrink-0">
                 {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
