@@ -36,7 +36,7 @@ from datetime import datetime
 import json
 from typing import Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import ChangeAssessment, ChangeRequest
@@ -699,10 +699,22 @@ async def no_cost(session: AsyncSession, change: ChangeRequest, department_id: i
         raise EarlyCostingError(
             f"{who.full_name if who else 'A colleague'} has an open supplier "
             f"quote ({waits.line(w)}): close it first")
+    # 2026-11-09 night: the standing rows are no cost lines. 'Assessment
+    # effort' / 'Costing effort' are the booked hours (booking is mandatory,
+    # so every department has one) and a 0 h support line is the 'no support'
+    # answer; refusing on them made 'No cost' unreachable ("Alexa has a cost
+    # position 'Internal effort: time spent on assessment'"). The booked
+    # hours stay on the change as time spent.
+    from app.services.hours_service import HoursService
     pos = (await session.execute(
         select(CostingPosition).where(
             CostingPosition.change_id == change.id,
-            CostingPosition.department_id == department_id)
+            CostingPosition.department_id == department_id,
+            CostingPosition.kind != "internal_effort",
+            ~and_(CostingPosition.kind == "own_time",
+                  func.coalesce(CostingPosition.notes, "") == HoursService.FROM_BOOKINGS),
+            ~and_(CostingPosition.kind == "support_effort",
+                  func.coalesce(CostingPosition.hours, 0) == 0))
         .order_by(CostingPosition.id).limit(1))).scalar_one_or_none()
     if pos is not None:
         who = await session.get(User, pos.created_by)

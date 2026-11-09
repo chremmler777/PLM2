@@ -124,6 +124,33 @@ async def test_no_cost_refused_for_others_and_with_a_position(client, ec):
     assert "NC dale has a cost position 'Insert re-cut'" in res.json()["detail"]
 
 
+async def test_no_cost_with_only_the_standing_rows(client, ec, session_factory):
+    """2026-11-09 night: booked hours (Assessment / Costing effort) and a 0 h
+    support line are no cost lines: 'No cost' is reachable; a support line
+    with hours is a cost and refuses it."""
+    from app.models.change_cost import CostingPosition
+    from app.services.hours_service import HoursService
+    async with session_factory() as s:
+        for kind, label, hours, notes in (
+                ("internal_effort", "Internal effort: time spent on assessment (h)", 1.0, None),
+                ("own_time", HoursService.COSTING_EFFORT_LABEL, 0.5, HoursService.FROM_BOOKINGS),
+                ("support_effort", "Implementation support, estimated (h)", 0.0, None)):
+            s.add(CostingPosition(change_id=ec["cid"], department_id=ec["proc"], label=label,
+                                  kind=kind, pricing="estimate", hours=hours, notes=notes,
+                                  created_by=ec["lead_id"]))
+        sup = CostingPosition(change_id=ec["cid"], department_id=ec["shop"], kind="support_effort",
+                              label="Implementation support, estimated (h)", pricing="estimate",
+                              hours=3.0, created_by=ec["dale_id"])
+        s.add(sup)
+        await s.commit()
+    res = await _no_cost(client, ec, ec["proc"], ec["pe"], reason="no_work")
+    assert res.status_code == 200, res.text
+    assert ec["proc"] in res.json()["finalized_department_ids"]
+    # negative: 3 h implementation support is a cost answer
+    res = await _no_cost(client, ec, ec["shop"], ec["dale"], reason="no_work")
+    assert res.status_code == 400 and "Implementation support" in res.json()["detail"]
+
+
 # --- supplier wait ---------------------------------------------------------
 
 async def test_wait_holds_finalize_and_no_cost_and_names_itself(client, ec):
