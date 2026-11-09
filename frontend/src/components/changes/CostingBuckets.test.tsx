@@ -309,7 +309,12 @@ describe('CostingBuckets', () => {
         costing_pending_department_ids: [2], costing_finalized_department_ids: [],
       }) })
       fireEvent.click(screen.getByTestId('costing-toggle-2'))
-      fireEvent.click(await screen.findByTestId('costing-finalize-2'))
+      const btn = await screen.findByTestId('costing-finalize-2') as HTMLButtonElement
+      await waitFor(() => expect(btn.disabled).toBe(false))
+      fireEvent.click(btn)
+      // Christoph 2026-11-08: an inline confirm first, not a modal
+      expect(changesApi.finalizeDepartmentCosting).not.toHaveBeenCalled()
+      fireEvent.click(await screen.findByTestId('costing-finalize-now-2'))
       await waitFor(() => expect(changesApi.finalizeDepartmentCosting).toHaveBeenCalledWith(7, 2))
     })
 

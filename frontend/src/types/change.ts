@@ -245,6 +245,8 @@ export interface ChangeRequest {
   costing_finalized_department_ids?: number[];
   /** C18: departments that said "no cost", with why. */
   costing_no_cost?: Record<string, { reason: NoCostReason; hours?: number }>;
+  /** Christoph 2026-11-08: who finalized each department's costing, and when. */
+  costing_finalized_info?: Record<string, { at?: string | null; by?: number | null; by_name?: string | null }>;
   /** Spec §4: open supplier waits (header "Waiting on FZ since ..."). */
   open_supplier_waits?: SupplierWait[];
   /** Departments with an open assessment concern — their submit is blocked. */
@@ -1078,6 +1080,10 @@ export interface CostingOffer {
   quote_ref?: string | null;
   quoted_on?: string | null;
   valid_until?: string | null;
+  /** The offer's total on its line (backend): amount x price + transport once. */
+  total_cost?: number | null;
+  /** The promise in calendar days (business days scaled 7/5). */
+  lead_time_calendar_days?: number | null;
 }
 
 export interface CostPosition {
@@ -1114,6 +1120,10 @@ export interface CostPosition {
   notes?: string | null;
   /** What the backend counts: the estimate, or the favourite offer's price. */
   effective_cost?: number | null;
+  /** The favourite offer's days (or the line's own), in calendar days. */
+  effective_lead_time_calendar_days?: number | null;
+  /** The offer the line is priced from (favourite, or the only one). */
+  favorite_offer_id?: number | null;
   /** The summed partial quotes on a quoted line. */
   parts_cost?: number;
   offers: CostingOffer[];

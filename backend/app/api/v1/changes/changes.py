@@ -1054,6 +1054,25 @@ async def get_change(
     change.costing_owed_department_ids = _ec["owed"]
     change.costing_finalized_department_ids = _ec["finalized"]
     change.costing_no_cost = {str(k): v for k, v in _ec["no_cost"].items()}
+    # Christoph 2026-11-08: who finalized each department's costing and when,
+    # for the PM overview's "Finalized by <name>, <date>"
+    _fin: dict[str, dict] = {}
+    _by_ids: set[int] = set()
+    for _did in _ec["finalized"]:
+        _row = early_costing.finalized_row(change, _did)
+        if _row is None:
+            continue
+        _d = _row.details_dict
+        _uid = _d.get("costing_finalized_by")
+        _fin[str(_did)] = {"at": _d.get("costing_finalized_at"), "by": _uid}
+        if isinstance(_uid, int):
+            _by_ids.add(_uid)
+    if _by_ids:
+        _names = dict((await db.execute(
+            select(User.id, User.full_name).where(User.id.in_(_by_ids)))).all())
+        for _v in _fin.values():
+            _v["by_name"] = _names.get(_v["by"])
+    change.costing_finalized_info = _fin
     # spec §0/§4: the header's "Waiting on <vendor> since <date>": the
     # waits of the phase the change is in (a costing wait left open says
     # nothing once costing closed; it shows again if costing reopens)

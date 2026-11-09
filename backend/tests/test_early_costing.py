@@ -168,6 +168,9 @@ async def test_finalized_departments_stay_finalized_into_costing(
     # every department that owes has finalized: costing is complete at once
     assert detail["costing_pending_department_ids"] == []
     assert detail["costing_finalized_department_ids"] == [early["tool"]]
+    # Christoph 2026-11-08: who finalized, and when, for the PM overview
+    info = detail["costing_finalized_info"][str(early["tool"])]
+    assert info["at"] and info["by_name"]
     from app.services.change_service import ChangeService
     async with session_factory() as s:
         change = await ChangeService.get_change(s, early["change_id"])

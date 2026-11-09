@@ -448,6 +448,8 @@ class ChangeResponse(BaseModel):
     costing_finalized_department_ids: List[int] = []
     # C18: {department id: {"reason": no_work | absorbed | supplier, "hours"}}
     costing_no_cost: dict = {}
+    # Christoph 2026-11-08: {department id: {"at", "by", "by_name"}}
+    costing_finalized_info: dict = {}
     # spec §4: open supplier waits (vendor, asked on, expected by, chip)
     open_supplier_waits: List[dict] = []
     # Departments with costing lines the cost sheet cannot price (no rate):

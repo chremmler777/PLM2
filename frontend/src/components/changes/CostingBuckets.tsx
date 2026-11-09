@@ -28,22 +28,39 @@ import {
   NoCostButton, SupplierWaitDecisions, SupplierWaitPanel, noCostWords,
 } from './costing/NoCostAndWaits'
 import PlantNotInUseNote from '../common/PlantNotInUseNote'
+import PmCostingOverview from './costing/PmCostingOverview'
 import { t } from '../../i18n/cmLabels'
-import { formatDays, formatMoney, formatNumber } from '../../lib/format'
+import { formatDate, formatDays, formatMoney, formatNumber } from '../../lib/format'
 import type { ChangeDetail, DeptRollup, Summation } from '../../types/change'
 
 /** Finalize / reopen the department's own costing (the backend refuses a
- *  finalize with nothing entered: a zero line is an answer, nothing is not). */
+ *  finalize with nothing entered: a zero line is an answer, nothing is not).
+ *
+ *  Christoph 2026-11-08: Finalize is THE step that tells the PM a department
+ *  is done. It sits at the end of the department's lines, large; while
+ *  something is missing it is disabled with the list from finalize-check; once
+ *  nothing is missing it is also pinned at the top. Pressing it asks inline
+ *  (no modal), and afterwards the bar says who finalized, what happens next
+ *  and who may reopen. */
 function FinalizeBar({ changeId, departmentId, finalized, v2 = false, departmentName = '',
-  noCost }: {
+  noCost, placement = 'end', finalizedBy, finalizedAt, pmName }: {
   changeId: number; departmentId: number; finalized: boolean
   /** ASSESSMENT_V2: "<Dept> has no cost" beside Finalize (C18). */
   v2?: boolean
   departmentName?: string
   /** The department's "no cost" answer, when that is how it finalized. */
   noCost?: string | null
+  /** 'top': only the finalized state, or the call once nothing is missing;
+   *  'end': the full call with what is missing (under the lines). */
+  placement?: 'top' | 'end'
+  finalizedBy?: string | null
+  finalizedAt?: string | null
+  /** The project's PM, named in "what happens next". */
+  pmName?: string | null
 }) {
   const qc = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
+  const [keptWorking, setKeptWorking] = useState(false)
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['change', changeId] })
     qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
@@ -51,10 +68,10 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
   }
   const finalize = useMutation({
     mutationFn: () => changesApi.finalizeDepartmentCosting(changeId, departmentId),
-    onSuccess: () => { toast.success(t('costing.finalizedSaved')); refresh() },
+    onSuccess: () => { toast.success(t('costing.finalizedSaved')); setConfirming(false); refresh() },
     onError: (e: unknown) => toastError(e, 'Could not finalize the costing'),
   })
-  const { data: check } = useQuery({
+  const { data: check, isFetched } = useQuery({
     queryKey: ['change', changeId, 'finalize-check', departmentId],
     queryFn: () => changesApi.finalizeCheck(changeId, departmentId),
     enabled: !finalized,
@@ -62,7 +79,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
   const reasons = finalized ? [] : (check?.reasons ?? [])
   const reopen = useMutation({
     mutationFn: () => changesApi.reopenDepartmentCosting(changeId, departmentId),
-    onSuccess: () => { toast.success(t('costing.reopenInputSaved')); refresh() },
+    onSuccess: () => { toast.success(t('costing.reopenInputSaved')); setKeptWorking(false); refresh() },
     onError: (e: unknown) => toastError(e, 'Could not reopen the costing'),
   })
   const TAG_STYLE: Record<string, string> = {
@@ -76,12 +93,64 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
   const items: { tag: string; text: string; info?: boolean }[] = check?.items ?? reasons.map((r) => ({ tag: 'other', text: r }))
   const blocking = items.filter((i) => !i.info)
   const infoItems = items.filter((i) => i.info)
+  const ready = !finalized && isFetched && reasons.length === 0
+  const dept = departmentName || 'this department'
+
+  if (finalized) {
+    // the finalized state lives at the top of the bucket, once
+    if (placement !== 'top') return null
+    return (
+      <div data-testid={`costing-finalize-bar-${departmentId}`}
+        className="rounded border border-emerald-800/70 bg-emerald-950/20 px-3 py-2 text-xs text-slate-300">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium text-emerald-200" data-testid={`costing-finalized-by-${departmentId}`}>
+              {noCost ? t('nocost.finalized').replace('{x}', noCost) : t('costing.finalized')}
+              {finalizedBy ? ` by ${finalizedBy}` : ''}{finalizedAt ? `, ${formatDate(finalizedAt)}` : ''}
+            </p>
+            <p data-testid={`costing-next-${departmentId}`}>
+              Next: {pmName ? `the PM (${pmName})` : 'the PM'} sees {dept} as done and prepares the
+              offer once every department is finalized.
+            </p>
+            <p className="text-slate-400">
+              To change a line, reopen: a member of {dept}, Project Management or an admin can, while costing is open.
+            </p>
+          </div>
+          <button type="button" data-testid={`costing-reopen-${departmentId}`}
+            disabled={reopen.isPending} onClick={() => reopen.mutate()}
+            className={btnSm.secondary}>
+            {t('costing.reopenInput')}
+          </button>
+        </div>
+      </div>
+    )
+  }
+  // at the top only once nothing is missing: the call, pinned
+  if (placement === 'top' && !ready) return null
+
+  const confirmPanel = confirming && (
+    <div role="group" aria-label="Confirm finalize" data-testid={`costing-finalize-confirm-${departmentId}`}
+      className="mx-3 mb-3 rounded border border-slate-500 bg-slate-800 px-3 py-2 text-sm text-slate-100">
+      <p>Finalize costing for {dept}? You can&apos;t change your lines afterwards; the PM takes over (offer).</p>
+      <div className="mt-2 flex gap-2">
+        <button type="button" data-testid={`costing-finalize-now-${departmentId}`}
+          disabled={finalize.isPending} onClick={() => finalize.mutate()} className={btnSm.primary}>
+          Finalize now
+        </button>
+        <button type="button" data-testid={`costing-keep-working-${departmentId}`}
+          onClick={() => { setConfirming(false); setKeptWorking(true) }} className={btnSm.secondary}>
+          Keep working
+        </button>
+      </div>
+    </div>
+  )
+
   return (
-    <div data-testid={`costing-finalize-bar-${departmentId}`}
-      className="rounded border border-slate-700 bg-slate-900/40 text-xs text-slate-300">
+    <div data-testid={placement === 'top' ? `costing-finalize-top-${departmentId}` : `costing-finalize-bar-${departmentId}`}
+      className="rounded border border-slate-600 bg-slate-900/60 text-xs text-slate-300">
       {/* Christoph 2026-11-08: one container of line items, a coloured banner each */}
       {/* Christoph 2026-11-08: same look as the assessment's open points */}
-      {!finalized && blocking.length > 0 && (
+      {placement === 'end' && blocking.length > 0 && (
         <div className="m-2 rounded border border-red-700/60 bg-red-950/20 px-2 py-1.5"
           data-testid={`costing-why-not-${departmentId}`}>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-red-300">
@@ -94,7 +163,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
           </ul>
         </div>
       )}
-      {!finalized && infoItems.length > 0 && (
+      {placement === 'end' && infoItems.length > 0 && (
         <div className="mx-2 mb-2 rounded border border-slate-700 bg-slate-900/40 px-2 py-1.5">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{t('costing.quoteStatus')}</p>
           <ul className="mt-0.5 space-y-0.5 text-xs text-slate-300">
@@ -105,29 +174,32 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
           </ul>
         </div>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-        <span className="flex items-center gap-2">
-          {finalized
-            ? (noCost ? t('nocost.finalized').replace('{x}', noCost) : t('costing.finalizedBody'))
-            : reasons.length ? null : t('costing.finalizeHint')}
-          {!finalized && v2 && (
+      <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
+        <div className="space-y-0.5">
+          <p className="text-sm text-slate-100">
+            {ready
+              ? 'Everything is entered: finalize, the PM then knows your department is done.'
+              : 'When everything is entered, finalize: the PM then knows your department is done.'}
+          </p>
+          {keptWorking && (
+            <p className="text-amber-300" data-testid={`costing-kept-working-${departmentId}`}>
+              Not finalized: the PM sees your department as open.
+            </p>
+          )}
+          {v2 && placement === 'end' && (
             <NoCostButton changeId={changeId} departmentId={departmentId} departmentName={departmentName} />
           )}
-        </span>
-        {finalized ? (
-          <button type="button" data-testid={`costing-reopen-${departmentId}`}
-            disabled={reopen.isPending} onClick={() => reopen.mutate()}
-            className={btnSm.secondary}>
-            {t('costing.reopenInput')}
-          </button>
-        ) : (
-          <button type="button" data-testid={`costing-finalize-${departmentId}`}
-            disabled={finalize.isPending || reasons.length > 0} onClick={() => finalize.mutate()}
-            className={btnSm.primary}>
+        </div>
+        {!confirming && (
+          <button type="button" data-testid={placement === 'top' ? `costing-finalize-top-btn-${departmentId}` : `costing-finalize-${departmentId}`}
+            disabled={finalize.isPending || !ready} onClick={() => setConfirming(true)}
+            title={ready ? undefined : `${blocking.length || reasons.length} open point(s) first`}
+            className="rounded-md bg-sky-600 px-5 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400">
             {t('costing.finalize')}
           </button>
         )}
       </div>
+      {confirmPanel}
     </div>
   )
 }
@@ -298,8 +370,37 @@ export default function CostingBuckets({
     : (change.costing_pending_department_ids ?? [])
       .filter((id) => !myDepartmentIds.includes(id)).length
 
+  // Christoph 2026-11-08: the PM's overview names every department that owes
+  // costing (or already finalized it) and jumps to its bucket.
+  const owedRows = rows.filter((r) => !change.costing_owed_department_ids
+    || owesInput(r.department_id) || isFinalized(r.department_id))
+    .map((r) => r.department_id)
+  const jumpTo = (id: number) => {
+    setOpenDept(id)
+    requestAnimationFrame(() => document.getElementById(`costing-dept-${id}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
+
+  // The project's PM, named in a finalized bar's "what happens next".
+  const pmDeptId = departments.find((d) => d.name === 'Project Manager')?.id
+  const pmRow = change.assessments.find((x) => x.department_id === pmDeptId)
+  const pmName = pmRow?.owner_name ?? pmRow?.responsible_name ?? null
+  const finalizeBar = (id: number, placement: 'top' | 'end') => {
+    const info = change.costing_finalized_info?.[String(id)]
+    return (
+      <FinalizeBar changeId={changeId} departmentId={id} finalized={isFinalized(id)}
+        v2={!!change.assessment_v2} departmentName={deptName(id)} placement={placement}
+        noCost={noCostWords(change.costing_no_cost?.[String(id)])}
+        finalizedBy={info?.by_name} finalizedAt={info?.at} pmName={pmName} />
+    )
+  }
+
   return (
     <div className="space-y-2">
+      {canSeeAll && owedRows.length > 0 && (
+        <PmCostingOverview change={change} departmentIds={owedRows} deptName={deptName}
+          summation={summation} isPm={isPm} onJump={jumpTo} />
+      )}
       {sheetBar}
       {/* Mexico (Silao) among the change's plants: not in use yet, said once. */}
       <PlantNotInUseNote plants={plants} />
@@ -342,7 +443,7 @@ export default function CostingBuckets({
         // still fix them, as everywhere in costing.
         const writable = editable && (isPm || !finalized)
         return (
-          <section key={id} data-testid={`costing-bucket-${id}`}
+          <section key={id} id={`costing-dept-${id}`} data-testid={`costing-bucket-${id}`}
             // Christoph 2026-11-08: red goes on the sub-container that misses
             // something (a line, the finalize list), not on the whole bucket
             className={`rounded-lg border ${expanded ? 'border-slate-600' : 'border-slate-700'} ${
@@ -365,9 +466,12 @@ export default function CostingBuckets({
                   finalized ? 'bg-emerald-900/70 text-emerald-200'
                   : noRate ? 'bg-amber-900/70 text-amber-200'
                   : filled === null ? 'bg-slate-700 text-slate-400'
+                  // Christoph 2026-11-08: filled is not done until Finalize
+                  : filled && live && owesInput(id) ? 'bg-red-900/70 text-red-100'
                   : filled ? 'bg-emerald-900/70 text-emerald-200'
                   : 'bg-slate-700 text-slate-300'}`}
-                title={noRate ? t('costing.noRateHint') : filled === null ? t('costing.hiddenHint') : undefined}>
+                title={noRate ? t('costing.noRateHint') : filled === null ? t('costing.hiddenHint')
+                  : filled && live && owesInput(id) ? 'Filled, not finalized: the PM sees the department as open' : undefined}>
                 {finalized ? t('costing.finalized')
                   : noRate ? t('costing.noRate') : filled === null ? t('costing.hidden')
                   : filled ? t('costing.filled') : t('costing.empty')}
@@ -394,11 +498,7 @@ export default function CostingBuckets({
                     {/* What this department books against the change, above the
                         old grid — the grid keeps working, position by position
                         is how departments actually think about it. */}
-                    {editable && owesInput(id) && (
-                      <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized}
-                        v2={!!change.assessment_v2} departmentName={deptName(id)}
-                        noCost={noCostWords(change.costing_no_cost?.[String(id)])} />
-                    )}
+                    {editable && owesInput(id) && finalizeBar(id, 'top')}
                     {change.assessment_v2 && (
                       <SupplierWaitPanel changeId={changeId} departmentId={id}
                         waits={change.open_supplier_waits ?? []}
@@ -437,6 +537,9 @@ export default function CostingBuckets({
                       <LeadTimeField changeId={changeId} departmentId={id}
                         initial={leadTimeOf(id)} />
                     )}
+                    {/* Christoph 2026-11-08: Finalize closes the department's
+                        section, after its lines and total */}
+                    {editable && owesInput(id) && finalizeBar(id, 'end')}
                   </>
                 ) : (
                   <div className="text-sm space-y-3" data-testid={`costing-readonly-${id}`}>
@@ -456,11 +559,7 @@ export default function CostingBuckets({
                         and the lead only read them. */}
                     {/* A3-12 (R24): what the backend lets PM do for any
                         department: finalize, "no cost", supplier waits */}
-                    {editable && isPm && owesInput(id) && (
-                      <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized}
-                        v2={!!change.assessment_v2} departmentName={deptName(id)}
-                        noCost={noCostWords(change.costing_no_cost?.[String(id)])} />
-                    )}
+                    {editable && isPm && owesInput(id) && finalizeBar(id, 'top')}
                     {change.assessment_v2 && isPm && (
                       <SupplierWaitPanel changeId={changeId} departmentId={id}
                         waits={change.open_supplier_waits ?? []}
@@ -471,6 +570,7 @@ export default function CostingBuckets({
                       departmentName={deptName(id)}
                       partWeightG={change.estimated_part_weight_g}
                       editable={editable && isPm} />
+                    {editable && isPm && owesInput(id) && finalizeBar(id, 'end')}
                   </div>
                 )}
               </div>
