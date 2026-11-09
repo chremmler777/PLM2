@@ -434,7 +434,7 @@ export default function ActivityChecklist({
               return (
                 <div className="space-y-1.5" data-testid={`check-cases-${id}`}>
                   {cases.map((c, n) => (
-                    <div key={c.id || n} className="rounded border border-slate-700 bg-slate-900/40 p-1.5 space-y-1"
+                    <div key={n} className="rounded border border-slate-700 bg-slate-900/40 p-1.5 space-y-1"
                       data-testid={`check-case-box-${id}-${n}`}>
                       <div className="flex items-center gap-1">
                         <span className="text-[11px] text-slate-500 w-12 flex-shrink-0">{t('check.case', lang)} {n + 1}</span>
