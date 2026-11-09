@@ -363,7 +363,8 @@ export async function persistLegacy(calls: LegacyCall[], api: LegacyApi, known: 
 export const ECR_KINDS: Record<string, GanttKindStyle> = Object.fromEntries(
   (Object.keys(KIND_LABEL) as (keyof typeof KIND_LABEL)[]).map((k) => [k, {
     label: KIND_LABEL[k], color: KIND_COLOR[k].fill,
-    ...(k === 'buffer' ? { pattern: 'hatch' as const } : {}), ...(k === 'milestone' ? { milestone: true } : {}),
+    // a bank build is an estimate (floats with the PO): hatched like a buffer
+    ...(k === 'buffer' || k === 'bank_build' ? { pattern: 'hatch' as const } : {}), ...(k === 'milestone' ? { milestone: true } : {}),
   }]))
 
 /** One save chain per change plan, shared by every planner instance on the page. */

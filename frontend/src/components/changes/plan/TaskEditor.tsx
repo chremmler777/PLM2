@@ -235,6 +235,12 @@ export default function TaskEditor(p: Props) {
       </header>
 
       <div className="grid gap-4 px-4 py-4 md:grid-cols-2 xl:grid-cols-3">
+        {task.kind === 'bank_build' && (
+          <p className="rounded-md border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200 md:col-span-2 xl:col-span-3"
+            data-testid="te-estimate-note">
+            {task.estimate_note ?? 'Estimate - floats with the PO; PM discusses the bank build when the PO arrives'}
+          </p>
+        )}
         {readOnly && (
           <p className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-xs text-slate-400">
             Read only. Plan editors (PM, Sales, Logistics, change lead) change the plan.

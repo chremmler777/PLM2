@@ -43,6 +43,9 @@ export interface TaskOut {
   source_tag?: string | null
   /** What the block is for the planning rules (backend plan_rules), null = none. */
   rule_role?: string | null
+  /** Bank builds: an estimate that floats with the PO (estimate_note says so). */
+  estimate?: boolean
+  estimate_note?: string | null
   notes: string | null
   slack_days?: number | null
   is_critical?: boolean
@@ -105,6 +108,19 @@ export interface PlanDeadline {
   date: string
 }
 
+export interface PlanTiming {
+  start: string | null
+  /** Exclusive, like end_date. */
+  real_finish: string | null
+  real_days: number
+  real_weeks: number
+  sales_buffer_task_id: number | null
+  sales_buffer_days: number
+  sales_buffer_weeks: number
+  total_days: number
+  total_weeks: number
+}
+
 export interface PlanOut {
   plan: PlanKind
   tasks: TaskOut[]
@@ -121,6 +137,8 @@ export interface PlanOut {
   /** Migration 088: typed links and the plan calendar. Absent on older servers. */
   links?: PlanLink[]
   calendar?: PlanCalendar | null
+  /** Real time vs the Sales buffer (Christoph 2026-11-09); days in the plan's unit. */
+  timing?: PlanTiming
   /** The viewer may shape plans (Sales, PM, Logistics, lead, admin). */
   plan_editor?: boolean
   /** Why the plan may not be reset or deleted now; null = it may. */

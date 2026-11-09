@@ -55,6 +55,9 @@ interface Props {
   onAlign: (a: AlignAction) => void
   groupByLane: boolean
   onGroupByLane: (v: boolean) => void
+  /** The typed timing table above the chart. */
+  showTable?: boolean
+  onShowTable?: (v: boolean) => void
   onImport?: (file: File) => void
   onCalendar?: () => void
   calendarLabel?: string
@@ -102,6 +105,13 @@ export default function PlanToolbar(p: Props) {
           onChange={(e) => p.onGroupByLane(e.target.checked)} />
         Lanes
       </label>
+      {p.onShowTable && (
+        <label className="flex cursor-pointer items-center gap-1.5 px-1 text-xs text-slate-300">
+          <input type="checkbox" className="accent-sky-500" checked={!!p.showTable} data-testid="gantt-table-toggle"
+            onChange={(e) => p.onShowTable?.(e.target.checked)} />
+          Table
+        </label>
+      )}
       {/* Less-used actions in one menu: the toolbar stays on one line. */}
       {(p.onSchedule || p.onCalendar || p.onImport || p.onSeed || p.onOpenWindow || p.onReset) && (
         <Menu label="More" ariaLabel="More plan actions" testId="gantt-more">

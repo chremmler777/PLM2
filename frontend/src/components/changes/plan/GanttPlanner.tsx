@@ -32,6 +32,7 @@ import ConfirmDialog from './ConfirmDialog'
 import DeviationDialog, { type MovedTask } from './DeviationDialog'
 import PlanToolbar, { btn, btnPrimary, type AlignAction } from './GanttToolbar'
 import TaskEditor from './TaskEditor'
+import TimingTable from './TimingTable'
 import ValidationList from './ValidationList'
 import {
   bankBuildChangeSet, bufferChangeSet, ideasFollow, matchSelection, runParallel, snapToLinks, withSuccessorMoves,
@@ -144,6 +145,16 @@ export default function GanttPlanner({
   // Christoph 2026-11-09: reset / delete asked inline; a move a planning rule refuses says why
   const [resetAsk, setResetAsk] = useState<'reset' | 'delete' | null>(null)
   const [ruleBlock, setRuleBlock] = useState<string | null>(null)
+  // Christoph 2026-11-09: timing typed in a table (on by default for the quote plan), remembered per plan
+  const tableKey = `gantt-table-${changeId}-${plan}`
+  const [showTable, setShowTableState] = useState<boolean>(() => {
+    try { const v = localStorage.getItem(tableKey); return v == null ? plan === 'quote' : v === '1' } catch { return plan === 'quote' }
+  })
+  const setShowTable = (v: boolean) => {
+    setShowTableState(v)
+    try { localStorage.setItem(tableKey, v ? '1' : '0') } catch { /* private mode: not remembered */ }
+  }
+  const [bufferDraft, setBufferDraft] = useState<string | null>(null)
   const emptyFile = useRef<HTMLInputElement>(null)
 
   const model = useMemo(() => (data ? planToModel(data) : null), [data])
@@ -409,6 +420,12 @@ export default function GanttPlanner({
       label: 'Replace plan', danger: true, run: go,
     })
   }
+  const saveBuffer = (raw: string) => {
+    setBufferDraft(null)
+    const weeks = Number(raw.replace(',', '.'))
+    if (!Number.isFinite(weeks) || weeks < 0 || weeks === data?.timing?.sales_buffer_weeks) return
+    void runServer(() => planApi.setSalesBuffer(changeId, plan, weeks), `Buffer set to ${weeks} week${weeks === 1 ? '' : 's'}`)
+  }
   const runReset = (what: 'reset' | 'delete') => {
     setResetAsk(null)
     void runServer(() => (what === 'reset' ? planApi.reset(changeId, plan) : planApi.deletePlan(changeId, plan)),
@@ -641,6 +658,7 @@ export default function GanttPlanner({
               : baselineSet && canDates && modern ? scheduleWithReason : undefined}
             selectionCount={selection.length} onAlign={align}
             groupByLane={groupByLane} onGroupByLane={setGroupByLane}
+            showTable={showTable} onShowTable={setShowTable}
             onImport={canStructure && modern ? importFile : undefined}
             onOpenWindow={inWindow ? undefined : openWindow} />
         ) : undefined}
@@ -654,7 +672,28 @@ export default function GanttPlanner({
             {stat('Start', fmtShort(firstDay))}
             {stat('Finish', fmtShort(lastDay))}
             {stat('Duration', `${s.duration_days} ${unitLabel} (${spanWeeks} wk)`)}
-            {stat('Buffer', `${s.buffer_days} d`, s.buffer_days === 0 ? 'text-amber-300' : 'text-slate-100')}
+            {data.timing ? (
+              <>
+                {stat('Real time', `${data.timing.real_weeks} wk (${data.timing.real_days} ${unitLabel})`)}
+                <div className="shrink-0">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-400">Buffer</p>
+                  {canDates && (data.timing.sales_buffer_task_id != null || data.tasks.length > 0) ? (
+                    <span className="inline-flex items-center gap-1 text-sm">
+                      <input aria-label="Buffer at the end, in weeks" data-testid="gantt-sales-buffer" inputMode="decimal"
+                        className="h-6 w-12 rounded border border-slate-600 bg-slate-900 px-1 text-right text-sm tabular-nums text-slate-100"
+                        value={bufferDraft ?? String(data.timing.sales_buffer_weeks)} disabled={busy}
+                        onChange={(e) => setBufferDraft(e.target.value)} onBlur={(e) => saveBuffer(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+                      <span className="text-slate-400">wk</span>
+                    </span>
+                  ) : (
+                    <p className={`whitespace-nowrap text-sm font-medium tabular-nums ${data.timing.sales_buffer_days === 0 ? 'text-amber-300' : 'text-slate-100'}`}>
+                      {data.timing.sales_buffer_weeks} wk</p>
+                  )}
+                </div>
+                {stat('With buffer', `${data.timing.total_weeks} wk`)}
+              </>
+            ) : stat('Buffer', `${s.buffer_days} d`, s.buffer_days === 0 ? 'text-amber-300' : 'text-slate-100')}
             {stat('Ideas', String(s.ideas), s.ideas > 0 ? 'text-amber-300' : 'text-slate-100')}
             {stat('Critical path', `${s.critical_ids.length} task${s.critical_ids.length === 1 ? '' : 's'}`)}
             <div className="ml-auto">
@@ -691,6 +730,12 @@ export default function GanttPlanner({
                 aria-label="Dismiss">Dismiss</button>
             </div>
           )}
+          {showTable && (
+            <div className="mt-2">
+              <TimingTable tasks={buildTree(model.tasks).order} links={model.links} calendar={model.calendar} rowNo={rowNo}
+                canDates={canDates} canLinks={canStructure} onApply={apply} />
+            </div>
+          )}
           {showIssues && (
             <div className="mt-2 border-t border-slate-700 pt-2">
               <ValidationList errors={data.validation.errors} warnings={data.validation.warnings}
@@ -705,6 +750,12 @@ export default function GanttPlanner({
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-slate-400" aria-label="Legend">
               {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-4 rounded bg-slate-400/60" />Baseline</span>}
               {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-3 rounded-sm bg-red-500" />Slip</span>}
+              {data.tasks.some((t) => t.kind === 'bank_build') && (
+                <span className="flex items-center gap-1.5" data-testid="gantt-bank-estimate-note">
+                  <span className="inline-block h-2.5 w-4 rounded-sm border border-dashed border-amber-500 bg-[repeating-linear-gradient(135deg,transparent_0_3px,rgba(245,158,11,0.5)_3px_5px)]" />
+                  Bank build: estimate. It floats with the PO; PM discusses the bank build when the PO arrives.
+                </span>
+              )}
               {canDates && <span>Drag bars to move, their edges to resize, the dots at the ends onto another bar to link. Double-click or Enter opens a task. Ctrl+scroll zooms, Ctrl+Z undoes.</span>}
             </div>
           )}

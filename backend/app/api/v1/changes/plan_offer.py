@@ -23,7 +23,7 @@ from app.services.change_plan_service import (
     ChangePlanService, PlanConflict, PlanForbidden, PlanRuleError,
 )
 from app.services.change_service import ChangeError, ChangeService
-from app.services import plan_rules
+from app.services import plan_quote, plan_rules
 from app.services.offer_service import OfferService
 from app.services.release_service import ReleaseService
 
@@ -277,6 +277,11 @@ async def _plan_out(db, change, plan, user):
         t["source_tag"] = ev["tags"].get(t.get("source_position_id"))
     editor = await ChangePlanService.is_editor(db, change, user)
     out["plan_editor"] = editor
+    # real time vs the Sales buffer (Sales/PM see both, the customer the total)
+    out["timing"] = plan_quote.timing_summary(
+        await ChangePlanService.tasks(db, change, plan),
+        ChangePlanService.calendar(change, plan))
+    plan_quote.mark_estimates(out)
     out["reset_blocked_reason"] = plan_rules.reset_blocked_reason(change, plan, editor)
     return out
 
@@ -350,6 +355,32 @@ async def reset_plan(
     out = await _plan_out(db, change, body.plan, current_user)
     await db.commit()
     return out
+
+
+class SalesBufferIn(BaseModel):
+    plan: str = "quote"
+    weeks: float = Field(ge=0, le=plan_quote.MAX_BUFFER_WEEKS)
+
+
+@router.put("/{change_id}/plan/sales-buffer")
+async def set_sales_buffer(
+    change_id: int, body: SalesBufferIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Christoph 2026-11-09: the ONE buffer at the end of the plan, in weeks
+    (resizes the end buffer block, or adds one after the real work)."""
+    change = await _change(db, change_id, current_user)
+    before = await _rules_before(db, change, body.plan)
+    try:
+        await plan_quote.set_sales_buffer(db, change, body.plan, body.weeks, current_user)
+    except _ERRORS as e:
+        await db.rollback()
+        raise _http(e)
+    await _rules_after(db, change, body.plan, before)
+    moved = ChangePlanService.take_moved(change)
+    out = await _plan_out(db, change, body.plan, current_user)
+    await db.commit()
+    return {**out, "moved_ids": moved}
 
 
 @router.delete("/{change_id}/plan")

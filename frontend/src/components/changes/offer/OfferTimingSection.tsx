@@ -58,6 +58,17 @@ export default function OfferTimingSection({
           <GanttPlanner changeId={changeId} plan="quote" changeNumber={changeNumber} compact={readOnly} />
         </PlanFullscreen>
       </div>
+      {plan?.timing && plan.tasks.length > 0 && (
+        <p className="text-xs text-slate-300" data-testid="offer-timing-split">
+          Real time <span className="font-medium tabular-nums">{plan.timing.real_weeks} wk</span>
+          {' + '}buffer <span className="font-medium tabular-nums">{plan.timing.sales_buffer_weeks} wk</span>
+          {' = '}<span className="font-medium tabular-nums">{plan.timing.total_weeks} wk</span>
+          <span className="text-slate-400"> (the customer sees the timing with the buffer)</span>
+          {plan.tasks.some((t) => t.kind === 'bank_build') && (
+            <span className="block text-amber-300/90">Bank build: estimate. It floats with the PO; PM discusses the bank build when the PO arrives. No fixed bank build dates in the offer.</span>
+          )}
+        </p>
+      )}
       <div ref={planBox} className="-mx-1 overflow-x-auto" data-testid="offer-timing-planner" data-readonly={readOnly || undefined}>
         <GanttPlanner changeId={changeId} plan="quote" changeNumber={changeNumber} compact={readOnly} />
       </div>

@@ -10,7 +10,7 @@ vi.mock('../../../api/changePlan', () => ({
   planApi: {
     get: vi.fn(), seed: vi.fn(), createTask: vi.fn(), patchTask: vi.fn(), bulkPatch: vi.fn(),
     deleteTask: vi.fn(), schedule: vi.fn(), exportXml: vi.fn(), exportCsv: vi.fn(),
-    applyChanges: vi.fn(), importXml: vi.fn(), setCalendar: vi.fn(), reset: vi.fn(), deletePlan: vi.fn(),
+    applyChanges: vi.fn(), importXml: vi.fn(), setCalendar: vi.fn(), reset: vi.fn(), deletePlan: vi.fn(), setSalesBuffer: vi.fn(),
   },
 }))
 vi.mock('../../../hooks/queries/useWorkflows', () => ({
@@ -913,4 +913,27 @@ describe('GanttPlanner (ECR adapter)', () => {
     expect((screen.getByTestId('gantt-delete-plan') as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByTestId('gantt-reset-blocked').textContent).toBe(why)
   })
+
+  it('shows real time and buffer apart, and types the buffer in weeks', async () => {
+    const timing = { start: '2026-10-05', real_finish: '2026-10-27', real_days: 22, real_weeks: 3.1, sales_buffer_task_id: null,
+      sales_buffer_days: 0, sales_buffer_weeks: 0, total_days: 22, total_weeks: 3.1 }
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ timing }))
+    vi.mocked(planApi.setSalesBuffer).mockResolvedValue(modernOut({ timing: { ...timing, sales_buffer_days: 14, sales_buffer_weeks: 2, total_days: 36, total_weeks: 5.1 } }))
+    renderPlanner()
+    const summary = await screen.findByTestId('gantt-summary')
+    expect(summary.textContent).toContain('Real time3.1 wk')
+    expect(summary.textContent).toContain('With buffer3.1 wk')
+    const buf = screen.getByTestId('gantt-sales-buffer')
+    fireEvent.change(buf, { target: { value: '2' } })
+    fireEvent.blur(buf)
+    await waitFor(() => expect(planApi.setSalesBuffer).toHaveBeenCalledWith(7, 'detailed', 2))
+  })
+
+  it('notes that a bank build is an estimate', async () => {
+    const tasks = [...planOut().tasks, task({ id: 4, name: 'Bank build', kind: 'bank_build', lane: 'Logistics', start_date: '2026-09-25', duration_days: 10 })]
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ tasks }))
+    renderPlanner()
+    expect((await screen.findByTestId('gantt-bank-estimate-note')).textContent).toContain('floats with the PO')
+  })
 })
+

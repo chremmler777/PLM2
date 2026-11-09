@@ -57,6 +57,10 @@ export const planApi = {
   deletePlan: (id: number, plan: PlanKind) =>
     client.delete<PlanOut>(base(id), { params: { plan } }).then((r) => r.data),
 
+  /** The ONE buffer at the end of the plan, in weeks (resizes it, or adds it after the real work). */
+  setSalesBuffer: (id: number, plan: PlanKind, weeks: number) =>
+    client.put<PlanOut>(`${base(id)}/sales-buffer`, { plan, weeks }).then((r) => r.data),
+
   createTask: (id: number, body: TaskCreate) =>
     client.post<PlanOut>(`${base(id)}/tasks`, body).then((r) => r.data),
 
