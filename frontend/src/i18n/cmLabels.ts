@@ -703,6 +703,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.tag.favourite': { de: 'FAVORIT WÄHLEN', en: 'PICK FAVOURITE' },
   'wait.sup.badge.not_received': { de: 'NICHT ERHALTEN', en: 'NOT RECEIVED' },
   'wait.sup.reason.not_received': { de: 'nicht erhalten (Kalkulation abgeschlossen)', en: 'not received (costing finalized)' },
+  'costpos.fileFirst': { de: 'Erst die Angebotsdatei anhängen', en: 'Attach the quote file first' },
+  'costpos.openNoFile': { de: 'OFFEN · DATEI FEHLT', en: 'OPEN · FILE MISSING' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

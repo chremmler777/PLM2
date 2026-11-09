@@ -8946,6 +8946,22 @@ class ChangeService:
         )
         session.add(att)
         await session.flush()
+        if kind == "vendor_quote" and costing_offer_id is not None:
+            # Christoph 2026-11-08: the shop's wait closes when its quote is
+            # in WITH the file, not when a price is typed
+            from app.models.change_cost import CostingOffer, CostingPosition
+            from app.services import supplier_wait_service as _sw
+            offer = await session.get(CostingOffer, costing_offer_id)
+            pos = await session.get(CostingPosition, offer.position_id) if offer else None
+            if offer is not None and pos is not None:
+                for w in await _sw.open_waits(session, [change.id], "costing"):
+                    if (w.department_id == pos.department_id
+                            and w.vendor_name.strip().lower() == offer.vendor_name.strip().lower()
+                            and w.position_id in (None, pos.id)):
+                        w.closed_at = datetime.utcnow()
+                        w.closed_by = user_id
+                        w.close_reason = "received"
+                await session.flush()
         await ChangeService.append_changelog(
             session, change, "attachment_added",
             f"Attached {filename} ({phase}, {kind})", user_id,

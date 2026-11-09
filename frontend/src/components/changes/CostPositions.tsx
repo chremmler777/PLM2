@@ -588,7 +588,9 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
   return (
     <tr data-testid={`supplier-line-${positionId}-${o.vendor_name}`} className="border-t border-slate-700/60">
       <td className={`${td} font-medium text-slate-100`}>{o.vendor_name}
-        <span className="ml-1 rounded bg-emerald-900/70 px-1.5 text-[11px] font-semibold text-emerald-100">{t('wait.sup.badge.received')}</span></td>
+        {(o.attachments ?? []).length > 0
+          ? <span className="ml-1 rounded bg-emerald-900/70 px-1.5 text-[11px] font-semibold text-emerald-100">{t('wait.sup.badge.received')}</span>
+          : <span className="ml-1 rounded bg-red-800 px-1.5 text-[11px] font-semibold text-red-100">{t('costpos.openNoFile')}</span>}</td>
       <td className={td}>
         {editable ? <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={t('costpos.shopRef')}
           aria-label={t('costpos.shopRef')} className={`${fieldCls} w-24`} />
@@ -672,8 +674,9 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel }: {
           aria-label={t('costpos.shopRef')} className={`${fieldCls} w-24`} />
       </td>
       <td className={td}>
-        <label className="cursor-pointer rounded border border-slate-600 px-1.5 py-0.5 text-[11px] text-slate-200 hover:bg-slate-700/60">
-          {file ? file.name : t('costpos.shopFile')}
+        <label className={`cursor-pointer rounded border px-1.5 py-0.5 text-[11px] hover:bg-slate-700/60 ${file
+          ? 'border-slate-600 text-slate-200' : 'border-red-600 text-red-200'}`}>
+          {file ? file.name : `${t('costpos.shopFile')} *`}
           <input type="file" className="sr-only" accept=".pdf,.xlsx,.xls,.doc,.docx,.msg,.eml"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </label>
@@ -694,7 +697,9 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel }: {
       </td>
       <td className={`${td} whitespace-nowrap`}>
         <button type="button" className={btnSm.primary} data-testid={`shop-quote-save-${positionId}-${shop}`}
-          disabled={!(Number(cost) > 0) || !(Number(days) >= 1) || save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
+          disabled={!(Number(cost) > 0) || !(Number(days) >= 1) || !file || save.isPending}
+          title={!file ? t('costpos.fileFirst') : undefined}
+          onClick={() => save.mutate()}>{t('common.save')}</button>
         <button type="button" className="ml-1 text-[11px] underline text-slate-400" onClick={onCancel}>{t('achk.cancel')}</button>
       </td>
     </tr>
