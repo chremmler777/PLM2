@@ -638,6 +638,27 @@ def snapshot_diff(prev: Optional[dict], cur: dict) -> list[dict]:
     return out
 
 
+
+def customer_name(name, project_code=None) -> str:
+    """A part name as the customer reads it: without the leading KTX
+    project number ('1864 OPMOBILITY VW426 LOWER CLADDING' ->
+    'OPMOBILITY VW426 LOWER CLADDING')."""
+    n = (name or "").strip()
+    if project_code and n.startswith(f"{project_code} "):
+        n = n[len(project_code) + 1:].strip()
+    return n
+
+
+def customer_title(items: list) -> str:
+    """The offer's title for the customer: the lead part's customer number
+    and name, '+N' for more parts; never the KTX article number."""
+    if not items:
+        return ""
+    first = items[0]
+    head = " - ".join(x for x in (first.get("number") or "", first.get("name") or "") if x)
+    return head + (f" +{len(items) - 1}" if len(items) > 1 else "")
+
+
 class OfferService:
 
     # ------------------------------------------------------------------
@@ -2118,8 +2139,12 @@ class OfferService:
         org = (await session.get(Organization, plant.organization_id)
                if plant else None)
         # §6: each part with the index the offer goes out on
-        items = [{"number": r["customer_number"] or r["number"], "name": r["name"],
-                  "index": r["index"]}
+        # 2026-11-09 night: the customer reads customer numbers only: no
+        # KTX article number in the title, no KTX project number in names
+        # (memory 'customer numbers first'; old rehearsal bug)
+        proj_code = (change.project.code if getattr(change, "project", None) else None)
+        items = [{"number": r["customer_number"] or r["number"],
+                  "name": customer_name(r["name"], proj_code), "index": r["index"]}
                  for r in await OfferService.part_indexes(session, change)]
         # idea blocks are kept, marked: the PDF draws them hatched, outside
         # the committed finish
@@ -2133,7 +2158,8 @@ class OfferService:
             "plant_name": plant.name if plant else "",
             "plant_location": plant.location if plant else "",
             "project_name": project.name if project else "",
-            "change_number": change.change_number, "title": change.title,
+            "change_number": change.change_number,
+            "title": customer_title(items) or change.title,
             "items": items,
             # Christoph 2026-11-09: the customer never sees the buffer as a
             # bar (the milestones after it carry the timing with buffer) and

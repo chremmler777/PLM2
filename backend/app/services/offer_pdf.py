@@ -660,7 +660,9 @@ def _plan_charts(tasks: list[dict], width: float, loc: str = "de") -> list[Drawi
             last = t["start"] if ms else date.fromordinal(
                 max(t["end"], date.fromordinal(t["start"].toordinal() + 1)).toordinal() - 1)
             for j, d in enumerate((t["start"], last)):
-                dwg.add(String(name_w + date_w * (j + 0.5), y + 1.35 * mm, _chart_date(d, loc),
+                # a bank build floats with the PO: no fixed date in the offer
+                txt = "estimate" if t.get("kind") == "bank_build" else _chart_date(d, loc)
+                dwg.add(String(name_w + date_w * (j + 0.5), y + 1.35 * mm, txt,
                                fontName=FONT, fontSize=5.8, fillColor=BLACK,
                                textAnchor="middle"))
             if ms:
