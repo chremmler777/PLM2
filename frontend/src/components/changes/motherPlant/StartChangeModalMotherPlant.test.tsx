@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import StartChangeModal from '../StartChangeModal'
+import StartChangeModal, { START_ORIGINS_LIVE } from '../StartChangeModal'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -45,7 +45,10 @@ describe('StartChangeModal: change from KTX Weissenburg / Solingen', () => {
       return Promise.resolve({ data: [] })
     })
   })
-  afterEach(cleanup)
+  // The mother-plant origin is greyed out in the live app (in development);
+  // these tests exercise the flow behind it.
+  beforeEach(() => { START_ORIGINS_LIVE.motherPlant = true })
+  afterEach(() => { cleanup(); START_ORIGINS_LIVE.motherPlant = false })
 
   it('asks for plant, reference, SOP (required), documents and their timing, and sends them', async () => {
     wrap()

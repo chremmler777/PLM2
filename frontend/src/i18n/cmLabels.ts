@@ -441,6 +441,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'start.customerRelevant': { de: 'Wer trägt die Kosten?', en: 'Who carries the cost?' },
   'start.customerChange': { de: 'Kundenänderung', en: 'Customer change' },
   'start.internalChange': { de: 'Interne Änderung', en: 'Internal change' },
+  'start.inDevelopment': {
+    de: 'In Entwicklung, noch nicht verfügbar. Änderungen legt vorerst das Projektmanagement als Kundenänderung an.',
+    en: 'In development, not available yet. For now Project Management starts changes as customer changes.',
+  },
   'start.customerSalesOnly': {
     de: 'Kundenänderungen legt das Projektmanagement an. Sie starten interne Änderungen und führen sie.',
     en: 'Customer changes are captured by Project Management. You start internal changes and lead them.',

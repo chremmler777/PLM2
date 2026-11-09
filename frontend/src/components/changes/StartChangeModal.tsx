@@ -34,6 +34,12 @@ export const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
 // common) and add tooling / process / material / packaging as each flow is ready.
 export const ENABLED_CHANGE_TYPES: ChangeType[] = ['physical_part'];
 
+// Origins that are live today. Internal changes and changes from the mother
+// plant (Solingen) are still being developed, so they show greyed out; for now
+// Project Management starts every change as a customer change (Christoph
+// 2026-11-09). Tests flip these on to exercise the flows.
+export const START_ORIGINS_LIVE = { internal: false, motherPlant: false };
+
 // WinCarat encodes the real part class in the number prefix (all rows are
 // item_category 'article' in PLM). Physical parts are the 10/11/20/22 families;
 // 40 = resin/material, 65 = returnables/dunnage, which get their own flows
@@ -187,7 +193,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const permissions = useChangePermissions();
   // P3 + D1: Development, Process, Tool and Manufacturing Engineer start internal changes only.
   const internalOnly = useInternalOnlyStarter();
-  useEffect(() => { if (internalOnly) setCustomerRelevant(false); }, [internalOnly]);
+  useEffect(() => { if (internalOnly && START_ORIGINS_LIVE.internal) setCustomerRelevant(false); }, [internalOnly]);
   const motherPlants = permissions?.mother_plants ?? FALLBACK_MOTHER_PLANTS;
   const [fromMotherPlant, setFromMotherPlant] = useState(false);
   const [motherPlant, setMotherPlant] = useState<MotherPlantDraft>(
@@ -705,17 +711,21 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 </span>
               </span>
             </label>
-            <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <label className={`flex items-start gap-2 text-sm ${START_ORIGINS_LIVE.internal ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
               <input
                 type="radio"
                 name="sc-customer-relevant"
                 className="mt-1"
+                data-testid="sc-internal-change"
+                disabled={!START_ORIGINS_LIVE.internal}
                 checked={customerRelevant === false && !fromMotherPlant}
                 onChange={() => { setCustomerRelevant(false); setFromMotherPlant(false); }}
               />
               <span>
                 <span className="text-slate-100">{t('start.internalChange')}</span>
-                <span className="block text-xs text-slate-500">{t('start.customerRelevantNoHint')}</span>
+                <span className="block text-xs text-slate-500">
+                  {START_ORIGINS_LIVE.internal ? t('start.customerRelevantNoHint') : t('start.inDevelopment')}
+                </span>
               </span>
             </label>
             {/* Mother plant (spec §14): started by Project Management (and
@@ -726,11 +736,13 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
               </p>
             )}
             {permissions?.can_start_mother_plant !== false && (
-              <label className="flex items-start gap-2 text-sm cursor-pointer">
+              <label className={`flex items-start gap-2 text-sm ${START_ORIGINS_LIVE.motherPlant ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
                 <input
                   type="radio"
                   name="sc-customer-relevant"
                   className="mt-1"
+                  data-testid="sc-mother-plant"
+                  disabled={!START_ORIGINS_LIVE.motherPlant}
                   checked={fromMotherPlant}
                   onChange={() => {
                     setFromMotherPlant(true);
@@ -741,7 +753,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 <span>
                   <span className="text-slate-100">{plantText('mp.startOption', null)}</span>
                   <span className="block text-xs text-slate-500">
-                    {plantText('mp.startHint', null)}
+                    {START_ORIGINS_LIVE.motherPlant ? plantText('mp.startHint', null) : t('start.inDevelopment')}
                   </span>
                 </span>
               </label>

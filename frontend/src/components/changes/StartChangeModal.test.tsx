@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import StartChangeModal, { composeTitle } from './StartChangeModal'
+import StartChangeModal, { composeTitle, START_ORIGINS_LIVE } from './StartChangeModal'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -49,7 +49,16 @@ describe('StartChangeModal', () => {
       return Promise.resolve({ data: [] })
     })
   })
-  afterEach(cleanup)
+  afterEach(() => { cleanup(); START_ORIGINS_LIVE.internal = false; START_ORIGINS_LIVE.motherPlant = false })
+
+  it('greys out internal change and change from the mother plant while they are in development', async () => {
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
+    const internal = await screen.findByTestId('sc-internal-change') as HTMLInputElement
+    expect(internal.disabled).toBe(true)
+    expect((screen.getByTestId('sc-mother-plant') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByTestId('sc-customer-change') as HTMLInputElement).checked).toBe(true)
+    expect(screen.getAllByText(t('start.inDevelopment')).length).toBe(2)
+  })
 
   it('starts a physical-part change and creates change + lead item', async () => {
     wrap(<StartChangeModal open onClose={() => {}} prefill={{
@@ -70,6 +79,7 @@ describe('StartChangeModal', () => {
   })
 
   it('P3: an internal-only starter gets internal preselected and cannot pick customer', async () => {
+    START_ORIGINS_LIVE.internal = true
     const base = clientMocks.get.getMockImplementation()!
     clientMocks.get.mockImplementation((url: string) => url.includes('/changes/permissions')
       ? Promise.resolve({ data: { can_start_change: false, can_start_internal_change: true,
@@ -356,6 +366,7 @@ describe('StartChangeModal', () => {
   })
 
   it('offers the internal branch: no quote deadline, sent as customer_relevant false (F-04)', async () => {
+    START_ORIGINS_LIVE.internal = true
     wrap(<StartChangeModal open onClose={() => {}} prefill={{
       projectId: 1,
       part: { id: 4, part_number: '20-3450-001-0', name: 'Clip', item_category: 'article' },
