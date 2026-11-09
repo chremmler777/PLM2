@@ -175,9 +175,11 @@ async def create(session: AsyncSession, change: ChangeRequest, actor: User, *,
         pos = await session.get(CostingPosition, position_id)
         if pos is None or pos.change_id != change.id or pos.department_id != department_id:
             raise SupplierWaitError("Pick one of the department's costing positions")
+    # 2026-11-08: the same shop may be asked for two cases (two lines)
     twin = next((w for w in await open_waits(session, [change.id], phase)
                  if w.department_id == department_id
-                 and w.vendor_name.lower() == vendor.lower()), None)
+                 and w.vendor_name.lower() == vendor.lower()
+                 and w.position_id == position_id), None)
     if twin is not None:
         raise SupplierWaitError(
             f"Already waiting on {twin.vendor_name} until "

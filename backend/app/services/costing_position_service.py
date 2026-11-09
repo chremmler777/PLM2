@@ -663,6 +663,17 @@ class CostingPositionService:
         CostingPositionService._validate_offer(offer, position)
         session.add(offer)
         await session.flush()
+        # Christoph 2026-11-08: the quote of a shop we waited on closes that
+        # wait (received)
+        from app.services import supplier_wait_service as _sw
+        for w in await _sw.open_waits(session, [change.id], "costing"):
+            if (w.department_id == position.department_id
+                    and w.vendor_name.strip().lower() == offer.vendor_name.strip().lower()
+                    and w.position_id in (None, position.id)):
+                w.closed_at = datetime.utcnow()
+                w.closed_by = actor.id
+                w.close_reason = "received"
+        await session.flush()
         was = position.estimate_check
         CostingPositionService._quote_after_commit(change, position, offer)
         if was is None and position.estimate_check == "pending":

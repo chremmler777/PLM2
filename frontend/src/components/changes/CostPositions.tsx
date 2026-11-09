@@ -437,8 +437,65 @@ function OfferRow({
   )
 }
 
-function NewOfferForm({ changeId, positionId, onAdded }: {
+/** Christoph 2026-11-08: the shops this line's RFQ went to, each a supplier
+ *  wait on the line (asked today, expected in 14 days); its quote closes it. */
+function RfqShops({ changeId, position: p, editable, onChanged }: {
+  changeId: number; position: CostPosition; editable: boolean; onChanged: () => void
+}) {
+  const qc = useQueryClient()
+  const { data: waits } = useQuery({
+    queryKey: ['change', changeId, 'supplier-waits'],
+    queryFn: () => changesApi.listSupplierWaits(changeId),
+  })
+  const mine = (waits ?? []).filter((w) => w.position_id === p.id)
+  const [shop, setShop] = useState('')
+  const iso = (d: Date) => d.toISOString().slice(0, 10)
+  const add = useMutation({
+    mutationFn: () => {
+      const today = new Date()
+      const due = new Date(today.getTime() + 14 * 86400000)
+      return changesApi.startSupplierWait(changeId, {
+        department_id: p.department_id, vendor_name: shop.trim(),
+        asked_on: iso(today), expected_by: iso(due), position_id: p.id })
+    },
+    onSuccess: () => {
+      setShop('')
+      qc.invalidateQueries({ queryKey: ['change', changeId] })
+      onChanged()
+    },
+    onError: (e: unknown) => toastError(e, 'Could not record the RFQ'),
+  })
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 py-1" data-testid={`rfq-shops-${p.id}`}>
+      <span className="text-[11px] text-slate-500">{t('costpos.rfqSentTo')}</span>
+      {mine.length === 0 && <span className="text-[11px] text-slate-600">{t('costpos.rfqNone')}</span>}
+      {mine.map((w) => (
+        <span key={w.id} data-testid={`rfq-shop-${w.id}`}
+          title={w.is_open ? `${w.chip}` : (w.closed_at ?? '')}
+          className={`rounded px-1.5 text-[11px] ${!w.is_open
+            ? 'bg-emerald-900/60 text-emerald-100' : w.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
+          {w.vendor_name} · {w.is_open ? t('costpos.rfqWaiting') : t('costpos.rfqIn')}
+        </span>
+      ))}
+      {editable && (
+        <span className="inline-flex items-center gap-1">
+          <input value={shop} onChange={(e) => setShop(e.target.value)}
+            data-testid={`rfq-shop-new-${p.id}`} placeholder={t('costpos.rfqAddShop')}
+            onKeyDown={(e) => { if (e.key === 'Enter' && shop.trim().length >= 2) add.mutate() }}
+            className={`${fieldCls} w-36`} />
+          <button type="button" className={btnSm.secondary} data-testid={`rfq-shop-add-${p.id}`}
+            disabled={shop.trim().length < 2 || add.isPending} onClick={() => add.mutate()}>
+            {t('costpos.rfqAdd')}</button>
+        </span>
+      )}
+    </div>
+  )
+}
+
+function NewOfferForm({ changeId, positionId, onAdded, suggest = [] }: {
   changeId: number; positionId: number; onAdded: () => void
+  /** shops the RFQ went to (open waits on this line): one click fills the supplier */
+  suggest?: string[]
 }) {
   const [vendor, setVendor] = useState('')
   const [cost, setCost] = useState('')
@@ -467,6 +524,14 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
   return (
     <div data-testid={`offer-new-${positionId}`}
       className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-slate-700/60">
+      {suggest.map((v) => (
+        <button key={v} type="button" data-testid={`offer-suggest-${positionId}-${v}`}
+          onClick={() => setVendor(v)}
+          className={`rounded border px-1.5 text-[11px] ${vendor === v
+            ? 'border-sky-500 bg-sky-900/60 text-sky-100' : 'border-slate-600 text-slate-300 hover:bg-slate-700/60'}`}>
+          {v}
+        </button>
+      ))}
       <VendorField testId={`offer-new-vendor-${positionId}`} value={vendor} onChange={setVendor} />
       <input data-testid={`offer-new-cost-${positionId}`} type="number" step="0.01" value={cost}
         aria-label={t('costpos.cost')} placeholder={t('costpos.cost')}
@@ -666,6 +731,12 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   const diverges = decisionDivergesOf(p)
   const offerCount = (p.offers ?? []).length
 
+  const { data: waitsAll } = useQuery({
+    queryKey: ['change', changeId, 'supplier-waits'],
+    queryFn: () => changesApi.listSupplierWaits(changeId),
+    enabled: isQuote,
+  })
+  const openShops = (waitsAll ?? []).filter((w) => w.position_id === p.id && w.is_open).map((w) => w.vendor_name)
   const setPricing = useMutation({
     mutationFn: (v: 'estimate' | 'quote') => changesApi.updateCostPosition(changeId, p.id, { pricing: v }),
     onSuccess: onChanged,
@@ -929,7 +1000,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
                 ))}
               </ul>
             )}
-            {editable && <NewOfferForm changeId={changeId} positionId={p.id} onAdded={onChanged} />}
+            <RfqShops changeId={changeId} position={p} editable={editable} onChanged={onChanged} />
+            {editable && <NewOfferForm changeId={changeId} positionId={p.id} onAdded={onChanged}
+              suggest={openShops} />}
           </td>
         </tr>
       )}
