@@ -47,6 +47,9 @@ VALIDATION_STATUS = "in_validation"
 #: §10 (RELEASE_V2): a weight delta reaches Sales above this share of the
 #: estimate (or on a FAIL).
 WEIGHT_DELTA_SALES_SHARE = 0.02
+#: Christoph 2026-11-08: the weight is the shot weight CHANGE (signed), so a
+#: share of it means nothing; Sales hears of a gap above this many grams.
+WEIGHT_DELTA_TOLERANCE_G = 1.0
 #: D5 (Christoph 2026-10-19): the department that confirms the limits a
 #: measurer set with the first measurement (A5-02); was Quality.
 LIMITS_CONFIRMER_DEPARTMENT = "APQP"
@@ -312,8 +315,7 @@ class ValidationService:
             # §10: Sales hears of the weight only on a FAIL (a notice, see
             # ValidationIssueService.on_check_failed) or a delta > 2 % of
             # the estimate the quote was built on
-            est = float(change.estimated_part_weight_g or 0)
-            return est <= 0 or abs(delta) > WEIGHT_DELTA_SALES_SHARE * est
+            return abs(delta) > WEIGHT_DELTA_TOLERANCE_G
         return True
 
     # ------------------------------------------------------------------

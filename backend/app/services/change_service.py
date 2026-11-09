@@ -3766,8 +3766,7 @@ class ChangeService:
         for nothing. Who erased it and what it was is in the changelog, which
         is where a withdrawn claim belongs.
         """
-        if weight_g is not None and weight_g <= 0:
-            raise ChangeError("Part weight must be greater than zero")
+        # Christoph 2026-11-08: the shot weight change, signed (-3 g, +5 g)
         if user.effective_role != "admin" and not (
                 change.status == "costing"
                 or await ChangeService._tool_costing_open(session, change)):

@@ -814,8 +814,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // The Tool Engineer's other standing answer during costing: what the part
   // will weigh. A quote, not a measurement — the real figure comes later.
   'costpos.partWeightField': {
-    de: 'Teilegewicht (g): Schätzung, wird validiert',
-    en: 'Part weight (g): estimate, validated later',
+    de: 'Schussgewicht-Änderung (g, ±): Schätzung, wird validiert',
+    en: 'Shot weight change (g, ±): estimate, validated later',
   },
   'costpos.partWeightSaved': {
     de: 'Gewichtsschätzung gespeichert',
@@ -1022,8 +1022,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.standing': { de: 'Pflichtangabe', en: 'standing' },
   'costpos.internalEffortRow': { de: 'Aufwand Bewertung', en: 'Assessment effort' },
   'costpos.supportEffortRow': { de: 'Support Umsetzung', en: 'Implementation support' },
-  'costpos.partWeightRow': { de: 'Teilegewicht', en: 'Part weight' },
-  'costpos.partWeightDesc': { de: 'Schätzung, wird validiert', en: 'estimate, validated later' },
+  'costpos.partWeightRow': { de: 'Schussgewicht-Änderung', en: 'Shot weight change' },
+  'costpos.partWeightDesc': { de: 'g pro Schuss, + schwerer / − leichter; Schätzung, wird validiert', en: 'g per shot, + heavier / − lighter; estimate, validated later' },
   'costpos.internalEffortDesc': { de: 'Zeit für die Bewertung: Summe der gebuchten Stunden', en: 'time spent on the assessment: sum of the booked hours' },
   'costpos.supportEffortDesc': { de: 'geschätzt', en: 'estimated' },
   'costpos.addLine': { de: 'Zeile hinzufügen', en: 'Add line' },
@@ -1080,10 +1080,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'summation.pastDeadline': { de: 'nach Termin', en: 'past the deadline' },
   // The Tool Engineer's weight quote, as Sales reads it in the wrap-up. It says
   // "estimate" until somebody has validated the figure against a real part.
-  'summation.partWeight': { de: 'Teilegewicht', en: 'Part weight' },
+  'summation.partWeight': { de: 'Schussgewicht-Änderung', en: 'Shot weight change' },
   'summation.partWeightEstimate': {
-    de: 'Teilegewicht (Schätzung)',
-    en: 'Part weight (estimate)',
+    de: 'Schussgewicht-Änderung (Schätzung)',
+    en: 'Shot weight change (estimate)',
   },
   'summation.grams': { de: 'g', en: 'g' },
   'tasks.kind.costing_input': { de: 'Kosten erfassen', en: 'Enter costs' },
@@ -1979,7 +1979,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'validation.check.sampled': { de: 'Werkzeug abgemustert', en: 'Tool sampled' },
   'validation.check.measured': { de: 'Teil vermessen', en: 'Part measured' },
   'validation.check.cycle_time': { de: 'Zykluszeit gemessen', en: 'Measured cycle time' },
-  'validation.check.weight': { de: 'Teilegewicht validiert', en: 'Part weight validated' },
+  'validation.check.weight': { de: 'Schussgewicht-Änderung validiert', en: 'Shot weight change validated' },
   'validation.check.revision_bump': { de: 'Indexstände angehoben', en: 'Revision levels raised' },
   'validation.check.packaging_validated': {
     de: 'Verpackung mit dem geänderten Teil validiert', en: 'Packaging validated with the changed part',
@@ -2017,7 +2017,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'keine Taktzeit kalkuliert',
     en: 'no cycle time in the costing',
   },
-  'validation.weightValue': { de: 'Gemessenes Gewicht (g)', en: 'Measured weight (g)' },
+  'validation.weightValue': { de: 'Gemessene Schussgewicht-Änderung (g, ±)', en: 'Measured shot weight change (g, ±)' },
   'validation.weightEstimate': { de: 'geschätzt: {x} g', en: 'estimated {x} g' },
   'validation.weightNoEstimate': { de: 'keine Schätzung', en: 'no estimate' },
   'validation.weightDelta': { de: 'Abweichung {x} g', en: 'Delta {x} g' },

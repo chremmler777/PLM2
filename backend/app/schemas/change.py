@@ -1454,8 +1454,7 @@ class WeightEstimateIn(BaseModel):
     @field_validator("weight_g")
     @classmethod
     def _positive_or_absent(cls, v):
-        if v is not None and v <= 0:
-            raise ValueError("Part weight must be greater than zero")
+        # Christoph 2026-11-08: the shot weight CHANGE, + heavier / - lighter
         return v
 
 

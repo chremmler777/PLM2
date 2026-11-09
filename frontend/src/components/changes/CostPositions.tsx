@@ -1113,7 +1113,7 @@ function PartWeightRow({ changeId, departmentId, weightG, editable, index, onSav
             <label htmlFor={`part-weight-${departmentId}`} className="sr-only">{t('costpos.partWeightField')}</label>
             <input id={`part-weight-${departmentId}`}
               data-testid={`costpos-weight-${departmentId}`}
-              type="number" step="1" min={0} value={grams}
+              type="number" step="0.1" value={grams}
               onChange={(e) => setGrams(e.target.value)}
               onBlur={commit}
               onKeyDown={(e) => { if (e.key === 'Enter') commit() }}
@@ -1127,7 +1127,7 @@ function PartWeightRow({ changeId, departmentId, weightG, editable, index, onSav
           </span>
         ) : (
           <span data-testid={`costpos-weight-value-${departmentId}`} className="tabular-nums text-slate-200">
-            {weightG != null ? weightG : '-'}
+            {weightG != null ? `${weightG > 0 ? '+' : ''}${weightG} g` : '-'}
           </span>
         )}
       </td>
