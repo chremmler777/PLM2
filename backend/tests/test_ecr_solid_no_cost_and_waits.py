@@ -61,11 +61,14 @@ async def ec(client, session_factory, seed):
             customer_relevant=True)
         s.add(change)
         await s.flush()
+        # a minute back: this WSL clock steps back ~7.5 s now and then (seen
+        # 2026-11-09 night), and a submit stamped 'now' could then land after the
+        # finalize / booking the test makes next (flaky 1-3 of 10 runs)
         for d in (shop, proc):
             s.add(ChangeAssessment(change_id=change.id, department_id=d, stage_order=1,
                                    rasic_letter="R", status="submitted",
                                    verdict="feasible", details=json.dumps(IMPACTED),
-                                   submitted_at=datetime.utcnow()))
+                                   submitted_at=datetime.utcnow() - timedelta(minutes=1)))
         await s.commit()
         cid = change.id
     return {"cid": cid, "shop": shop, "proc": proc, "dale": dale, "pe": pe,

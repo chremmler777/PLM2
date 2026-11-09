@@ -26,7 +26,7 @@ async def _make(session_factory, seed, *, status="costing", extra_rows=(),
     """A customer change: Tool Engineer submitted feasible with an impact
     (owes costing), Packaging submitted 'nothing impacted' (owes nothing).
     extra_rows: (department name, stage, letter, submitted)."""
-    from datetime import datetime
+    from datetime import datetime, timedelta
     async with session_factory() as s:
         depts = {}
         for name in ("Tool Engineer", "Packaging Engineer", "Development", "Project Manager"):
@@ -46,7 +46,10 @@ async def _make(session_factory, seed, *, status="costing", extra_rows=(),
             required_by_date=datetime(2026, 12, 31))
         s.add(change)
         await s.flush()
-        now = datetime.utcnow()
+        # a minute back: this WSL clock steps back ~7.5 s now and then (seen
+        # 2026-11-09 night), and a submit stamped 'now' could then land after the
+        # finalize / booking the test makes next (flaky 1-3 of 10 runs)
+        now = datetime.utcnow() - timedelta(minutes=1)
         rows = [("Tool Engineer", 1, "R", tool_verdict, IMPACTED, True),
                 ("Packaging Engineer", 1, "R", "feasible", NOTHING_IMPACTED, True)]
         rows += [(n, st, l, "feasible" if sub else "pending", NOTHING_IMPACTED if sub else None, sub)
@@ -200,8 +203,8 @@ async def test_project_manager_owes_costing_and_holds_the_move(
             ChangeAssessment.change_id == ids["change_id"],
             ChangeAssessment.department_id == ids["Project Manager"]))).scalar_one()
         a.status, a.verdict = "submitted", "feasible"
-        from datetime import datetime
-        a.submitted_at = datetime.utcnow()
+        from datetime import datetime, timedelta
+        a.submitted_at = datetime.utcnow() - timedelta(minutes=1)  # clock steps, see _make
         await s.commit()
     await _finalize_tool(client, session_factory, seed, ids, "auto-tool4@test.io")
     assert await _status(session_factory, ids["change_id"]) == "costing"

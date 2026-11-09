@@ -1778,6 +1778,15 @@ async def test_reject_without_records_keeps_rows_of_approved_deviations(
     admin_auth = await _login_admin(client)
     c = await _api_change_in_assessment(client, auth, seed, session_factory)
     mfg, sales = departments["Manufacturing Engineer"], departments["Sales"]
+    # a minute back: the deviation entries are read from routing.created_at
+    # on (performed_at >=), and this WSL clock steps back ~7.5 s now and then
+    # (2026-11-09 night): an entry written right after could read as older
+    async with session_factory() as s:
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == c["id"]))).scalar_one()
+        from datetime import datetime, timedelta
+        routing.created_at = datetime.utcnow() - timedelta(minutes=1)
+        await s.commit()
     assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
         "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 1,
         "reason": "forgot MfgEng"}, headers=auth)).status_code == 200
