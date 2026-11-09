@@ -638,9 +638,11 @@ async def test_the_costing_input_task_disappears_for_a_nothing_impacted_departme
 
 
 async def test_a_position_answers_the_costing_queue(
-        client, admin_auth, costing):
+        client, admin_auth, session_factory, costing):
+    from tests.conftest import ready_to_finalize
     await _add_position(client, admin_auth, costing, est_cost=42.0,
                         basis_ref="Hasco figure 12 Oct 2026")
+    await ready_to_finalize(session_factory, costing["change_id"], costing["tool"])
     # A position is a finalizable answer like a line (per-department
     # pipeline: the queue clears on finalize, not on the first entry).
     res = await client.post(

@@ -8,7 +8,7 @@ from app.models.change import ChangeAssessment, ChangeRequest
 from app.models.change_cost import AssessmentActivity, DepartmentRate
 from app.models.entities import Plant, Project
 from app.models.workflow import Department, UserDepartment
-from tests.conftest import login
+from tests.conftest import login, ready_to_finalize
 
 pytestmark = pytest.mark.asyncio
 
@@ -186,7 +186,9 @@ async def test_empty_summation_reports_zeroes_not_nulls(client, admin_auth, cost
 # --- (4) who still owes a number -------------------------------------------
 
 async def test_costing_pending_lists_feasible_departments_until_finalized(
-        client, admin_auth, costing):
+        client, admin_auth, session_factory, costing):
+    # support hours 0, costing booked: the finalize rules this test is not about
+    await ready_to_finalize(session_factory, costing["change_id"], costing["tool"])
     detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
                                headers=admin_auth)).json()
     assert sorted(detail["costing_pending_department_ids"]) == sorted(
@@ -285,6 +287,7 @@ async def test_costing_input_task_reaches_the_department(
     ]}, headers=tool_member)
     # lines alone are a draft: the task stays until the department finalizes
     assert len(await rows()) == 1
+    await ready_to_finalize(session_factory, costing["change_id"], costing["tool"])
     res = await client.post(
         f"/api/v1/changes/{costing['change_id']}/costing/departments/"
         f"{costing['tool']}/finalize", headers=tool_member)
