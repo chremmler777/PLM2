@@ -1,3 +1,4 @@
+import { Info } from 'lucide-react'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -356,7 +357,7 @@ export default function ConcernStrip({
         <span className="font-medium text-slate-100">{w.title}</span>
         {scoped && (
           <span className="text-[11px] text-slate-500 cursor-help" title={w.hint}
-            data-testid="risk-hint">ⓘ</span>
+            data-testid="risk-hint"><Info aria-hidden="true" size={12} className="inline align-[-2px]" /></span>
         )}
         {blocking.length > 0 && (
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900 text-amber-100">

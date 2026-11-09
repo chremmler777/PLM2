@@ -12,7 +12,7 @@
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Check, Flag, Minus } from 'lucide-react'
+import { Check, Flag, Info, Minus } from 'lucide-react'
 import { changesApi } from '../../../api/changes'
 import { AttachmentRow } from '../AttachmentRow'
 import { t } from '../../../i18n/cmLabels'
@@ -541,7 +541,7 @@ export default function ActivityChecklist({
   return (
     <div className="space-y-1">
       <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('check.title', lang)}
-        {' '}<span className="normal-case cursor-help" title={t('check.hint', lang)}>ⓘ</span></p>
+        {' '}<span className="normal-case cursor-help" title={t('check.hint', lang)}><Info aria-hidden="true" size={12} className="inline align-[-2px]" /></span></p>
       {items.length === 0 && freeLines.length === 0 && legacy.length === 0 && earlier.length === 0 ? (
         <p className="text-xs text-slate-600">{t('check.empty', lang)}</p>
       ) : (
