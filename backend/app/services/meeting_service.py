@@ -1595,6 +1595,47 @@ class MeetingService:
         return min(stage) if stage else None
 
     @staticmethod
+    async def _reopen_question(session: AsyncSession, change: ChangeRequest,
+                               concern: ChangeConcern, user: User,
+                               reason: Optional[str]) -> ChangeConcern:
+        """Christoph 2026-11-08: a closed assessment question can be reopened
+        to edit its answer, by the asking department, Project Management or
+        an admin, while the change is assessed or costed. The old answer
+        stays on the change history; the question is open and unanswered
+        again (it holds the department's submit only while that is open)."""
+        from app.services.workflow_service import WorkflowService
+        if concern.withdrawn_at is None:
+            raise ChangeError("The question is still open: answer it there")
+        if change.status not in ("in_assessment", "costing"):
+            raise ChangeError("Questions can be reopened only while the change "
+                              "is assessed or costed")
+        if not (user.effective_role == "admin"
+                or await MeetingService.user_is_pm_member(session, user)
+                or await WorkflowService.actor_in_department(
+                    session, user, concern.department_id)):
+            raise MeetingForbidden("Only the asking department, Project "
+                                   "Management or an admin may reopen it")
+        why = (reason or "").strip()
+        if len(why) < 5:
+            raise ChangeError("Say why you reopen it (at least 5 characters)")
+        old = (concern.answer_ref or concern.assumed_value or concern.answer_note
+               or concern.resolution_note or "")
+        concern.withdrawn_at = concern.withdrawn_by = None
+        concern.settled_as = None
+        concern.resolution_note = None
+        concern.answered_at = concern.answered_by = None
+        concern.answer_note = concern.answer_kind = concern.answer_ref = None
+        concern.assumed_value = concern.assumed_unit = concern.assumed_risk = None
+        concern.confirm_by_id = concern.confirm_due = None
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "concern_reopened",
+            f"Question #{concern.id} reopened to edit: {why}"
+            + (f" (old answer: {old})" if old else ""), user.id,
+            new_value={"concern_id": concern.id, "old_answer": old}, notes=why)
+        return concern
+
+    @staticmethod
     def reopen_check_refusal(change: ChangeRequest, concern: ChangeConcern,
                              user: User) -> Optional[tuple[bool, str]]:
         """Why the caller may not reopen this check item, as (forbidden,
@@ -1644,6 +1685,8 @@ class MeetingService:
         concern = await session.get(ChangeConcern, concern_id)
         if concern is None or concern.change_id != change.id:
             raise ChangeError("Concern not found on this change")
+        if concern.flag_type == "question" and concern.department_id is not None:
+            return await MeetingService._reopen_question(session, change, concern, user, reason)
         refusal = MeetingService.reopen_check_refusal(change, concern, user)
         if refusal is not None:
             forbidden, text = refusal

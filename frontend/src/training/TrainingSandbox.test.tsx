@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { vi, afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import client from '../api/client'
 import TrainingSandbox from './TrainingSandbox'
@@ -7,6 +7,8 @@ import { sandboxIsOpen } from './sandbox/containment'
 import type { SandboxState } from './sandbox/state'
 import { SEED } from './sandbox/state'
 import { TASKS } from './tasks'
+// ActivityChecklist reads the viewer (who may delete assessment documents).
+vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 
 //: The mechanism end to end: the real screen, the real shared client, the
 //: training adapter underneath. Nothing is mocked but the network, and the

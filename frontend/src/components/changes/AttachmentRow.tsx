@@ -5,7 +5,7 @@
  * wherever they meet it.
  */
 import { useState } from 'react'
-import { Paperclip, X } from 'lucide-react'
+import { Download, Paperclip, X } from 'lucide-react'
 import { API_BASE_URL } from '../../api/client'
 import AttachmentDropzone from './AttachmentDropzone'
 import { UploadedBy } from '../common/UploadedBy'
@@ -149,4 +149,22 @@ export function attachmentBlocks(items: Attachment[]): {
     .map((a) => a.kind === 'info_request'
       ? { request: a, responses: items.filter((r) => r.responds_to_id === a.id), plain: null }
       : { request: null, responses: [], plain: a })
+}
+
+
+/** Christoph 2026-11-08: a question's files as inline download icons. */
+export function DownloadIcons({ changeId, attachments }: { changeId: number; attachments: Attachment[] }) {
+  if (!attachments.length) return null
+  return (
+    <span className="inline-flex items-center gap-1 ml-1" data-testid="download-icons">
+      {attachments.map((a) => (
+        <a key={a.id} href={`${API_BASE_URL}/v1/changes/${changeId}/attachments/${a.id}/download`}
+          download={a.filename} title={a.filename} aria-label={`Download ${a.filename}`}
+          className="inline-flex items-center gap-0.5 rounded px-1 text-sky-300 hover:text-sky-200 hover:bg-slate-700/60">
+          <Download aria-hidden="true" size={12} />
+          <span className="max-w-[10rem] truncate text-[11px]">{a.filename}</span>
+        </a>
+      ))}
+    </span>
+  )
 }

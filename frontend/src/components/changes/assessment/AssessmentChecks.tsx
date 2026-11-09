@@ -21,6 +21,7 @@ import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import { formatCalendarDate } from '../../../lib/format'
 import AnswerForm from '../scoping/AnswerForm'
+import { DownloadIcons } from '../AttachmentRow'
 import {
   type AnswerFrom, type Attachment, type ChangeConcern,
 } from '../../../types/change'
@@ -67,7 +68,9 @@ export default function AssessmentChecks({
   const checks = concerns.filter((c) => ownsCheck(c, departmentId))
   const open = checks.filter((c) => c.is_open)
   const closed = checks.filter((c) => !c.is_open)
-  const questions = concerns.filter((c) => asksFrom(c, departmentId) && c.is_open)
+  // 2026-11-08: closed questions stay visible (grey, with the answer)
+  const questions = concerns.filter((c) => asksFrom(c, departmentId))
+    .sort((x, y) => Number(!!y.is_open) - Number(!!x.is_open) || x.id - y.id)
   const others = concerns.filter((c) => c.kind === 'needs_info')
   if (!checks.length && !questions.length && !editable) return null
 
@@ -306,6 +309,14 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
     : q.answer_kind === 'confirmed' ? `${t('answer.confirmed')}: ${q.answer_ref ?? ''}`
       : q.answer_note
   const settle = () => close.mutate(t('achk.settledByAnswer'))
+  const [reopening, setReopening] = useState(false)
+  const [why, setWhy] = useState('')
+  const reopen = useMutation({
+    mutationFn: () => changesApi.reopenCheck(changeId, q.id, why.trim()),
+    onSuccess: () => { setReopening(false); setWhy(''); onDone() },
+    onError: (e: unknown) => { toastError(e, t('achk.saveFailed')) },
+  })
+  const files = attachments.filter((x) => x.concern_id === q.id)
   return (
     <div className={`rounded border p-2 space-y-1 ${q.is_open
       ? 'border-red-600/80 bg-red-950/20' : 'border-sky-800/60 bg-sky-950/20'}`} data-testid={`achk-q-${q.id}`}
@@ -319,7 +330,11 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
       <Head c={q} />
       {q.answered_at ? (
         <p className="text-xs text-slate-200">{t('achk.answer')}: {answer}
-          {q.answered_by_name && <span className="text-slate-500"> ({q.answered_by_name})</span>}</p>
+          {q.answered_by_name && <span className="text-slate-500"> ({q.answered_by_name})</span>}
+          <DownloadIcons changeId={changeId} attachments={files} /></p>
+      ) : !q.is_open ? (
+        <p className="text-xs text-slate-400">{t('bucket.qClosed')}{q.resolution_note ? `: ${q.resolution_note}` : ''}
+          <DownloadIcons changeId={changeId} attachments={files} /></p>
       ) : (
         <p className="text-xs text-slate-400">{editable ? t('achk.answerToClose') : t('achk.waitingOther')}</p>
       )}
@@ -329,8 +344,24 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
             confirmerName={confirmerName} onDone={onDone} onSaved={settle} />
         </div>
       )}
+      {/* closed: reopen to edit the answer (asking department, PM, admin) */}
+      {!q.is_open && editable && !reopening && (
+        <button type="button" className="text-[11px] underline text-slate-300"
+          data-testid={`achk-qreopen-${q.id}`} onClick={() => setReopening(true)}>
+          {t('achk.reopenEdit')}
+        </button>
+      )}
+      {!q.is_open && reopening && (
+        <span className="flex gap-1 items-center">
+          <input className={`${input} flex-1`} value={why} placeholder={t('achk.reopenWhy')}
+            aria-label={t('achk.reopenWhy')} onChange={(e) => setWhy(e.target.value)} />
+          <button type="button" className={btnSm.secondary} disabled={why.trim().length < 5 || reopen.isPending}
+            data-testid={`achk-qreopen-go-${q.id}`} onClick={() => reopen.mutate()}>{t('achk.reopenEdit')}</button>
+          <button type="button" className={btnSm.secondary} onClick={() => setReopening(false)}>{t('achk.cancel')}</button>
+        </span>
+      )}
       {/* answered earlier but still open (before 2026-11-08): one click */}
-      {editable && q.answered_at && (
+      {editable && q.is_open && q.answered_at && (
         <button type="button" className={btnSm.secondary} disabled={close.isPending}
           data-testid={`achk-qclose-${q.id}`} onClick={settle}>
           {t('achk.closeQuestion')}

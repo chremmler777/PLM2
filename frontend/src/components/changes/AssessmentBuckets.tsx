@@ -23,7 +23,7 @@ import NotResponsibleDialog from './NotResponsibleDialog'
 import ConcernStrip from './ConcernStrip'
 import AssessmentChecks, { asksFrom, ownsCheck } from './assessment/AssessmentChecks'
 import AttachmentDropzone from './AttachmentDropzone'
-import { AttachmentRow } from './AttachmentRow'
+import { AttachmentRow, DownloadIcons } from './AttachmentRow'
 import {
   impactedCount, impactsOf, choiceLabel, checklistItemLabel, DOCUMENT_EXTENSIONS, CASE_KEYS, casesOf,
 } from './departmentForms/ActivityChecklist'
@@ -400,6 +400,8 @@ export default function AssessmentBuckets({
             <span className={q.is_open ? 'text-red-300' : 'text-emerald-300'}>
               {' — '}{q.is_open ? t('bucket.qOpen') : `${t('bucket.qClosed')}${questionAnswer(q) ? `: ${questionAnswer(q)}` : ''}`}
             </span>
+            <DownloadIcons changeId={changeId}
+              attachments={(change.attachments ?? []).filter((x) => x.concern_id === q.id)} />
           </li>
         ))}
       </ul>

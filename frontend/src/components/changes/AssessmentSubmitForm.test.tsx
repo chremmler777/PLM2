@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AssessmentSubmitForm, { draftKey } from './AssessmentSubmitForm'
 import BucketErrorBoundary from './BucketErrorBoundary'
 import { t } from '../../i18n/cmLabels'
+// ActivityChecklist reads the viewer (who may delete assessment documents).
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 
 const submitAssessment = vi.fn().mockResolvedValue({})
 const saveAssessmentDraft = vi.fn().mockResolvedValue({})
@@ -37,7 +39,7 @@ describe('AssessmentSubmitForm', () => {
       departmentName="Quality" onDone={() => {}} />))
     fireEvent.change(screen.getByLabelText(/verdict/i), { target: { value: 'feasible' } })
     expect((screen.getByRole('button', { name: /submit assessment/i }) as HTMLButtonElement).disabled).toBeTruthy()
-    fireEvent.change(screen.getByLabelText(/effort/i), { target: { value: '3.5' } })
+    fireEvent.change(screen.getByLabelText(/your hours on this assessment/i), { target: { value: '3.5' } })
     fireEvent.click(await screen.findByTestId('check-no-cycle_time_change'))
     fireEvent.click(screen.getByTestId('check-no-threed_change'))
     fireEvent.click(screen.getByRole('button', { name: /submit assessment/i })); fireEvent.click(screen.getByTestId('confirm-go'))

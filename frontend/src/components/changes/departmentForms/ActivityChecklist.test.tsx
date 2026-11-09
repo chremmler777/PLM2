@@ -5,6 +5,8 @@ import ActivityChecklist, {
   checklistItemLabel, checklistProgress, earlierAnswers, missingDocuments, casesOf, refToNos, restToNo,
   riskKeyOf, saysWhat, verdictEvidence,
 } from './ActivityChecklist'
+// ActivityChecklist reads the viewer (who may delete assessment documents).
+vi.mock('../../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 
 const DEFS = [
   { key: 'cycle_time_change', label_de: 'Zykluszeit', label_en: 'Cycle time change', extra: false },
