@@ -279,6 +279,7 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
     await _refuse_while_waiting(session, change, department_id)
     await _refuse_thin_basis(session, change, department_id)
     await _refuse_transport_missing(session, change, department_id)
+    await _refuse_time_critical_missing(session, change, department_id)
     empty, _ = await _empty_lines(session, change, department_id)
     if empty:
         raise EarlyCostingError(". ".join(empty))
@@ -381,6 +382,27 @@ async def _refuse_transport_missing(session: AsyncSession, change: ChangeRequest
         raise EarlyCostingError(
             "Enter the transport of the quote (0 is allowed): "
             + ", ".join(f"'{p.label}' ({o.vendor_name})" for p, o in gaps))
+
+
+async def _time_critical_missing(session: AsyncSession, change: ChangeRequest,
+                                 department_id: int) -> list:
+    """Christoph 2026-11-09: the department's spare part lines that do not
+    say yet whether they are time critical (needed for the change: their
+    delivery counts for the lead time)."""
+    from app.models.change_cost import CostingPosition
+    rows = (await session.execute(select(CostingPosition).where(
+        CostingPosition.change_id == change.id,
+        CostingPosition.department_id == department_id,
+        CostingPosition.kind == "external"))).scalars().all()
+    return [p for p in rows if p.is_spare_part and p.time_critical is None]
+
+
+async def _refuse_time_critical_missing(session: AsyncSession, change: ChangeRequest,
+                                        department_id: int) -> None:
+    missing = await _time_critical_missing(session, change, department_id)
+    if missing:
+        raise EarlyCostingError(". ".join(
+            f"{p.label}: say if the spare part is time critical" for p in missing))
 
 
 async def _refuse_thin_basis(session: AsyncSession, change: ChangeRequest,
@@ -540,6 +562,10 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
     for p in ext:
         if "spare part" in ((p.notes or "") + " " + p.label).lower() and not (p.quantity or 0) > 0:
             items.append({"tag": "amount_missing", "text": f"{p.label}: enter the amount"})
+            ids.append(p.id)
+        if p.is_spare_part and p.time_critical is None:
+            items.append({"tag": "time_critical_missing",
+                          "text": f"{p.label}: say if the spare part is time critical"})
             ids.append(p.id)
         if p.estimate_check == "pending":
             items.append({"tag": "compare", "text": f"{p.label}: compare the quote with your estimate"})

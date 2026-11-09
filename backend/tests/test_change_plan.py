@@ -1862,3 +1862,23 @@ async def test_f15_detailed_order_milestone_takes_the_po_date(client, world, ses
         order["start_date"] <= business_today().isoformat()
     quote = _by_name(await _plan(client, sales, cid))["Customer order / go-ahead"]
     assert order["start_date"] < quote["start_date"]
+
+
+async def test_a_spare_part_not_time_critical_does_not_hold_sampling(client, world,
+                                                                    session_factory):
+    """Christoph 2026-11-09: a spare part that is not needed for the change
+    runs alongside; sampling waits only for the time critical lines."""
+    cid, depts, uid = world["change_id"], world["depts"], world["users"]["apqp"]
+    async with session_factory() as s:
+        for label, days, critical in (("Gauge", 15, None), ("Spare part: pins", 30, False),
+                                      ("Spare part: bushing", 20, True)):
+            s.add(CostingPosition(change_id=cid, department_id=depts["APQP"], label=label,
+                                  kind="external", pricing="estimate", est_cost=10,
+                                  lead_time_days=days, lead_time_unit="calendar_days",
+                                  time_critical=critical, created_by=uid))
+        await s.commit()
+    out = (await _seed(client, await _auth(client, "sales"), cid)).json()
+    t = _by_name(out)
+    pins, bushing, gauge = t["Spare part: pins"], t["Spare part: bushing"], t["Gauge"]
+    assert pins["duration_days"] == 30            # still on the plan, alongside
+    assert set(t["Sampling / trial"]["predecessors"]) == {gauge["id"], bushing["id"]}

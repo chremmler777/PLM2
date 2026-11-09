@@ -761,7 +761,10 @@ class ChangePlanService:
                 t = add(p.label + (f" - {vendor}" if vendor else ""), kind,
                         after(pred), td(cal, int(days)), lane=dname,
                         dept_id=p.department_id, preds=(pred,), source=p.id)
-                work_tail.append(t)
+                # Christoph 2026-11-09: a spare part that is not time
+                # critical runs alongside; sampling does not wait for it
+                if p.counts_for_lead_time:
+                    work_tail.append(t)
             await flush()
             if not work_tail:
                 work_tail = list(eng_by_dept.values())

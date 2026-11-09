@@ -18,7 +18,9 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { changesApi } from '../../../api/changes'
 import { formatDate, formatDays, formatMoney, formatNumber } from '../../../lib/format'
-import { lineGroupOf, spareName, type LineGroup } from '../CostPositions'
+import {
+  countsForLeadTime, excludedText, leadSummary, leadSummaryText, lineGroupOf, spareName, type LineGroup,
+} from '../CostPositions'
 import { noCostWords } from './NoCostAndWaits'
 import type { ChangeDetail, CostPosition, CostingOffer, Summation, SupplierWait } from '../../../types/change'
 
@@ -37,6 +39,7 @@ const TAG_WORDS: Record<string, string> = {
   price_missing: 'price', basis_missing: 'basis', hours_missing: 'hours',
   amount_missing: 'amount', compare: 'compare', empty: 'nothing entered',
   book_hours: 'book hours', support_hours: 'support hours', other: 'open',
+  time_critical_missing: 'time critical?',
 }
 
 const alternatives = (p: CostPosition) => (p.offers ?? []).filter((o) => !o.is_partial)
@@ -142,6 +145,16 @@ function LineText({ p, cur }: { p: CostPosition; cur?: string }) {
   )
 }
 
+/** Under a department's lead time: what sets it ("30 d (spare part X, time
+ *  critical)") when the lines explain the number, and any spare part left out. */
+function LeadWhy({ lead, info, testId }: {
+  lead: number | null; info: ReturnType<typeof leadSummary>; testId: string
+}) {
+  const text = lead != null && lead > 0 && info.days === lead ? leadSummaryText(info) : excludedText(info)
+  if (!text) return null
+  return <span className="block whitespace-normal text-[11px] text-slate-500" data-testid={testId}>{text}</span>
+}
+
 function Breakdown({ lines, cur }: { lines: CostPosition[]; cur?: string }) {
   if (!lines.length) return <p className="px-2 py-1 text-xs text-slate-500">No cost lines yet.</p>
   return (
@@ -161,7 +174,13 @@ function Breakdown({ lines, cur }: { lines: CostPosition[]; cur?: string }) {
                   <li key={p.id} data-testid={`pm-line-${p.id}`}
                     className="grid grid-cols-[minmax(10rem,16rem)_1fr_9rem_4rem] gap-3 border-t border-slate-800 py-0.5 pl-3.5 text-xs">
                     <LineText p={p} cur={cur} />
-                    <span className="text-right tabular-nums text-slate-400">{days ? formatDays(days) : ''}</span>
+                    <span className="text-right tabular-nums text-slate-400">
+                      {days ? formatDays(days) : ''}
+                      {days && !countsForLeadTime(p) ? (
+                        <span className="block text-[11px] text-slate-500" data-testid={`pm-line-excluded-${p.id}`}>
+                          not time critical, not counted</span>
+                      ) : null}
+                    </span>
                   </li>
                 )
               })}
@@ -227,7 +246,10 @@ export default function PmCostingOverview({
     const blockers = items.filter((x) => !x.info && x.tag !== 'waiting')
     const deptWaits = waits.filter((w) => w.department_id === id)
     const fin = change.costing_finalized_info?.[String(id)]
-    return { id, lines, internal, hours, ext, lead, noCost, status, a, blockers, deptWaits, fin }
+    // Christoph 2026-11-09: who sets the department's lead time; a spare part
+    // that is not time critical is left out (the summation applies the same rule)
+    const leadInfo = leadSummary(lines)
+    return { id, lines, internal, hours, ext, lead, leadInfo, noCost, status, a, blockers, deptWaits, fin }
   })
 
   const sumInternal = rows.reduce((s, r) => s + (r.internal ?? 0), 0)
@@ -334,6 +356,7 @@ export default function PmCostingOverview({
                     </td>
                     <td className={`${num} text-slate-300`} data-testid={`pm-lead-${r.id}`}>
                       {r.lead != null ? formatDays(r.lead) : '-'}
+                      <LeadWhy lead={r.lead} info={r.leadInfo} testId={`pm-lead-why-${r.id}`} />
                     </td>
                     <td className={`${td} text-xs`} data-testid={`pm-open-${r.id}`}>
                       {r.blockers.length === 0 && r.deptWaits.length === 0
@@ -386,6 +409,10 @@ export default function PmCostingOverview({
               </td>
               <td className={`${td} text-xs font-normal text-slate-400`}>
                 {longest.length > 0 && <>longest: {longest.map((r) => deptName(r.id)).join(', ')}</>}
+                {longest.filter((r) => r.leadInfo.days === leadMax).map((r) => (
+                  <span key={r.id} className="block" data-testid={`pm-total-lead-why-${r.id}`}>
+                    {leadSummaryText(r.leadInfo)}</span>
+                ))}
               </td>
             </tr>
           </tbody>

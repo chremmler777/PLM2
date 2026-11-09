@@ -39,7 +39,7 @@ _POSITION_FIELDS = ("label", "tag", "kind", "pricing", "est_cost", "vendor_name"
                     "hours", "lead_time_days", "lead_time_unit", "notes",
                     "labour_position", "machine_class_id", "trials", "machine_id",
                     "basis", "basis_ref", "basis_part_id", "basis_differs",
-                    "quantity", "quantity_unit")
+                    "quantity", "quantity_unit", "time_critical")
 _OFFER_FIELDS = ("vendor_name", "cost", "shipping_cost", "shipping_included",
                  "lead_time_days", "lead_time_unit", "favorite", "is_partial",
                  "quote_ref", "quoted_on", "valid_until")
@@ -260,6 +260,8 @@ class CostingPositionService:
                 "basis_part_number": part_numbers.get(p.basis_part_id),
                 "basis_differs": p.basis_differs, "estimated": p.estimated,
                 "quantity": p.quantity, "quantity_unit": p.quantity_unit,
+                "is_spare_part": p.is_spare_part, "time_critical": p.time_critical,
+                "counts_for_lead_time": p.counts_for_lead_time,
                 "estimate_check": p.estimate_check, "estimate_over": p.estimate_over,
                 "lead_time_days": p.lead_time_days,
                 "lead_time_unit": p.lead_time_unit, "notes": p.notes,

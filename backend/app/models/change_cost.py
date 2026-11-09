@@ -217,6 +217,11 @@ class CostingPosition(Base):
     estimate_check: Mapped[str | None] = mapped_column(String(10), nullable=True)
     estimate_over: Mapped[float | None] = mapped_column(
         Numeric(14, 2, asdecimal=False), nullable=True)
+    # Christoph 2026-11-09 (158): a spare part line says whether it is
+    # needed for the change. True: its delivery counts for the lead time
+    # (it may be the time leader); False: it is excluded from every lead-time
+    # roll-up; None: not answered yet (counts, and Finalize asks for it).
+    time_critical: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(
@@ -355,6 +360,22 @@ class CostingPosition(Base):
         if chosen is not None and self.kind == "external" and self.pricing == "quote":
             return self._quoted_total(chosen)
         return self.effective_cost
+
+    @property
+    def is_spare_part(self) -> bool:
+        """A spare part line: external, and its notes or label say so
+        ("From the assessment: Spare part required", "Spare part: <name>")."""
+        if self.kind != "external":
+            return False
+        text = f"{self.notes or ''} {self.label or ''}".lower()
+        return "spare part" in text or "ersatzteil" in text
+
+    @property
+    def counts_for_lead_time(self) -> bool:
+        """Christoph 2026-11-09: a spare part that is not time critical does
+        not set the lead time (the tool change favourite does). Unanswered
+        counts: the safe side until the department says."""
+        return not (self.is_spare_part and self.time_critical is False)
 
     @property
     def _lead_time_source(self):

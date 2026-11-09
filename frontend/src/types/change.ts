@@ -1100,6 +1100,12 @@ export interface CostPosition {
   /** A3-07: how many of what ("2 inserts"); null on lines from before. */
   quantity?: number | null;
   quantity_unit?: string | null;
+  /** Christoph 2026-11-09: a spare part line (the backend's reading). */
+  is_spare_part?: boolean;
+  /** A spare part is needed for the change (counts for the lead time); null = not answered. */
+  time_critical?: boolean | null;
+  /** false = a spare part that is not time critical: left out of every lead time. */
+  counts_for_lead_time?: boolean;
   estimated?: boolean;
   /** settled: the open price an 'above' caused was absorbed or accepted. */
   estimate_check?: 'pending' | 'within' | 'above' | 'settled' | null;
@@ -1257,6 +1263,8 @@ export interface CostPositionIn {
   /** A3-07: how many of what a money line stands for (ASSESSMENT_V2). */
   quantity?: number | null;
   quantity_unit?: string | null;
+  /** Christoph 2026-11-09: a spare part is time critical (counts for the lead time). */
+  time_critical?: boolean | null;
 }
 
 export type CostBasis = 'rate' | 'quote' | 'same_as' | 'estimate'

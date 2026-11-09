@@ -495,8 +495,11 @@ class CostService:
         # long pole — so the FAVORITE offer's days (or the position's own)
         # count towards the department's, by the same max-not-sum rule. A
         # 5-business-day quote is 7 calendar days and beats a 6-day one.
+        # Christoph 2026-11-09: a spare part that is not time critical is
+        # left out (the tool change favourite sets the time then).
         for p in positions:
-            days = p.effective_lead_time_calendar_days
+            days = (p.effective_lead_time_calendar_days
+                    if p.counts_for_lead_time else None)
             if days is not None:
                 lead_by_dept[p.department_id] = max(
                     lead_by_dept.get(p.department_id, 0), days)

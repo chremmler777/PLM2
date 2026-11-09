@@ -173,6 +173,71 @@ export function leadTimeOf(p: CostPosition): { days: number; unit: LeadTimeUnit 
   return { days: p.lead_time_days, unit: p.lead_time_unit ?? DEFAULT_UNIT }
 }
 
+/** A lead time in calendar days (what every roll-up compares). */
+const calendarOf = (lt: { days: number; unit: LeadTimeUnit }): number =>
+  lt.unit === 'business_days' ? Math.ceil(lt.days * 7 / 5) : lt.days
+
+/** Christoph 2026-11-09: a spare part that is not time critical does not set
+ *  the lead time (the backend's counts_for_lead_time, same rule). Unanswered
+ *  counts: the safe side until the department says. */
+export const countsForLeadTime = (p: CostPosition): boolean =>
+  p.counts_for_lead_time ?? !(isSpareLine(p) && p.time_critical === false)
+
+export interface LeadSummary {
+  /** the longest counted line, calendar days (0 = none) */
+  days: number
+  leader: CostPosition | null
+  /** spare parts left out (not time critical), with their days */
+  excluded: { p: CostPosition; days: number }[]
+}
+
+/** The department's lead time: the longest line that counts. */
+export function leadSummary(lines: CostPosition[]): LeadSummary {
+  let days = 0
+  let leader: CostPosition | null = null
+  const excluded: LeadSummary['excluded'] = []
+  for (const p of lines) {
+    // the backend's calendar days when served, else read from the offers
+    const lt = leadTimeOf(p)
+    const d = p.effective_lead_time_calendar_days ?? (lt ? calendarOf(lt) : 0)
+    if (!countsForLeadTime(p)) {
+      if (d > 0) excluded.push({ p, days: d })
+    } else if (d > days) {
+      days = d
+      leader = p
+    }
+  }
+  return { days, leader, excluded }
+}
+
+/** Who sets the lead time: "spare part X, time critical" / "Hitech, tool change". */
+export function leaderText(p: CostPosition): string {
+  if (isSpareLine(p)) {
+    return t(p.time_critical === true ? 'costpos.tc.leaderSpare' : 'costpos.tc.leaderSpareOpen')
+      .replace('{name}', spareName(p.label))
+  }
+  if (p.kind !== 'external') return p.label.replace(/ \(h\)$/, '')
+  const vendor = pricedOffer(p)?.vendor_name ?? p.vendor_name
+  return [vendor, t('costpos.tc.toolChange')].filter(Boolean).join(', ')
+}
+
+/** "spare part not time critical (30 d) excluded", or null when none is. */
+export function excludedText(s: LeadSummary): string | null {
+  if (!s.excluded.length) return null
+  const d = Math.max(...s.excluded.map((x) => x.days))
+  return s.excluded.length === 1
+    ? t('costpos.tc.excluded').replace('{d}', String(d))
+    : t('costpos.tc.excludedMany').replace('{n}', String(s.excluded.length)).replace('{d}', String(d))
+}
+
+/** "30 d (spare part X, time critical)" or
+ *  "15 d (Hitech, tool change) · spare part not time critical (30 d) excluded". */
+export function leadSummaryText(s: LeadSummary): string {
+  const head = s.leader && s.days > 0 ? `${s.days} d (${leaderText(s.leader)})` : s.days > 0 ? `${s.days} d` : '-'
+  const ex = excludedText(s)
+  return ex ? `${head} · ${ex}` : head
+}
+
 const fieldCls =
   'bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100'
 
@@ -979,7 +1044,51 @@ function SpareAmount({ changeId, position: p, editable, onChanged }: {
             {[badName && t('costpos.itemName'), badQty && t('costpos.amount')].filter(Boolean).join(', ')} {t('costpos.missingWord')}</span>}
         </>
       ) : <span className="tabular-nums">{spareName(p.label) || '-'} · {p.quantity ?? '-'} {t('costpos.pcs')}</span>}
+      <TimeCritical changeId={changeId} position={p} editable={editable} />
     </div>
+  )
+}
+
+/** Christoph 2026-11-09: "It needs to be identified if spare parts are time
+ *  critical or not, that changes the sales timing." Yes: the spare part counts
+ *  for the lead time (it may be the time leader); No: it is left out. Red until
+ *  answered (Finalize asks for it), neutral once answered. Saves on click. */
+function TimeCritical({ changeId, position: p, editable }: {
+  changeId: number; position: CostPosition; editable: boolean
+}) {
+  const qc = useQueryClient()
+  const value = p.time_critical ?? null
+  const open = value == null
+  const save = useMutation({
+    mutationFn: (v: boolean) => changesApi.updateCostPosition(changeId, p.id, { time_critical: v }),
+    onSuccess: () => { toast.success(t('costpos.tc.saved')); invalidateCosting(qc, changeId) },
+    onError: (e: unknown) => toastError(e, 'Could not save time critical'),
+  })
+  const edge = open ? 'border-red-600' : 'border-slate-500'
+  return (
+    <span className="inline-flex items-center gap-1.5" data-testid={`spare-tc-${p.id}`}
+      data-answered={open ? 'no' : 'yes'}>
+      <span className={`font-medium ${open ? 'text-red-300' : 'text-slate-200'}`} title={t('costpos.tc.question')}>
+        {t('costpos.tc.label')}</span>
+      {editable ? (
+        <span role="group" aria-label={`${t('costpos.tc.label')}: ${t('costpos.tc.question')}`}
+          className={`inline-flex overflow-hidden rounded border ${edge}`}>
+          {([true, false] as const).map((b) => (
+            <button key={String(b)} type="button" aria-pressed={value === b}
+              data-testid={`spare-tc-${b ? 'yes' : 'no'}-${p.id}`}
+              disabled={save.isPending}
+              onClick={() => { if (value !== b) save.mutate(b) }}
+              className={`px-2 py-0.5 text-[11px] font-medium ${b ? `border-r ${edge}` : ''} ${value === b
+                ? 'bg-slate-600 text-white' : 'bg-slate-900 text-slate-300 hover:bg-slate-800'}`}>
+              {t(b ? 'costpos.tc.yes' : 'costpos.tc.no')}</button>
+          ))}
+        </span>
+      ) : (
+        <span className={open ? 'text-red-300' : 'text-slate-200'}>
+          {open ? t('costpos.tc.open') : t(value ? 'costpos.tc.yes' : 'costpos.tc.no')}</span>
+      )}
+      {open && editable && <span className="text-[11px] text-red-300">{t('costpos.tc.question')}</span>}
+    </span>
   )
 }
 
@@ -1417,6 +1526,10 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           ) : time ? (
             <span data-testid={`costpos-lead-${p.id}`} className="text-xs text-slate-400">
               {leadTimeText(time.days, time.unit)}
+              {!countsForLeadTime(p) && (
+                <span className="block text-[11px] text-slate-500" data-testid={`costpos-lead-excluded-${p.id}`}>
+                  {t('costpos.tc.notCounted')}</span>
+              )}
             </span>
           ) : null}
         </td>
@@ -2341,14 +2454,10 @@ export default function CostPositions({
         editable={editable} index={n} onChanged={invalidate} ctx={ctx} />
     )
   }
-  // the department's lead time: the longest line (favourite quote's days on quoted lines)
-  const leadMax = Math.max(0, ...mine.map((p) => {
-    if (p.kind === 'external' && p.pricing === 'quote') {
-      const fav = (p.offers ?? []).find((o) => o.favorite)
-      return fav?.lead_time_days ?? 0
-    }
-    return p.lead_time_days ?? 0
-  }))
+  // the department's lead time: the longest line (favourite quote's days on
+  // quoted lines); a spare part that is not time critical is left out
+  // (Christoph 2026-11-09, same rule as the backend's roll-ups)
+  const lead = leadSummary(mine)
   const unpriced = mine.filter((p) => p.rate_missing).length
   const totals = [...byCurrency.entries()]
 
@@ -2472,11 +2581,11 @@ export default function CostPositions({
                       <span className="block text-xs font-normal text-slate-300">{t('costpos.favShort')}: {money(extFav, cur0)}</span>
                     )}
                   </span>
-                  {leadMax > 0 && (
+                  {(lead.days > 0 || lead.excluded.length > 0) && (
                     <>
                       <span className="text-slate-300">{t('costpos.leadLongest')}</span>
                       <span className="text-right text-slate-200" data-testid={`costpos-total-lead-${departmentId}`}>
-                        {leadMax} d</span>
+                        {leadSummaryText(lead)}</span>
                     </>
                   )}
                   {totals.length > 1 && totals.map(([cur, v]) => (

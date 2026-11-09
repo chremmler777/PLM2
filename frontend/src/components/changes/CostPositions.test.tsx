@@ -976,3 +976,78 @@ describe('CostPositions — sections by line type (Christoph 2026-11-08)', () =>
     expect((await screen.findByTestId('est-transport-30')).textContent).toBe(t('costpos.transportInPrice'))
   })
 })
+
+describe('CostPositions — spare part time critical (Christoph 2026-11-09)', () => {
+  // change 31: tool change favourite Hitech 15 d, spare part Hasco 30 d
+  const toolChange = {
+    ...external, id: 64, label: 'Toolchange aadadaads', tag: null, hours: null, lead_time_days: 30,
+    lead_time_unit: 'calendar_days', notes: 'From the assessment: External modification (supplier)',
+    offers: [
+      { id: 17, vendor_name: 'Hitech', cost: 5000, shipping_cost: 0, shipping_included: false,
+        lead_time_days: 15, lead_time_unit: 'calendar_days', favorite: true },
+      { id: 20, vendor_name: 'sdfsdf', cost: 6000, shipping_cost: 0, shipping_included: false,
+        lead_time_days: 20, lead_time_unit: 'calendar_days', favorite: false },
+    ],
+  }
+  const spare = (time_critical: boolean | null) => ({
+    ...external, id: 66, label: 'Spare part: dsafsdfsdfs', tag: null, hours: null, quantity: 20,
+    quantity_unit: 'pcs', notes: 'From the assessment: sdfsdf', time_critical,
+    offers: [{ id: 21, vendor_name: 'Hasco', cost: 10, shipping_cost: 0, shipping_included: false,
+      lead_time_days: 30, lead_time_unit: 'calendar_days', favorite: true }],
+  })
+  const load = (tc: boolean | null) => vi.mocked(changesApi.listCostPositions)
+    .mockResolvedValue([toolChange, spare(tc), effort] as never)
+
+  beforeEach(() => {
+    vi.mocked(changesApi.costingTags).mockResolvedValue(TAGS as never)
+    vi.mocked(changesApi.listSupplierWaits).mockResolvedValue([])
+    vi.mocked(changesApi.updateCostPosition).mockClear()
+  })
+  afterEach(() => cleanup())
+
+  it('asks Yes/No in the spare part box, red until answered, and saves on click', async () => {
+    load(null)
+    positions()
+    const box = await screen.findByTestId('spare-tc-66')
+    expect(box.getAttribute('data-answered')).toBe('no')
+    expect(box.textContent).toContain(t('costpos.tc.label'))
+    expect(box.querySelector('.border-red-600')).toBeTruthy()
+    // next to the name and the amount, in the box header
+    expect(screen.getByTestId('spare-amount-66').contains(box)).toBe(true)
+    fireEvent.click(screen.getByTestId('spare-tc-yes-66'))
+    await waitFor(() => expect(changesApi.updateCostPosition).toHaveBeenCalledWith(7, 66, { time_critical: true }))
+  })
+
+  it('answered: neutral, the answer pressed, no red or amber', async () => {
+    load(false)
+    positions()
+    const box = await screen.findByTestId('spare-tc-66')
+    expect(box.getAttribute('data-answered')).toBe('yes')
+    expect(box.querySelector('.border-red-600, .text-red-300, [class*="amber"]')).toBeNull()
+    expect(screen.getByTestId('spare-tc-no-66').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('spare-tc-yes-66').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('time critical: the spare part is the time leader (30 d)', async () => {
+    load(true)
+    positions()
+    expect((await screen.findByTestId('costpos-total-lead-2')).textContent)
+      .toBe('30 d (spare part dsafsdfsdfs, time critical)')
+    expect(screen.queryByTestId('costpos-lead-excluded-66')).toBeNull()
+  })
+
+  it('not answered yet: the spare part still counts and says so', async () => {
+    load(null)
+    positions()
+    expect((await screen.findByTestId('costpos-total-lead-2')).textContent)
+      .toBe('30 d (spare part dsafsdfsdfs, time critical not answered)')
+  })
+
+  it('not time critical: excluded, the tool change favourite leads (15 d)', async () => {
+    load(false)
+    positions()
+    expect((await screen.findByTestId('costpos-total-lead-2')).textContent)
+      .toBe('15 d (Hitech, tool change) · spare part not time critical (30 d) excluded')
+    expect(screen.getByTestId('costpos-lead-excluded-66').textContent).toBe(t('costpos.tc.notCounted'))
+  })
+})

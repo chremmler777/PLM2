@@ -174,3 +174,46 @@ describe('PmCostingOverview', () => {
     expect(onJump).toHaveBeenCalledWith(3)
   })
 })
+
+describe('PmCostingOverview — spare part time critical (Christoph 2026-11-09)', () => {
+  // change 31: tool change favourite Hitech 15 d, spare part Hasco 30 d
+  const lines = (tc: boolean | null): CostPosition[] => [
+    pos({ id: 64, label: 'Toolchange', pricing: 'quote', effective_cost: 5000, favorite_offer_id: 17,
+      effective_lead_time_calendar_days: 15,
+      offers: [offer({ id: 17, vendor_name: 'Hitech', cost: 5000, total_cost: 5000, favorite: true,
+        lead_time_days: 15 })] as never }),
+    pos({ id: 66, label: 'Spare part: dsafsdfsdfs', notes: 'From the assessment: x', pricing: 'quote',
+      quantity: 20, quantity_unit: 'pcs', effective_cost: 200, favorite_offer_id: 31, time_critical: tc,
+      counts_for_lead_time: tc !== false, effective_lead_time_calendar_days: 30,
+      offers: [offer({ id: 31, vendor_name: 'Hasco', cost: 10, total_cost: 200, favorite: true,
+        lead_time_days: 30 })] as never }),
+  ]
+  const render31 = (tc: boolean | null, lead: number) => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue(lines(tc))
+    vi.mocked(changesApi.finalizeCheck).mockResolvedValue({ reasons: [], position_ids: [], items: [] } as never)
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <PmCostingOverview change={change({ costing_finalized_department_ids: [], open_supplier_waits: [] })}
+          departmentIds={[2]} deptName={(id) => NAMES[id]} isPm onJump={vi.fn()}
+          summation={{ ...(summation as object), lead_time_by_department: [{ department_id: 2, lead_time_days: lead }],
+            max_lead_time_days: lead } as never} />
+      </QueryClientProvider>)
+  }
+
+  it('time critical: the spare part leads with 30 d', async () => {
+    render31(true, 30)
+    expect((await screen.findByTestId('pm-lead-why-2')).textContent)
+      .toBe('30 d (spare part dsafsdfsdfs, time critical)')
+    expect(screen.getByTestId('pm-total-lead-why-2').textContent)
+      .toBe('30 d (spare part dsafsdfsdfs, time critical)')
+    expect(screen.queryByTestId('pm-line-excluded-66')).toBeNull()
+  })
+
+  it('not time critical: 15 d from the Hitech tool change, the spare part excluded', async () => {
+    render31(false, 15)
+    expect((await screen.findByTestId('pm-lead-why-2')).textContent)
+      .toBe('15 d (Hitech, tool change) · spare part not time critical (30 d) excluded')
+    expect(screen.getByTestId('pm-total-lead').textContent).toMatch(/15/)
+    expect(screen.getByTestId('pm-line-excluded-66').textContent).toMatch(/not counted/)
+  })
+})

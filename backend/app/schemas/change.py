@@ -1099,6 +1099,8 @@ class CostingPositionCreate(BaseModel):
     # A3-07: how many of what (a money line, ASSESSMENT_V2)
     quantity: Optional[float] = Field(default=None, gt=0)
     quantity_unit: Optional[str] = Field(default=None, max_length=20)
+    # Christoph 2026-11-09: a spare part is time critical (counts for the lead time)
+    time_critical: Optional[bool] = None
 
 
 class CostingPositionUpdate(BaseModel):
@@ -1129,6 +1131,9 @@ class CostingPositionUpdate(BaseModel):
     # A3-07: how many of what (a money line, ASSESSMENT_V2)
     quantity: Optional[float] = Field(default=None, gt=0)
     quantity_unit: Optional[str] = Field(default=None, max_length=20)
+    # Christoph 2026-11-09: a spare part is needed for the change (counts for
+    # the lead time); null = not answered
+    time_critical: Optional[bool] = None
 
 
 class CostingPositionResponse(BaseModel):
@@ -1171,6 +1176,11 @@ class CostingPositionResponse(BaseModel):
     basis_differs: Optional[str] = None
     quantity: Optional[float] = None
     quantity_unit: Optional[str] = None
+    # Christoph 2026-11-09: spare part lines say if they are time critical;
+    # counts_for_lead_time False = left out of every lead-time roll-up
+    is_spare_part: bool = False
+    time_critical: Optional[bool] = None
+    counts_for_lead_time: bool = True
     estimated: bool = False
     estimate_check: Optional[str] = None
     estimate_over: Optional[float] = None
