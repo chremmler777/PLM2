@@ -18,6 +18,7 @@ import BankBuildCard from '../BankBuildCard'
 import ImplementationTracking from '../ImplementationTracking'
 import ImplementationPanel from '../ImplementationPanel'
 import GanttPlanner from '../plan/GanttPlanner'
+import PlanFullscreen from '../plan/PlanFullscreen'
 import { formatDate } from '../../../lib/format'
 import DeviationsPanel from './DeviationsPanel'
 import TeamFeedbackPanel from './TeamFeedbackPanel'
@@ -303,6 +304,12 @@ export default function TimingTab({
       )}
       {/* The detailed plan is created by the "Create detailed plan" button in
           the card above; the Gantt's own seed button would be a second way in. */}
+      <div className="flex justify-end">
+        <PlanFullscreen title={`Timing${change.change_number ? ` · ${change.change_number}` : ''}`} testId="timing-fullscreen">
+          <GanttPlanner changeId={id} plan="detailed" mode={mode} status={status} changeNumber={change.change_number} hideSeed
+        focusTaskId={focusTaskId} />
+        </PlanFullscreen>
+      </div>
       <GanttPlanner changeId={id} plan="detailed" mode={mode} status={status} changeNumber={change.change_number} hideSeed
         focusTaskId={focusTaskId} />
 

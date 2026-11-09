@@ -3,9 +3,12 @@
  * component) plus how the offer states it: included or not, weeks from order
  * and the disclaimer that keeps the dates a draft.
  */
+import { useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useMiddlePan } from '../../../hooks/useMiddlePan'
 import { RotateCcw } from 'lucide-react'
 import GanttPlanner from '../plan/GanttPlanner'
+import PlanFullscreen from '../plan/PlanFullscreen'
 import { planApi } from '../../../api/changePlan'
 import type { OfferData } from '../../../types/changeOffer'
 import { DEFAULT_DISCLAIMER, fmtDate, inputCls, planWeeks, quotePlanKey } from './offerFormat'
@@ -33,6 +36,8 @@ export default function OfferTimingSection({
     queryKey: quotePlanKey(changeId),
     queryFn: () => planApi.get(changeId, 'quote'),
   })
+  const planBox = useRef<HTMLDivElement>(null)
+  useMiddlePan(planBox)
   const timing = data?.timing ?? { include: true }
   // The plan summary's span leaves idea blocks out (backend plan_out), so
   // the weeks never count an option; the offer's own weeks_from_order too.
@@ -43,12 +48,17 @@ export default function OfferTimingSection({
 
   return (
     <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
       <p className="text-xs text-slate-400">
         {readOnly
           ? 'The timing the customer accepted. It stays as offered; the detailed plan takes over from here.'
           : 'Rough timing for the offer. Move blocks, run work in parallel, add a bank build idea and safety buffers. Dates are revisited after order.'}
       </p>
-      <div className="-mx-1 overflow-x-auto" data-testid="offer-timing-planner" data-readonly={readOnly || undefined}>
+        <PlanFullscreen title={`Offer timing${changeNumber ? ` · ${changeNumber}` : ''}`} testId="offer-timing-fullscreen">
+          <GanttPlanner changeId={changeId} plan="quote" changeNumber={changeNumber} compact={readOnly} />
+        </PlanFullscreen>
+      </div>
+      <div ref={planBox} className="-mx-1 overflow-x-auto" data-testid="offer-timing-planner" data-readonly={readOnly || undefined}>
         <GanttPlanner changeId={changeId} plan="quote" changeNumber={changeNumber} compact={readOnly} />
       </div>
       {data && update && (
