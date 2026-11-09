@@ -177,7 +177,8 @@ async def test_seed_from_costing_positions(client, world, session_factory):
     tool = t["Insert rework - Hasco"]
     assert tool["kind"] == "downtime"            # Tool Engineer -> downtime
     assert tool["duration_days"] == 28           # 20 business days
-    assert tool["predecessors"] == [eng["id"]]
+    # Christoph 2026-11-09: the mold bank build links into the tool change
+    assert sorted(tool["predecessors"]) == sorted([eng["id"], t["Bank build (idea)"]["id"]])
     assert tool["source_position_id"] == tool_pos
     gauge = t["Gauge update"]
     assert gauge["kind"] == "supplier" and gauge["duration_days"] == 10

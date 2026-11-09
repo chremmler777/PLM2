@@ -10,7 +10,7 @@ vi.mock('../../../api/changePlan', () => ({
   planApi: {
     get: vi.fn(), seed: vi.fn(), createTask: vi.fn(), patchTask: vi.fn(), bulkPatch: vi.fn(),
     deleteTask: vi.fn(), schedule: vi.fn(), exportXml: vi.fn(), exportCsv: vi.fn(),
-    applyChanges: vi.fn(), importXml: vi.fn(), setCalendar: vi.fn(),
+    applyChanges: vi.fn(), importXml: vi.fn(), setCalendar: vi.fn(), reset: vi.fn(), deletePlan: vi.fn(),
   },
 }))
 vi.mock('../../../hooks/queries/useWorkflows', () => ({
@@ -355,7 +355,7 @@ describe('GanttPlanner (ECR adapter)', () => {
     renderPlanner()
     await screen.findByTestId('gantt-planner')
     const gets = vi.mocked(planApi.get).mock.calls.length
-    drag(screen.getByTestId('gantt-bar-shape-1'), 28)
+    drag(screen.getByTestId('gantt-bar-shape-1'), -28) // earlier: a later tool rework would run into the trial (planning rule b)
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Plan is read-only'))
     await waitFor(() => expect(vi.mocked(planApi.get).mock.calls.length).toBeGreaterThan(gets))
     expect(screen.getByTestId('gantt-row-1').textContent).toContain('5 Oct 26')
@@ -377,13 +377,13 @@ describe('GanttPlanner (ECR adapter)', () => {
     vi.mocked(planApi.bulkPatch).mockImplementationOnce(() => new Promise((r) => { release = r }))
     renderPlanner()
     await screen.findByTestId('gantt-planner')
-    drag(screen.getByTestId('gantt-bar-shape-1'), 28)
+    drag(screen.getByTestId('gantt-bar-shape-1'), -28) // earlier: a later tool rework would run into the trial (planning rule b)
     await waitFor(() => expect(planApi.bulkPatch).toHaveBeenCalledTimes(1))
     drag(screen.getByTestId('gantt-bar-shape-3'), 28)
     await new Promise((r) => setTimeout(r, 30))
     expect(planApi.bulkPatch).toHaveBeenCalledTimes(1)
     // The first move is still shown while the second is queued.
-    expect(screen.getByTestId('gantt-row-1').textContent).toContain('6 Oct 26')
+    expect(screen.getByTestId('gantt-row-1').textContent).toContain('4 Oct 26')
     expect(screen.getByTestId('gantt-row-3').textContent).toContain('14 Oct 26')
     await act(async () => { release(planOut()) })
     await waitFor(() => expect(planApi.bulkPatch).toHaveBeenCalledTimes(2))
@@ -395,7 +395,7 @@ describe('GanttPlanner (ECR adapter)', () => {
     renderPlanner({ plan: 'quote' })
     await screen.findByTestId('gantt-planner')
     const spy = vi.spyOn(qc, 'invalidateQueries')
-    drag(screen.getByTestId('gantt-bar-shape-1'), 28)
+    drag(screen.getByTestId('gantt-bar-shape-1'), -28) // earlier: a later tool rework would run into the trial (planning rule b)
     await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['change', 7, 'offers'] }))
   })
 
@@ -612,7 +612,9 @@ describe('GanttPlanner (ECR adapter)', () => {
   })
 
   it('manual scheduling (auto off) leaves successors where they are', async () => {
-    vi.mocked(planApi.get).mockResolvedValue(modernOut({ calendar: { mode: 'calendar', workdays: [1, 2, 3, 4, 5], holidays: [], auto: false } }))
+    // a design block, not a tool change: the planning rules do not hold the trial to it
+    const tasks = planOut().tasks.map((t) => (t.id === 1 ? { ...t, name: 'Design', kind: 'work' as const } : t))
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ tasks, calendar: { mode: 'calendar', workdays: [1, 2, 3, 4, 5], holidays: [], auto: false } }))
     renderPlanner()
     await screen.findByTestId('gantt-planner')
     drag(screen.getByTestId('gantt-bar-shape-1'), 56)
@@ -852,5 +854,63 @@ describe('GanttPlanner (ECR adapter)', () => {
     expect(screen.getByTestId('gantt-zoom-fit').getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByTestId('gantt-row-1').querySelector('[data-col="progress"]')).toBeNull()
   })
-})
 
+  // ---------------------------------------------------------------- Christoph 2026-11-09
+  it('refuses a move that starts the trial before the tool change is finished, and says why', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ calendar: { mode: 'calendar', workdays: [1, 2, 3, 4, 5], holidays: [], auto: false } }))
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    drag(screen.getByTestId('gantt-bar-shape-2'), -28) // sampling one day earlier: into the tool rework
+    const block = await screen.findByTestId('gantt-rule-block')
+    expect(block.textContent).toContain("Trial 'Sampling'")
+    expect(block.textContent).toContain('tool and gauge changes are finished')
+    expect(planApi.applyChanges).not.toHaveBeenCalled()
+    // the bar stays where the server has it
+    expect(screen.getByTestId('gantt-row-2').textContent).toContain('10 Oct 26')
+  })
+
+  it('resets the plan after an inline confirm (no browser dialog); cancel keeps it', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ plan_editor: true, reset_blocked_reason: null }))
+    vi.mocked(planApi.reset).mockResolvedValue(modernOut({ plan_editor: true, reset_blocked_reason: null }))
+    const confirmSpy = vi.spyOn(window, 'confirm')
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    fireEvent.click(screen.getByTestId('gantt-reset'))
+    const ask = screen.getByTestId('gantt-reset-confirm')
+    expect(ask.textContent).toContain('All 3 tasks')
+    expect(ask.textContent).toContain('from the quote plan')
+    fireEvent.click(screen.getByTestId('gantt-reset-cancel'))
+    expect(screen.queryByTestId('gantt-reset-confirm')).toBeNull()
+    expect(planApi.reset).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    fireEvent.click(screen.getByTestId('gantt-reset'))
+    fireEvent.click(screen.getByTestId('gantt-reset-go'))
+    await waitFor(() => expect(planApi.reset).toHaveBeenCalledWith(7, 'detailed'))
+    expect(confirmSpy).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
+  })
+
+  it('deletes the plan after the inline confirm', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ plan_editor: true, reset_blocked_reason: null }))
+    vi.mocked(planApi.deletePlan).mockResolvedValue(modernOut({ tasks: [], links: [], plan_editor: true }))
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    fireEvent.click(screen.getByTestId('gantt-delete-plan'))
+    expect(screen.getByTestId('gantt-reset-confirm').textContent).toContain('stays empty')
+    fireEvent.click(screen.getByTestId('gantt-reset-go'))
+    await waitFor(() => expect(planApi.deletePlan).toHaveBeenCalledWith(7, 'detailed'))
+  })
+
+  it('shows reset and delete disabled with the reason once timing is validated', async () => {
+    const why = 'The detailed plan cannot be reset or deleted: timing was validated.'
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ plan_editor: true, reset_blocked_reason: why, baseline_set: true, can_edit: false }))
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    expect((screen.getByTestId('gantt-reset') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('gantt-delete-plan') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('gantt-reset-blocked').textContent).toBe(why)
+  })
+})

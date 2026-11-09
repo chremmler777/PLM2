@@ -49,6 +49,14 @@ export const planApi = {
   seed: (id: number, plan: PlanKind, replace = false) =>
     client.post<PlanOut>(`${base(id)}/seed`, { plan, replace }).then((r) => r.data),
 
+  /** Delete every task and seed again (quote: from costing, detailed: from the quote plan). */
+  reset: (id: number, plan: PlanKind) =>
+    client.post<PlanOut>(`${base(id)}/reset`, { plan }).then((r) => r.data),
+
+  /** Delete every task: the plan stays empty and can be seeded again. */
+  deletePlan: (id: number, plan: PlanKind) =>
+    client.delete<PlanOut>(base(id), { params: { plan } }).then((r) => r.data),
+
   createTask: (id: number, body: TaskCreate) =>
     client.post<PlanOut>(`${base(id)}/tasks`, body).then((r) => r.data),
 

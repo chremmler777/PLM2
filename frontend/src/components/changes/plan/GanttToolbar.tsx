@@ -59,6 +59,12 @@ interface Props {
   onCalendar?: () => void
   calendarLabel?: string
   onOpenWindow?: () => void
+  /** Christoph 2026-11-09: reset (delete + seed again) and delete the plan; shown to plan editors. */
+  onReset?: () => void
+  onDeletePlan?: () => void
+  resetLabel?: string
+  /** Why reset / delete are not allowed now (items shown disabled with this reason). */
+  resetBlocked?: string | null
 }
 
 export default function PlanToolbar(p: Props) {
@@ -97,7 +103,7 @@ export default function PlanToolbar(p: Props) {
         Lanes
       </label>
       {/* Less-used actions in one menu: the toolbar stays on one line. */}
-      {(p.onSchedule || p.onCalendar || p.onImport || p.onSeed || p.onOpenWindow) && (
+      {(p.onSchedule || p.onCalendar || p.onImport || p.onSeed || p.onOpenWindow || p.onReset) && (
         <Menu label="More" ariaLabel="More plan actions" testId="gantt-more">
           {(close) => (
             <>
@@ -118,9 +124,20 @@ export default function PlanToolbar(p: Props) {
                 <button type="button" role="menuitem" className={menuItem} data-testid="gantt-open-window"
                   onClick={() => { close(); p.onOpenWindow?.() }}>Open in new window</button>
               )}
-              {p.onSeed && !p.empty && (
+              {p.onSeed && !p.empty && !p.onReset && (
                 <button type="button" role="menuitem" className={menuItem} data-testid="gantt-reseed"
                   onClick={() => { close(); p.onSeed?.() }}>{p.seedLabel}</button>
+              )}
+              {p.onReset && !p.empty && (
+                <div className="mt-1 border-t border-slate-800 pt-1">
+                  <button type="button" role="menuitem" className={menuItem} data-testid="gantt-reset"
+                    disabled={!!p.resetBlocked} onClick={() => { close(); p.onReset?.() }}>{p.resetLabel ?? 'Reset plan'}</button>
+                  <button type="button" role="menuitem" className={`${menuItem} text-red-300`} data-testid="gantt-delete-plan"
+                    disabled={!!p.resetBlocked} onClick={() => { close(); p.onDeletePlan?.() }}>Delete plan</button>
+                  {p.resetBlocked && (
+                    <p className="max-w-[280px] px-3 py-1 text-[11px] leading-snug text-slate-400" data-testid="gantt-reset-blocked">{p.resetBlocked}</p>
+                  )}
+                </div>
               )}
             </>
           )}

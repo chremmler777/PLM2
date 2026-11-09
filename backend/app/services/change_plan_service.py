@@ -779,27 +779,56 @@ class ChangePlanService:
                              preds=(order,))]
             await flush()
 
-        downtimes = [t for t in work_tail if t.kind == "downtime"]
+        # Christoph 2026-11-09: what each block is for the planning rules
+        # (plan_rules): tool changes get the MOLD bank build in front of
+        # them, line changes the ASSEMBLY bank build; each bank build links
+        # into the changes it covers (the rules then hold per pair)
+        from app.services import plan_rules
+        pos_by_id = {p.id: p for p in positions} if positions else {}
+
+        def role(t):
+            p = pos_by_id.get(t.source_position_id)
+            return plan_rules.classify(t.kind, t.name, t.lane, names.get(t.department_id),
+                                       p.tag if p is not None else None)
+        changes_ = [t for t in tasks if t.source_position_id is not None]
+        tool_changes = [t for t in changes_ if role(t) == plan_rules.TOOL_CHANGE]
+        line_changes = [t for t in changes_ if role(t) == plan_rules.LINE_CHANGE]
         # F5: a decided changeover is no idea any more: a running change
         # needs no bank, planned scrap builds it (a committed block)
         decided = getattr(change, "bank_build_mode", None)
-        if downtimes and decided != "running_change":
-            first = min(t.start_date for t in downtimes)
-            bank_days = td(cal, BANK_BUILD_DAYS)
-            bank_start = (cal.date_at(cal.idx(first) - bank_days) if cal.working
-                          else first - timedelta(days=BANK_BUILD_DAYS))
-            add("Bank build" if decided else "Bank build (idea)", "bank_build",
-                bank_start, bank_days,
-                lane=BANK_BUILD_DEPARTMENT, dept_id=ids_by_name.get(BANK_BUILD_DEPARTMENT),
-                is_idea=not decided)
+        if decided != "running_change":
+            for covered, label in ((tool_changes, "Bank build"),
+                                   (line_changes, "Assembly bank build")):
+                if not covered:
+                    continue
+                first = min(t.start_date for t in covered)
+                bank_days = td(cal, BANK_BUILD_DAYS)
+                bank_start = (cal.date_at(cal.idx(first) - bank_days) if cal.working
+                              else first - timedelta(days=BANK_BUILD_DAYS))
+                bank = add(label if decided else f"{label} (idea)", "bank_build",
+                           bank_start, bank_days, lane=BANK_BUILD_DEPARTMENT,
+                           dept_id=ids_by_name.get(BANK_BUILD_DEPARTMENT),
+                           is_idea=not decided)
+                for t in covered:
+                    pending_links.append((bank, t))
 
-        sampling = add("Sampling / trial", "sampling", after(*work_tail),
+        mold_tail = [t for t in work_tail if t not in line_changes] or work_tail
+        sampling = add("Sampling / trial", "sampling", after(*mold_tail),
                        td(cal, SAMPLING_DAYS), lane=TOOL_DEPARTMENT,
-                       dept_id=ids_by_name.get(TOOL_DEPARTMENT), preds=work_tail)
+                       dept_id=ids_by_name.get(TOOL_DEPARTMENT), preds=mold_tail)
         await flush()
+        trial_end = sampling
+        if line_changes and mold_tail is not work_tail:
+            # the assembly trial assembles the sampled parts on the changed line
+            line_dept = next((t.department_id for t in line_changes), None)
+            trial_end = add("Assembly trial", "sampling",
+                            after(sampling, *line_changes), td(cal, SAMPLING_DAYS),
+                            lane=names.get(line_dept), dept_id=line_dept,
+                            preds=(sampling, *line_changes))
+            await flush()
         validation = add("Measurement and validation", "validation",
-                         after(sampling), td(cal, VALIDATION_DAYS), lane="APQP",
-                         dept_id=ids_by_name.get("APQP"), preds=(sampling,))
+                         after(trial_end), td(cal, VALIDATION_DAYS), lane="APQP",
+                         dept_id=ids_by_name.get("APQP"), preds=(trial_end,))
         await flush()
         approval = add("Customer approval (PPAP / ISIR)", "customer",
                        after(validation), td(cal, CUSTOMER_APPROVAL_DAYS),
@@ -908,7 +937,8 @@ class ChangePlanService:
             commit = bool(decided) and t.kind == "bank_build" and t.is_idea
             n = ChangePlanTask(
                 change_id=change.id, plan=plan,
-                name=("Bank build" if commit and t.name == "Bank build (idea)" else t.name),
+                name=(t.name[:-len(" (idea)")] if commit and (t.name or "").endswith(" (idea)")
+                      else t.name),
                 lane=t.lane,
                 department_id=t.department_id, kind=t.kind,
                 is_idea=False if commit else t.is_idea,

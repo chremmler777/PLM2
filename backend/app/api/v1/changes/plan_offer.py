@@ -23,6 +23,7 @@ from app.services.change_plan_service import (
     ChangePlanService, PlanConflict, PlanForbidden, PlanRuleError,
 )
 from app.services.change_service import ChangeError, ChangeService
+from app.services import plan_rules
 from app.services.offer_service import OfferService
 from app.services.release_service import ReleaseService
 
@@ -262,8 +263,36 @@ async def _change(db: AsyncSession, change_id: int, user: User):
 
 async def _plan_out(db, change, plan, user):
     try:
-        return await ChangePlanService.get_plan(db, change, plan, user)
+        out = await ChangePlanService.get_plan(db, change, plan, user)
     except _ERRORS as e:
+        raise _http(e)
+    # Christoph 2026-11-09: the planning rules (plan_rules) in the issues
+    # list, each block's rule role, and whether the plan may be reset
+    ev = await plan_rules.evaluate(db, change, plan)
+    rule_issues = plan_rules.as_issues(ev["violations"])
+    out["validation"]["errors"] = rule_issues["errors"] + out["validation"]["errors"]
+    out["validation"]["warnings"] = rule_issues["warnings"] + out["validation"]["warnings"]
+    for t in out["tasks"]:
+        t["rule_role"] = ev["roles"].get(t["id"])
+        t["source_tag"] = ev["tags"].get(t.get("source_position_id"))
+    editor = await ChangePlanService.is_editor(db, change, user)
+    out["plan_editor"] = editor
+    out["reset_blocked_reason"] = plan_rules.reset_blocked_reason(change, plan, editor)
+    return out
+
+
+async def _rules_before(db, change, plan) -> set:
+    """The rule violations before a write (see _rules_after)."""
+    return await plan_rules.snapshot(db, change, plan)
+
+
+async def _rules_after(db, change, plan, before: set) -> None:
+    """Refuse (400, code) a write that created a new planning-rule
+    violation between committed blocks; nothing of it is kept."""
+    try:
+        await plan_rules.refuse_new(db, change, plan, before)
+    except PlanRuleError as e:
+        await db.rollback()
         raise _http(e)
 
 
@@ -303,6 +332,45 @@ async def seed_plan(
     return out
 
 
+@router.post("/{change_id}/plan/reset")
+async def reset_plan(
+    change_id: int, body: PlanIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Christoph 2026-11-09: delete every block of the plan and seed it
+    again (quote: from the costing, detailed: from the quote plan). Refused
+    once the customer accepted the quote plan or timing was validated."""
+    change = await _change(db, change_id, current_user)
+    try:
+        await plan_rules.reset_plan(db, change, body.plan, current_user,
+                                    reseed=True)
+    except _ERRORS as e:
+        await db.rollback()
+        raise _http(e)
+    out = await _plan_out(db, change, body.plan, current_user)
+    await db.commit()
+    return out
+
+
+@router.delete("/{change_id}/plan")
+async def delete_plan(
+    change_id: int, plan: str = Query("quote"),
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Christoph 2026-11-09: delete every block (the plan stays, empty; the
+    seed button is offered again). Same refusals as the reset."""
+    change = await _change(db, change_id, current_user)
+    try:
+        await plan_rules.reset_plan(db, change, plan, current_user,
+                                    reseed=False)
+    except _ERRORS as e:
+        await db.rollback()
+        raise _http(e)
+    out = await _plan_out(db, change, plan, current_user)
+    await db.commit()
+    return out
+
+
 @router.post("/{change_id}/plan/tasks")
 async def add_plan_task(
     change_id: int, body: TaskCreateIn,
@@ -310,10 +378,12 @@ async def add_plan_task(
 ):
     change = await _change(db, change_id, current_user)
     spec = body.model_dump(exclude={"plan"})
+    before = await _rules_before(db, change, body.plan)
     try:
         await ChangePlanService.add_task(db, change, body.plan, spec, current_user)
     except _ERRORS as e:
         raise _http(e)
+    await _rules_after(db, change, body.plan, before)
     out = await _plan_out(db, change, body.plan, current_user)
     await db.commit()
     return out
@@ -325,6 +395,7 @@ async def bulk_update_plan_tasks(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await _change(db, change_id, current_user)
+    before = await _rules_before(db, change, body.plan)
     try:
         await ChangePlanService.bulk_update(
             db, change, body.plan,
@@ -332,6 +403,7 @@ async def bulk_update_plan_tasks(
             current_user, reason=body.reason)
     except _ERRORS as e:
         raise _http(e)
+    await _rules_after(db, change, body.plan, before)
     # moved_ids: what the server moved by itself, not the blocks sent
     moved = ChangePlanService.take_moved(change, [u.id for u in body.updates])
     out = await _plan_out(db, change, body.plan, current_user)
@@ -348,10 +420,13 @@ async def update_plan_task(
     spec = body.model_dump(exclude_unset=True)
     reason = spec.pop("reason", None)
     try:
+        plan = (await ChangePlanService._get_task(db, change, task_id)).plan
+        before = await _rules_before(db, change, plan)
         task = await ChangePlanService.update_task(
             db, change, task_id, spec, current_user, reason=reason)
     except _ERRORS as e:
         raise _http(e)
+    await _rules_after(db, change, plan, before)
     moved = ChangePlanService.take_moved(change, [task_id])
     out = await _plan_out(db, change, task.plan, current_user)
     await db.commit()
@@ -381,11 +456,13 @@ async def schedule_plan(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await _change(db, change_id, current_user)
+    before = await _rules_before(db, change, body.plan)
     try:
         await ChangePlanService.schedule(db, change, body.plan, current_user,
                                          reason=body.reason)
     except _ERRORS as e:
         raise _http(e)
+    await _rules_after(db, change, body.plan, before)
     moved = ChangePlanService.take_moved(change)
     out = await _plan_out(db, change, body.plan, current_user)
     await db.commit()
@@ -398,11 +475,13 @@ async def add_plan_link(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await _change(db, change_id, current_user)
+    before = await _rules_before(db, change, body.plan)
     try:
         await ChangePlanService.add_link(
             db, change, body.plan, body.model_dump(exclude={"plan"}), current_user)
     except _ERRORS as e:
         raise _http(e)
+    await _rules_after(db, change, body.plan, before)
     moved = ChangePlanService.take_moved(change)
     out = await _plan_out(db, change, body.plan, current_user)
     await db.commit()
@@ -416,10 +495,13 @@ async def update_plan_link(
 ):
     change = await _change(db, change_id, current_user)
     try:
+        link_plan = (await ChangePlanService._get_link(db, change, link_id)).plan
+        before = await _rules_before(db, change, link_plan)
         link = await ChangePlanService.update_link(
             db, change, link_id, body.model_dump(exclude_unset=True), current_user)
     except _ERRORS as e:
         raise _http(e)
+    await _rules_after(db, change, link_plan, before)
     moved = ChangePlanService.take_moved(change)
     out = await _plan_out(db, change, link.plan, current_user)
     await db.commit()
@@ -449,12 +531,14 @@ async def set_plan_calendar(
     """The calendar of the plan `?plan=` (each plan has its own); answers
     that plan's PlanOut."""
     change = await _change(db, change_id, current_user)
+    before = await _rules_before(db, change, plan) if plan in ("quote", "detailed") else set()
     try:
         # only what the client sent: {"auto": false} alone keeps the calendar
         await ChangePlanService.set_calendar(
             db, change, body.model_dump(exclude_unset=True), current_user, plan=plan)
     except _ERRORS as e:
         raise _http(e)
+    await _rules_after(db, change, plan, before)
     moved = ChangePlanService.take_moved(change)
     out = await _plan_out(db, change, plan, current_user)
     await db.commit()
@@ -476,12 +560,14 @@ async def apply_plan_changes(
         "links_upsert": [u.model_dump(exclude_unset=True) for u in ch.links_upsert],
         "links_delete": list(ch.links_delete),
     }
+    before = await _rules_before(db, change, body.plan)
     try:
         maps = await ChangePlanService.apply_changes(
             db, change, body.plan, changes, current_user, reason=body.reason)
     except _ERRORS as e:
         await db.rollback()
         raise _http(e)
+    await _rules_after(db, change, body.plan, before)
     # moved_ids: what the server moved by itself, not the blocks sent
     sent = [u["id"] for u in changes["tasks_upsert"]
             if isinstance(u.get("id"), int) and not isinstance(u.get("id"), bool)]
@@ -581,6 +667,13 @@ async def validate_timing(
 ):
     """Sets the baseline; returns the detailed PlanOut."""
     change = await _change(db, change_id, current_user)
+    broken = [v for v in (await plan_rules.evaluate(db, change, "detailed"))["violations"]
+              if not v["idea"]]
+    if broken:
+        raise HTTPException(status_code=400, detail={
+            "message": "The detailed plan breaks a planning rule: "
+                       + "; ".join(v["message"] for v in broken),
+            "code": broken[0]["code"]})
     try:
         await ChangePlanService.validate_timing(db, change, current_user)
     except _ERRORS as e:

@@ -51,6 +51,7 @@ export function taskToGantt(t: TaskOut): GanttTask {
     meta: {
       department_id: t.department_id, department_name: t.department_name ?? null,
       own_lane: t.lane, sort_order: t.sort_order, source_position_id: t.source_position_id ?? null,
+      source_tag: t.source_tag ?? null, rule_role: t.rule_role ?? null,
       total_slack: t.total_slack ?? t.slack_days ?? null,
     },
   }

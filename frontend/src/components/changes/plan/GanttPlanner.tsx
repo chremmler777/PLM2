@@ -41,7 +41,10 @@ import {
   translateIdMap,
 } from './ecrAdapter'
 import { deadlineColor } from './ganttMath'
+import { newViolation, roleOf } from './planRules'
+import { applyChangeSet } from '../../gantt/engine/changes'
 import { apiErrorMessage } from '../../../lib/apiError'
+import { btnSm } from '../../common/buttonStyles'
 
 export interface GanttPlannerProps {
   changeId: number
@@ -80,6 +83,10 @@ const errDetail = (e: unknown): string | undefined => {
 
 /** A plan nobody works on any more: shown whole, without the progress column. */
 const ENDED = ['released', 'closed', 'rejected', 'cancelled']
+
+/** Refusal codes of the planning rules (backend plan_rules). */
+const RULE_CODES = new Set(['tool_change_during_bank_build', 'line_change_during_bank_build',
+  'trial_before_change_done', 'assembly_trial_before_line_done'])
 
 interface ReasonAsk { cs: ChangeSet; changed: MovedTask[]; moved: MovedTask[]; resolve: (cs: ChangeSet | null) => void }
 interface ConfirmState { title: string; body?: string; label: string; danger?: boolean; run: () => void }
@@ -134,6 +141,9 @@ export default function GanttPlanner({
   const [busy, setBusy] = useState(false)
   const [blank, setBlank] = useState(false)
   const [importWarnings, setImportWarnings] = useState<string[]>([])
+  // Christoph 2026-11-09: reset / delete asked inline; a move a planning rule refuses says why
+  const [resetAsk, setResetAsk] = useState<'reset' | 'delete' | null>(null)
+  const [ruleBlock, setRuleBlock] = useState<string | null>(null)
   const emptyFile = useRef<HTMLInputElement>(null)
 
   const model = useMemo(() => (data ? planToModel(data) : null), [data])
@@ -248,6 +258,9 @@ export default function GanttPlanner({
     } catch (e) {
       // Part of a multi-call save may have landed: the server copy is the truth.
       qc.invalidateQueries({ queryKey })
+      // A planning rule the server refused (same wording as the browser check)
+      const code = (e as { response?: { data?: { detail?: { code?: unknown } } } })?.response?.data?.detail?.code
+      if (typeof code === 'string' && RULE_CODES.has(code)) setRuleBlock(errDetail(e) ?? null)
       throw e
     }
   }), [changeId, plan, modern, model, afterSave, qc, queryKey, autoSchedule])
@@ -257,9 +270,17 @@ export default function GanttPlanner({
    * change needs a reason; the preview lists the successors the move pushes
    * (already in the ChangeSet as `meta.derived`, the server makes the same moves).
    */
-  const beforeChange = useCallback((cs0: ChangeSet, m: GanttModel): Promise<ChangeSet | null> | ChangeSet => {
+  const beforeChange = useCallback((cs0: ChangeSet, m: GanttModel): Promise<ChangeSet | null> | ChangeSet | null => {
     let cs = ideasFollow({ tasks: m.tasks, links: m.links, calendar: model?.calendar }, cs0)
-    if (!baselineSet || !hasDateChanges(cs)) return cs
+    // Planning rules (bank build -> tool / line change -> trial): refuse a
+    // change that newly breaks one, before it is sent; the server checks again.
+    const refused = (c: ChangeSet) => {
+      const broken = newViolation(m, applyChangeSet(m, c), model?.calendar)
+      if (broken) { setRuleBlock(broken.message); toast.error(broken.message); return true }
+      setRuleBlock(null)
+      return false
+    }
+    if (!baselineSet || !hasDateChanges(cs)) return refused(cs) ? null : cs
     let derived = new Set(Array.isArray(cs.meta?.derived) ? (cs.meta!.derived as GanttId[]).map(key) : [])
     if (!modern) {
       // An older server (no typed links) does not push: the successors move
@@ -268,6 +289,7 @@ export default function GanttPlanner({
       cs = r.cs
       derived = new Set(r.moved.map((x) => key(x.id)))
     }
+    if (refused(cs)) return null
     const full = cs
     const cal = makeCal(model?.calendar)
     const byKey = new Map(m.tasks.map((t) => [key(t.id), t]))
@@ -387,6 +409,13 @@ export default function GanttPlanner({
       label: 'Replace plan', danger: true, run: go,
     })
   }
+  const runReset = (what: 'reset' | 'delete') => {
+    setResetAsk(null)
+    void runServer(() => (what === 'reset' ? planApi.reset(changeId, plan) : planApi.deletePlan(changeId, plan)),
+      what === 'reset' ? 'Plan reset and seeded again' : 'Plan deleted').then((ok) => {
+      if (ok) ganttRef.current?.clearHistory()
+    })
+  }
   const importFile = (file: File) => {
     const hasTasks = (data?.tasks.length ?? 0) > 0
     const go = (replace: boolean) => void runServer(() => planApi.importXml(changeId, plan, file, replace), 'Plan imported')
@@ -442,7 +471,13 @@ export default function GanttPlanner({
   const addBuffer = () => apply(bufferChangeSet(ctx(), selection, 5))
   const addBankBuild = () => {
     const sched = departments.find((d) => d.name === 'Logistics' && d.is_active !== false)
-    const cs = bankBuildChangeSet(ctx(), selection, { lane: 'Logistics', departmentId: sched?.id ?? null })
+    const c = ctx()
+    let cs = bankBuildChangeSet(c, selection, { lane: 'Logistics', departmentId: sched?.id ?? null })
+    // In front of a line change it is the ASSEMBLY bank build (planning rule d)
+    const anchor = cs.addLinks?.[0] ? c.tasks.find((t) => key(t.id) === key(cs.addLinks![0].to)) : undefined
+    if (anchor && roleOf(anchor) === 'line_change' && cs.addTasks?.[0]) {
+      cs = { ...cs, addTasks: [{ ...cs.addTasks[0], name: 'Assembly bank build (idea)' }] }
+    }
     if (typeof cs.meta?.warning === 'string') toast.warning?.(cs.meta.warning)
     apply(cs)
   }
@@ -594,7 +629,11 @@ export default function GanttPlanner({
         toolbarStart={!compact ? (
           <PlanToolbar canStructure={canStructure} canDates={canDates} empty={empty}
             seedLabel={plan === 'quote' ? 'Seed again from costing' : 'Copy quote plan again'}
-            onSeed={canStructure ? () => seed(true) : undefined}
+            onSeed={canStructure && !data.plan_editor ? () => seed(true) : undefined}
+            onReset={data.plan_editor ? () => setResetAsk('reset') : undefined}
+            onDeletePlan={data.plan_editor ? () => setResetAsk('delete') : undefined}
+            resetLabel={plan === 'quote' ? 'Reset plan (seed again from costing)' : 'Reset plan (copy quote plan again)'}
+            resetBlocked={data.reset_blocked_reason ?? null}
             onCalendar={modern ? () => setCalendarOpen(true) : undefined}
             calendarLabel={`Calendar: ${model.calendar.mode === 'working' ? 'working days' : 'calendar days'}${autoSchedule && !baselineSet ? ', auto' : ''}`}
             onBuffer={addBuffer} onBankBuild={addBankBuild}
@@ -629,6 +668,29 @@ export default function GanttPlanner({
               </button>
             </div>
           </div>
+          {resetAsk && (
+            <div role="alertdialog" aria-label={resetAsk === 'reset' ? 'Reset the plan' : 'Delete the plan'}
+              className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-red-800/70 bg-red-950/40 px-3 py-2 text-xs text-red-100"
+              data-testid="gantt-reset-confirm">
+              <span className="min-w-0 flex-1">
+                {resetAsk === 'reset'
+                  ? `Reset the ${plan} plan? All ${data.tasks.length} tasks and their links are deleted and the plan is seeded again ${plan === 'quote' ? 'from the current costing' : 'from the quote plan'}. Your own changes to it are lost.`
+                  : `Delete the ${plan} plan? All ${data.tasks.length} tasks and their links are deleted. The plan stays empty and can be seeded again.`}
+                {plan === 'detailed' ? ' Team confirmations go stale.' : ''}
+              </span>
+              <button type="button" className={btnSm.danger} disabled={busy} data-testid="gantt-reset-go"
+                onClick={() => runReset(resetAsk)}>{resetAsk === 'reset' ? 'Reset plan' : 'Delete plan'}</button>
+              <button type="button" className={btn} onClick={() => setResetAsk(null)} data-testid="gantt-reset-cancel">Cancel</button>
+            </div>
+          )}
+          {ruleBlock && (
+            <div role="alert" className="mt-2 flex items-start gap-2 rounded-md border border-red-800/70 bg-red-950/40 px-3 py-2 text-xs text-red-100"
+              data-testid="gantt-rule-block">
+              <span className="min-w-0 flex-1"><span className="font-medium">Move refused: </span>{ruleBlock}</span>
+              <button type="button" className="text-red-300 hover:text-red-100" onClick={() => setRuleBlock(null)}
+                aria-label="Dismiss">Dismiss</button>
+            </div>
+          )}
           {showIssues && (
             <div className="mt-2 border-t border-slate-700 pt-2">
               <ValidationList errors={data.validation.errors} warnings={data.validation.warnings}

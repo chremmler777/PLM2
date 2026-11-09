@@ -39,6 +39,10 @@ export interface TaskOut {
   /** Same convention as end_date (exclusive). */
   baseline_finish: string | null
   source_position_id?: number | null
+  /** Costing category of the seeding position (planning rules). */
+  source_tag?: string | null
+  /** What the block is for the planning rules (backend plan_rules), null = none. */
+  rule_role?: string | null
   notes: string | null
   slack_days?: number | null
   is_critical?: boolean
@@ -117,6 +121,10 @@ export interface PlanOut {
   /** Migration 088: typed links and the plan calendar. Absent on older servers. */
   links?: PlanLink[]
   calendar?: PlanCalendar | null
+  /** The viewer may shape plans (Sales, PM, Logistics, lead, admin). */
+  plan_editor?: boolean
+  /** Why the plan may not be reset or deleted now; null = it may. */
+  reset_blocked_reason?: string | null
 }
 
 /** Answer of POST /plan/changes: the plan plus temp id maps. */

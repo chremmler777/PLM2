@@ -51,7 +51,7 @@ export default function OfferTimingSection({
       <div className="flex items-start justify-between gap-3">
       <p className="text-xs text-slate-400">
         {readOnly
-          ? 'The timing the customer accepted. It stays as offered; the detailed plan takes over from here.'
+          ? 'The timing the customer accepted. It stays as offered and can no longer be reset or deleted; the detailed plan takes over from here.'
           : 'Rough timing for the offer. Move blocks, run work in parallel, add a bank build idea and safety buffers. Dates are revisited after order.'}
       </p>
         <PlanFullscreen title={`Offer timing${changeNumber ? ` · ${changeNumber}` : ''}`} testId="offer-timing-fullscreen">
