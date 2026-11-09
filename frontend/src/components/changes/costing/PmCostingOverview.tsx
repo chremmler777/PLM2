@@ -17,6 +17,8 @@ import { Fragment, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { changesApi } from '../../../api/changes'
+import { changeOfferApi } from '../../../api/changeOffer'
+import { offersKey } from '../offer/useOfferDraft'
 import { formatDate, formatDays, formatMoney, formatNumber } from '../../../lib/format'
 import {
   countsForLeadTime, excludedText, leadSummary, leadSummaryText, lineGroupOf, spareName, type LineGroup,
@@ -225,6 +227,15 @@ export default function PmCostingOverview({
       enabled: !finalized.has(id),
     })),
   })
+  // Christoph 2026-11-09: PM sees when Sales is done ("Offer sent by X on date")
+  const offerOut = !!change.customer_relevant
+    && ['quoted', 'approved', 'in_implementation', 'in_validation', 'released', 'closed'].includes(change.status)
+  const { data: offers = [] } = useQuery({
+    queryKey: offersKey(changeId),
+    queryFn: () => changeOfferApi.list(changeId),
+    enabled: offerOut,
+  })
+  const sentOffer = offers.find((o) => o.status === 'sent' || o.status === 'accepted')
   const waits: SupplierWait[] = (change.open_supplier_waits ?? []).filter((w) => w.is_open && w.phase !== 'implementation')
   const labelOf = (pid?: number | null) => positions.find((p) => p.id === pid)?.label
 
@@ -271,6 +282,11 @@ export default function PmCostingOverview({
       className="rounded-lg border border-slate-700 bg-slate-900/50">
       <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-3 py-2">
         <h3 className="text-sm font-semibold text-slate-100">Costing overview</h3>
+        {sentOffer?.sent_at && (
+          <span data-testid="pm-overview-offer-sent" className="text-xs text-emerald-300">
+            Offer v{sentOffer.version} sent{sentOffer.sent_by_name ? ` by ${sentOffer.sent_by_name}` : ''} on {formatDate(sentOffer.sent_at)}
+          </span>
+        )}
         <span className="text-xs text-slate-400" data-testid="pm-overview-progress">
           {done} of {rows.length} finalized
           {openPoints > 0 && <> · <span className="text-amber-300">{openPoints} open point{openPoints === 1 ? '' : 's'}</span></>}

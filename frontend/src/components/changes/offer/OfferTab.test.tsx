@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { addDaysIso, formatDate, todayIso } from '../../../lib/format'
 import OfferTab, { type OfferTabProps } from './OfferTab'
 import { changeOfferApi } from '../../../api/changeOffer'
+import { changesApi } from '../../../api/changes'
 import type { ChangeDetail } from '../../../types/change'
 import type { OfferOut } from '../../../types/changeOffer'
 
@@ -22,6 +23,7 @@ vi.mock('../../../api/changes', () => ({
   changesApi: {
     listNegotiations: vi.fn().mockResolvedValue([]), addNegotiation: vi.fn(), deleteNegotiation: vi.fn(),
     customerResponse: vi.fn(), signOff: vi.fn(),
+    setChangeoverOffer: vi.fn().mockResolvedValue({}), chooseCostingOffer: vi.fn(),
   },
 }))
 vi.mock('../plan/GanttPlanner', () => ({ default: () => <div data-testid="mock-gantt" /> }))
@@ -577,5 +579,27 @@ describe('OfferTab', () => {
     price.scrollIntoView = spy
     fireEvent.click(within(screen.getByTestId('offer-warnings')).getByText(msg))
     expect(spy).toHaveBeenCalled()
+  })
+
+  it('the old-stock choice is saved on the change only once Sales picks it (Christoph 2026-11-09)', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    vi.mocked(changeOfferApi.patch).mockImplementation(async (_c, _o, body) =>
+      offer({ data: { ...offer().data, ...body.data } }))
+    renderTab(props())
+    await screen.findByTestId('offer-changeover')
+    await new Promise((r) => setTimeout(r, 1200))
+    expect(changesApi.setChangeoverOffer).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByTestId('changeover-mode')).getByText('Customer scraps the old stock'))
+    fireEvent.change(screen.getByTestId('changeover-date'), { target: { value: '2026-12-01' } })
+    await waitFor(() => expect(changesApi.setChangeoverOffer).toHaveBeenCalledWith(7, expect.objectContaining({
+      mode: 'customer_scrap', changeover_date: '2026-12-01' })), { timeout: 3000 })
+  })
+
+  it('a sent offer offers the ZIP and says who offered it when', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer({
+      status: 'sent', sent_at: '2026-11-09T08:00:00', sent_by_name: 'Karl Limburg' })])
+    renderTab(props({ change: change({ status: 'quoted' }) }))
+    expect(await screen.findByTestId('offer-package')).toBeDefined()
+    expect(screen.getByTestId('offer-offered-stamp').textContent).toContain('by Karl Limburg')
   })
 })

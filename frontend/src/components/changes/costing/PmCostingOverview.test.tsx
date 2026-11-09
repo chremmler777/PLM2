@@ -5,6 +5,9 @@ import PmCostingOverview, { externalOf, lineRange } from './PmCostingOverview'
 import { changesApi } from '../../../api/changes'
 import type { CostPosition } from '../../../types/change'
 
+vi.mock('../../../api/changeOffer', () => ({
+  changeOfferApi: { list: vi.fn().mockResolvedValue([{ id: 3, version: 2, status: 'sent', sent_at: '2026-11-09T08:00:00', sent_by_name: 'Karl Limburg' }]) },
+}))
 vi.mock('../../../api/changes', () => ({
   changesApi: {
     listCostPositions: vi.fn(),
@@ -215,5 +218,18 @@ describe('PmCostingOverview — spare part time critical (Christoph 2026-11-09)'
       .toBe('15 d (Hitech, tool change) · spare part not time critical (30 d) excluded')
     expect(screen.getByTestId('pm-total-lead').textContent).toMatch(/15/)
     expect(screen.getByTestId('pm-line-excluded-66').textContent).toMatch(/not counted/)
+  })
+})
+
+describe('Offer sent (Christoph 2026-11-09)', () => {
+  it('PM reads who sent the offer and when, once it is out', async () => {
+    show({ change: change({ status: 'quoted', customer_relevant: true }) })
+    const stamp = await screen.findByTestId('pm-overview-offer-sent')
+    expect(stamp.textContent).toContain('Offer v2 sent by Karl Limburg on')
+  })
+  it('says nothing while the change is still in costing', async () => {
+    show()
+    await screen.findByTestId('pm-costing-overview')
+    expect(screen.queryByTestId('pm-overview-offer-sent')).toBeNull()
   })
 })

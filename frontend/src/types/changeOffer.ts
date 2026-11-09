@@ -30,12 +30,35 @@ export interface OfferCostLine {
    *  Sampling and trials, Machine time, Supplier parts, Other), when the
    *  backend names it. Internal department labels never reach the customer. */
   customer_category?: string | null
+  /** Christoph 2026-11-09: what kind of block it is (who is doing what). */
+  block?: CostBlock | null
+  /** Our time: the department's hours and the rate they are valued at. */
+  hours?: number | null
+  rate?: number | null
+  /** A supplier position: its costing position and, with several quotes,
+   *  every quote Sales may pick (the favourite preselected). */
+  position_id?: number | null
+  quotes?: OfferQuote[]
+  quote_offer_id?: number | null
+}
+
+export type CostBlock = 'time' | 'machine_time' | 'sampling' | 'external' | 'supplier' | 'spare_part'
+
+export interface OfferQuote {
+  offer_id: number
+  vendor: string
+  total: number
+  /** The department's favourite. */
+  recommended: boolean
+  /** Sales' decision (costing: "Sales chose"). */
+  chosen: boolean
 }
 
 export interface OfferFactor {
   key: string
   label: string
-  type: 'pct' | 'amount'
+  /** multiplier: 1.15 adds 15 % of the cost basis (Sales markup). */
+  type: 'pct' | 'amount' | 'multiplier'
   value: number
   sign: 1 | -1
   enabled: boolean
@@ -48,10 +71,26 @@ export interface OfferFactor {
 
 /** A factor's "show on offer" with the backend's default when absent. */
 export const factorShown = (f: Pick<OfferFactor, 'key' | 'show'>): boolean =>
-  f.show ?? (f.key !== 'overhead' && f.key !== 'margin')
+  !SALES_MARKUP_KEYS.includes(f.key) && (f.show ?? (f.key !== 'overhead' && f.key !== 'margin'))
+
+/** Christoph 2026-11-09: Sales' markup on top of the cost blocks (backend
+ *  SALES_MARKUP_FACTORS): never its own row in the customer CBD. */
+export const SALES_MARKUP_FACTORS: { key: string; label: string; type: OfferFactor['type'] }[] = [
+  { key: 'sales_multiplier', label: 'Sales multiplier', type: 'multiplier' },
+  { key: 'sales_overhead', label: 'Sales overhead', type: 'pct' },
+  { key: 'sales_overhead_fixed', label: 'Sales overhead (fixed)', type: 'amount' },
+]
+export const SALES_MARKUP_KEYS = SALES_MARKUP_FACTORS.map((f) => f.key)
+
+export type RiskSource = 'risk' | 'assumption' | 'estimate' | 'sales'
 
 export interface OfferRisk {
-  concern_id: number
+  /** Identity across refreshes: c:<concern>, a:<assumption>, e:<position>, own:<id>. */
+  key?: string
+  /** Register risk, open assumption, costing estimate, or Sales' own text. */
+  source?: RiskSource
+  /** The register concern; null for the other sources. */
+  concern_id: number | null
   label: string
   severity?: number | null
   department?: string | null
@@ -67,6 +106,8 @@ export interface OfferChangeover {
   mode: ChangeoverMode
   scrap_qty?: number | null
   scrap_unit_price?: number | null
+  /** Christoph 2026-11-09: when the old stock ends (ISO date). */
+  changeover_date?: string | null
   note?: string | null
 }
 
@@ -89,6 +130,11 @@ export interface OfferTiming {
    *  an option for the customer, never part of the weeks from order. */
   milestones?: { label: string; date: string; idea?: boolean }[]
   disclaimer?: string | null
+  /** Christoph 2026-11-09, from the quote plan: the customer reads the
+   *  weeks with the Sales buffer; real time and buffer are internal. */
+  real_weeks?: number | null
+  sales_buffer_weeks?: number | null
+  total_weeks?: number | null
 }
 
 export interface OfferFreeField {
@@ -125,6 +171,8 @@ export interface OfferData {
   scope_text?: string | null
   /** Printed on the offer: a word to the customer about this version. */
   customer_note?: string | null
+  /** Christoph 2026-11-09: Sales' other notes, printed with the risks. */
+  other_notes?: string | null
 }
 
 export interface OfferTotals {
@@ -140,6 +188,10 @@ export interface OfferTotals {
   internal_cost?: number | null
   margin_abs?: number | null
   margin_pct?: number | null
+  /** Christoph 2026-11-09: included cost per department (internal only). */
+  by_department?: { department: string; amount: number; lines: number }[]
+  /** Sales multiplier + overhead, folded into the CBD rows. */
+  sales_markup?: number | null
 }
 
 export interface OfferDiffRow {

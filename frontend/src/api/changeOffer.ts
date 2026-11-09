@@ -31,6 +31,11 @@ export const changeOfferApi = {
     client.post<OfferOut>(`/v1/changes/${changeId}/offers/${offerId}/received`,
       { received_at: receivedAt }).then((r) => r.data),
 
+  /** Christoph 2026-11-09: offer PDF + internal breakdown + supplier quote files as one ZIP. */
+  packageZip: (changeId: number, offerId: number) =>
+    client.get<Blob>(`/v1/changes/${changeId}/offers/${offerId}/package`, { responseType: 'blob' })
+      .then((r) => r.data),
+
   /** The rendered PDF as a blob, for a new-tab preview through an object URL. */
   pdf: (changeId: number, offerId: number) =>
     client.get<Blob>(`/v1/changes/${changeId}/offers/${offerId}/pdf`, { responseType: 'blob' })

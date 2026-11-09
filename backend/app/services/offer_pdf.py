@@ -267,6 +267,25 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
+def changeover_sentence(co: dict, cur: str, loc: str = "de") -> str:
+    """Christoph 2026-11-09: the old-stock decision as ONE sentence the
+    customer is tied to: running change (old parts used up) or the customer
+    scraps the old stock; parts left and the changeover date when known."""
+    qty = _f(co.get("scrap_qty"))
+    when = co.get("changeover_date")
+    on = f" on {_d(when, loc)}" if when else ""
+    left = f"the remaining {_qty(qty, loc)} old parts" if qty else "the existing stock"
+    verb = "are" if qty else "is"
+    if co.get("mode") == "customer_pays_scrap":
+        price = _f(co.get("scrap_unit_price"))
+        cost = (f", at the customer's cost of {_qty(qty, loc)} pcs x {_money(price, cur)} = "
+                f"{_money(qty * price, cur)}" if qty and price else "")
+        return (f"Customer scraps the old stock: {left} {verb} scrapped at the "
+                f"changeover{on}{cost}.")
+    return (f"Running change: {left} {verb} used up before the changed part is "
+            f"introduced{(' (changeover' + on + ')') if on else ''}.")
+
+
 def _d(v, loc: str = "de") -> str:
     """A date on the offer: "26 Sep 2026" for every customer (decision
     2026-09-26: we are international, no 09/26/2026 or 26.09.2026).
@@ -986,15 +1005,7 @@ def render_offer_pdf(ctx: dict) -> bytes:
 
     # ---- 3 Changeover -------------------------------------------------
     co = data.get("changeover") or {}
-    if co.get("mode") == "customer_pays_scrap":
-        qty, price = _f(co.get("scrap_qty")), _f(co.get("scrap_unit_price"))
-        section("3. Changeover", [_p(
-            f"The existing stock is scrapped at the customer's cost: {_qty(qty, loc)} pcs "
-            f"x {_money(price, cur)} = {_money(qty * price, cur)}.", body)])
-    else:
-        section("3. Changeover", [_p(
-            "Running change: the existing stock is consumed before the "
-            "changed part is introduced.", body)])
+    section("3. Changeover", [_p(changeover_sentence(co, cur, loc), body)])
     if co.get("note"):
         story.append(_p(co["note"], small))
 
@@ -1040,7 +1051,9 @@ def render_offer_pdf(ctx: dict) -> bytes:
         sec += 1
 
     # ---- Risks --------------------------------------------------------
-    shown = [r for r in data.get("risks") or [] if isinstance(r, dict) and r.get("show")]
+    # an own risk Sales has not written yet is not printed
+    shown = [r for r in data.get("risks") or [] if isinstance(r, dict) and r.get("show")
+             and (r.get("source") != "sales" or str(r.get("label") or "").strip())]
     if shown:
         sev = {1: "Low", 2: "Medium", 3: "High"}
         rows = [[_p("Risk", head_c), _p("Severity", head_c), _p("Department", head_c),
@@ -1054,6 +1067,12 @@ def render_offer_pdf(ctx: dict) -> bytes:
     else:
         section(f"{sec}. Technical risks and assumptions", [_p(
             "No particular technical risks are stated for this change.", body)])
+    # Christoph 2026-11-09: Sales' other notes for the customer, with the risks
+    other_notes = _clean(data.get("other_notes")).strip()
+    if other_notes:
+        story += [Spacer(1, 3 * mm), _p("Other notes", cell_b)]
+        for para in other_notes.split("\n\n"):
+            story.append(_p(para, small))
 
     # ---- Terms --------------------------------------------------------
     terms = data.get("terms") or {}

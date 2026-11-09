@@ -3,16 +3,25 @@
  * (Sales may adjust or drop a line, the source stays visible), optional
  * factors sit on top, then the changeover, the piece-price effect and any free
  * items. The sum card on the right shows the server's arithmetic.
+ *
+ * Christoph 2026-11-09: the cost lines are one list grouped by department
+ * (who is doing what: our time as hours x rate, machine time, sampling,
+ * external work, supplier quotes, spare parts), every block included or not
+ * by Sales, a supplier line with several quotes picks its quote; Sales'
+ * markup sits on top and the internal breakdown shows cost, markup, price and
+ * margin.
  */
 import { t } from '../../../i18n/cmLabels'
+import { Fragment } from 'react'
 import {
-  factorShown,
+  factorShown, SALES_MARKUP_KEYS,
   type OfferCostLine, type OfferData, type OfferFactor, type OfferFreeField, type OfferPiecePrice,
-  type OfferChangeover,
+  type OfferChangeover, type OfferOut,
 } from '../../../types/changeOffer'
 import { X } from 'lucide-react'
 import { fmtMoney, inputCls } from './offerFormat'
 import { Field, NumField, Segmented, SubLabel, Toggle } from './ui'
+import { OfferInternalBreakdown, QuotePicker, SalesMarkupCard, blockLabel } from './OfferSalesBlocks'
 
 const CATEGORY_CHIP: Record<string, string> = {
   internal: 'bg-sky-950 text-sky-300 border-sky-900',
@@ -36,7 +45,16 @@ export const PRICE_WARNING_CODES = [
 
 export default function OfferPriceSection({
   data, update, editable, currency, annualEffect, onRefresh, refreshing, warnings = [],
+  offer, stale, onChooseQuote, choosing, canChooseQuote,
 }: {
+  /** The saved offer: the internal breakdown reads its totals. */
+  offer?: OfferOut
+  stale?: boolean
+  /** Sales' vendor decision on a supplier line (then the offer refreshes). */
+  onChooseQuote?: (offerId: number, reason?: string) => void
+  choosing?: boolean
+  /** The backend lets Sales choose only while the change is in quote creation. */
+  canChooseQuote?: boolean
   data: OfferData
   update: Update
   editable: boolean
@@ -48,6 +66,14 @@ export default function OfferPriceSection({
 }) {
   const priceWarnings = warnings.filter((w) => PRICE_WARNING_CODES.includes(w.code))
   const lines = data.cost_lines ?? []
+  // One group per department in the order costing lists them (who is doing what)
+  const groups: { dept: string; items: { l: OfferCostLine; i: number }[] }[] = []
+  lines.forEach((l, i) => {
+    const dept = l.department ?? 'Other'
+    let g = groups.find((x) => x.dept === dept)
+    if (!g) { g = { dept, items: [] }; groups.push(g) }
+    g.items.push({ l, i })
+  })
   // The customer's CBD groups lines by its own categories, not by our
   // departments: shown once the backend names them.
   const customerView = lines.some((l) => !!l.customer_category)
@@ -97,7 +123,7 @@ export default function OfferPriceSection({
                 <tr>
                   <th className="w-8 px-2 py-2" />
                   <th className="px-2 py-2 text-left font-medium">Line</th>
-                  <th className="px-2 py-2 text-left font-medium">Department</th>
+                  <th className="px-2 py-2 text-left font-medium">Block</th>
                   <th className="px-2 py-2 text-left font-medium">Type</th>
                   {customerView && <th className="px-2 py-2 text-left font-medium">Customer reads</th>}
                   <th className="whitespace-nowrap px-2 py-2 text-right font-medium">Source</th>
@@ -105,7 +131,16 @@ export default function OfferPriceSection({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/60">
-                {lines.map((l, i) => {
+                {groups.map((g) => (
+                  <Fragment key={g.dept}>
+                  <tr data-testid={`cost-group-${g.dept}`} className="bg-slate-900/40">
+                    <td />
+                    <td colSpan={customerView ? 4 : 3} className="px-2 py-1 text-xs font-semibold text-slate-300">{g.dept}</td>
+                    <td colSpan={2} className="px-2 py-1 text-right text-xs tabular-nums text-slate-400">
+                      {fmtMoney(g.items.filter(({ l }) => l.include).reduce((s, { l }) => s + (l.amount || 0), 0), currency)}
+                    </td>
+                  </tr>
+                {g.items.map(({ l, i }) => {
                   const changed = l.source_amount != null && Math.abs(l.amount - l.source_amount) > 0.004
                   return (
                     <tr key={l.key} data-testid={`cost-line-${l.key}`}
@@ -121,8 +156,18 @@ export default function OfferPriceSection({
                           <span data-testid={`offer-line-estimated-${l.key}`}
                             className="ml-1.5 rounded bg-amber-900/60 px-1.5 text-[11px] text-amber-100">
                             {t('basis.estimated')}</span>
+                        )}
+                        {l.hours != null && l.hours > 0 && (
+                          <span data-testid={`cost-line-hours-${l.key}`} className="block text-[11px] text-slate-500">
+                            {l.hours} h{l.rate != null ? ` × ${fmtMoney(l.rate, currency)}` : ''}
+                          </span>
+                        )}
+                        {(l.quotes?.length ?? 0) > 1 && onChooseQuote && (
+                          <QuotePicker lineKey={l.key} quotes={l.quotes!} selected={l.quote_offer_id}
+                            currency={currency} disabled={!editable || !canChooseQuote} busy={choosing}
+                            onChoose={onChooseQuote} />
                         )}</td>
-                      <td className="px-2 py-1.5 text-slate-400">{l.department ?? '-'}</td>
+                      <td data-testid={`cost-line-block-${l.key}`} className="px-2 py-1.5 text-slate-400">{blockLabel(l)}</td>
                       <td className="px-2 py-1.5">
                         <span className={`rounded border px-1.5 py-0 text-[11px] ${CATEGORY_CHIP[l.category] ?? CATEGORY_CHIP.other}`}>
                           {l.category}
@@ -146,6 +191,8 @@ export default function OfferPriceSection({
                     </tr>
                   )
                 })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>
@@ -159,7 +206,7 @@ export default function OfferPriceSection({
           Show on offer prints a factor as its own line. Hidden amounts are spread over the cost lines; the total stays the same.
         </p>
         <div className="space-y-1.5">
-          {factors.map((f, i) => (
+          {factors.map((f, i) => SALES_MARKUP_KEYS.includes(f.key) ? null : (
             <div key={f.key} data-testid={`factor-${f.key}`}
               className={`grid grid-cols-[auto_minmax(0,1.4fr)_auto_7rem_auto_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2 py-1.5 ${
                 f.enabled ? 'border-slate-600 bg-slate-900/60' : 'border-slate-800 bg-slate-900/20'}`}>
@@ -205,24 +252,33 @@ export default function OfferPriceSection({
         )}
       </div>
 
-      {/* Changeover */}
-      <div>
-        <SubLabel>Changeover</SubLabel>
+      <SalesMarkupCard data={data} update={update} editable={editable} currency={currency} />
+      {offer && <OfferInternalBreakdown offer={offer} stale={stale} />}
+
+      {/* Changeover: Christoph 2026-11-09, the old-stock decision the
+          customer is tied to (one sentence on the offer); saved on the
+          change too (PUT changeover-offer) */}
+      <div data-testid="offer-changeover">
+        <SubLabel>Old stock / changeover</SubLabel>
         <div className="flex flex-wrap items-end gap-3">
           <Segmented testId="changeover-mode" value={changeover.mode} disabled={!editable}
             options={[
-              { value: 'running_change', label: 'Running change' },
-              { value: 'customer_pays_scrap', label: 'Customer pays scrap' },
+              { value: 'running_change', label: 'Running change (old parts used up)' },
+              { value: 'customer_pays_scrap', label: 'Customer scraps the old stock' },
             ]}
             onChange={(v) => setChangeover({ mode: v })} />
+          <Field label="Old parts left (optional)">
+            <NumField value={changeover.scrap_qty} disabled={!editable} ariaLabel="Old parts left"
+              testId="scrap-qty" className="w-28" onChange={(v) => setChangeover({ scrap_qty: v })} />
+          </Field>
+          <Field label="Changeover date (optional)">
+            <input type="date" className={`${inputCls} w-40`} data-testid="changeover-date"
+              value={changeover.changeover_date ?? ''} disabled={!editable} aria-label="Changeover date"
+              onChange={(e) => setChangeover({ changeover_date: e.target.value || null })} />
+          </Field>
           {changeover.mode === 'customer_pays_scrap' && (
             <>
-              <Field label="Scrap quantity">
-                <NumField value={changeover.scrap_qty} disabled={!editable} ariaLabel="Scrap quantity"
-                  testId="scrap-qty" className="w-28" onChange={(v) => setChangeover({ scrap_qty: v })} />
-              </Field>
-              <span className="pb-1.5 text-slate-500">×</span>
-              <Field label={`Unit price (${currency})`}>
+              <Field label={`Charged per part (${currency}, optional)`}>
                 <NumField value={changeover.scrap_unit_price} disabled={!editable} ariaLabel="Scrap unit price"
                   testId="scrap-price" className="w-28" onChange={(v) => setChangeover({ scrap_unit_price: v })} />
               </Field>

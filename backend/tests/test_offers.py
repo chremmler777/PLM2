@@ -106,7 +106,9 @@ async def test_v1_is_seeded_from_costing_and_register(client, offer_world):
     assert line["label"] == "Insert rework (Hasco)" and line["category"] == "external"
     assert [f["key"] for f in d["factors"]] == [
         "overhead", "margin", "engineering_fee", "sampling_ppap",
-        "freight_packaging", "expedite", "discount"]
+        "freight_packaging", "expedite", "discount",
+        # Christoph 2026-11-09: Sales' markup, never shown on the offer
+        "sales_multiplier", "sales_overhead", "sales_overhead_fixed"]
     assert not any(f["enabled"] for f in d["factors"])
     assert next(f for f in d["factors"] if f["key"] == "discount")["sign"] == -1
     risk = d["risks"][0]
@@ -689,8 +691,10 @@ async def test_quote_plan_ideas_are_kept_marked_and_drawn_hatched(
     assert new_ideas <= ideas <= new_ideas | seeded_ideas
     assert all(not m.get("idea") for m in timing["milestones"]
                if m["label"] not in ideas)
+    # Christoph 2026-11-09: a bank build reads as an estimate on the PDF
+    est = " (estimate, floats with the PO)"
     snap_ideas = {t["name"] for t in snap["tasks"] if t.get("idea")}
-    assert snap_ideas == new_ideas | seeded_ideas
+    assert {n.replace(est, "") for n in snap_ideas} == new_ideas | seeded_ideas
     assert all("idea" not in t for t in snap["tasks"] if t["name"] not in snap_ideas)
 
     tasks = [{**t, "start": date.fromisoformat(t["start"]),

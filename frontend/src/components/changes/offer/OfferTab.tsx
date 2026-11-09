@@ -5,11 +5,12 @@
  * get the Approval variant: the cost summary, the quote plan and PM's
  * internal cost approval.
  */
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Check, CircleAlert, Lock } from 'lucide-react'
 import { changeOfferApi } from '../../../api/changeOffer'
+import { changesApi } from '../../../api/changes'
 import { toastError } from '../../../lib/apiError'
 import { formatCalendarDate } from '../../../lib/format'
 import ConfirmDialog from '../../common/ConfirmDialog'
@@ -156,6 +157,50 @@ function PdfButton({ changeId, offerId, testId = 'offer-preview-pdf' }: {
   )
 }
 
+/** Christoph 2026-11-09: everything Sales hands over as one ZIP (offer PDF,
+ *  internal breakdown, supplier quote files of the chosen quotes). */
+export function PackageButton({ changeId, offer }: { changeId: number; offer: OfferOut }) {
+  const [busy, setBusy] = useState(false)
+  const download = async () => {
+    setBusy(true)
+    try {
+      const blob = await changeOfferApi.packageZip(changeId, offer.id)
+      const url = URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob], { type: 'application/zip' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `offer-v${offer.version}-package.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (e) {
+      toastError(e, 'Could not build the offer package')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <button type="button" data-testid="offer-package" disabled={busy} onClick={() => { void download() }}
+      title="Offer PDF, internal breakdown and every supplier quote file of the chosen quotes"
+      className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-700 disabled:opacity-50">
+      {busy ? 'Packing' : 'Download all (ZIP)'}
+    </button>
+  )
+}
+
+/** "Offered on 9 Nov 2026 by Karl": Sales is done, PM sees when. */
+export function OfferedStamp({ offer }: { offer: Pick<OfferOut, 'status' | 'sent_at' | 'sent_by_name' | 'version'> }) {
+  if (offer.status === 'draft' || !offer.sent_at) return null
+  return (
+    <p data-testid="offer-offered-stamp"
+      className="mt-3 flex items-center gap-1.5 text-xs text-emerald-200">
+      <Check aria-hidden="true" size={12} className="shrink-0" />
+      Offer finished: v{offer.version} offered on {formatCalendarDate(offer.sent_at.slice(0, 10))}
+      {offer.sent_by_name ? ` by ${offer.sent_by_name}` : ''}
+    </p>
+  )
+}
+
 function OfferHeader({
   change, offer, latestSent, canWrite, onSend, onNewVersion, creating, warnings, stale, sendBlocked, sending,
   onDiscard, discarding, sendReasons = [], sendWarnings = [], newVersionLabel = 'New version',
@@ -253,6 +298,7 @@ function OfferHeader({
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 self-center">
           <PdfButton changeId={change.id} offerId={offer.id} />
+          <PackageButton changeId={change.id} offer={offer} />
           {onDiscard && offer.status === 'draft' && (
             <>
               <button type="button" data-testid="offer-discard" onClick={() => setConfirmDiscard(true)}
@@ -270,7 +316,8 @@ function OfferHeader({
             <button type="button" data-testid="offer-send" onClick={onSend}
               disabled={sendBlocked || sending || sendReasons.length > 0}
               aria-describedby={sendReasons.length > 0 ? 'offer-send-reasons' : undefined}
-              title={sendBlocked ? 'Saving your changes first' : undefined}
+              title={sendBlocked ? 'Saving your changes first'
+                : 'Offer finished: sends this version, the change moves to Quoted and PM is told'}
               className={buttonClass('primary')}>
               {sending ? 'Saving' : offer.kind === 'supplement' ? t('supp.send') : 'Send offer'}
             </button>
@@ -283,6 +330,7 @@ function OfferHeader({
           )}
         </div>
       </div>
+      <OfferedStamp offer={offer.status === 'draft' && latestSent ? latestSent : offer} />
       {canWrite && offer.status === 'draft' && sendReasons.length > 0 && (
         <div id="offer-send-reasons" data-testid="offer-send-reasons"
           className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300">
@@ -382,6 +430,49 @@ function OfferWorkspace({ props, offers, offer }: {
     mutationFn: () => changeOfferApi.create(change.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: offersKey(change.id) }),
     onError: (e: unknown) => toastError(e, 'Could not create a new version'),
+  })
+  // Christoph 2026-11-09: the old-stock decision lives on the change too
+  // (old-stock block, bank build prefill): saved shortly after Sales edits it
+  const co = data.changeover
+  const coKey = editable && co ? JSON.stringify([co.mode, co.scrap_qty ?? null, co.changeover_date ?? null, co.note ?? '']) : ''
+  const changeoverSaved = JSON.stringify([
+    change.changeover_offer_mode === 'customer_scrap' ? 'customer_pays_scrap' : change.changeover_offer_mode ? 'running_change' : null,
+    change.old_stock_parts ?? null, change.changeover_date ?? null, change.changeover_offer_note ?? ''])
+  // only what Sales changed here: opening the offer decides nothing
+  const coTouched = useRef(false)
+  const priceUpdate: typeof update = (k, v) => {
+    if (k === 'changeover') coTouched.current = true
+    update(k, v)
+  }
+  useEffect(() => {
+    if (!coTouched.current || !coKey || !co || coKey === changeoverSaved) return
+    const timer = setTimeout(() => {
+      changesApi.setChangeoverOffer(change.id, {
+        mode: co.mode === 'customer_pays_scrap' ? 'customer_scrap' : 'running_change',
+        old_stock_parts: co.scrap_qty != null ? Math.round(co.scrap_qty) : null,
+        changeover_date: co.changeover_date || null,
+        note: co.note || null,
+      }).then(() => qc.invalidateQueries({ queryKey: ['change', change.id] }))
+        .catch((e: unknown) => toastError(e, 'Could not save the changeover on the change'))
+    }, 1000)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coKey, changeoverSaved])
+  // Christoph 2026-11-09: Sales picks another supplier quote: the costing's
+  // vendor decision ("Sales chose X"), then the offer re-reads the costing
+  const chooseQuote = useMutation({
+    mutationFn: async ({ offerId, reason }: { offerId: number; reason?: string }) => {
+      if (!(await flush())) return null
+      await changesApi.chooseCostingOffer(change.id, offerId, reason)
+      return changeOfferApi.refresh(change.id, offer.id)
+    },
+    onSuccess: (o) => {
+      if (!o) return
+      qc.setQueryData<OfferOut[]>(offersKey(change.id), (old) => (old ?? []).map((x) => (x.id === o.id ? o : x)))
+      qc.invalidateQueries({ queryKey: ['change', change.id] })
+      toast.success('Supplier quote chosen; the offer is refreshed from costing')
+    },
+    onError: (e: unknown) => toastError(e, 'Could not choose the quote'),
   })
   const discard = useMutation({
     mutationFn: () => changeOfferApi.discard(change.id, offer.id),
@@ -495,13 +586,16 @@ function OfferWorkspace({ props, offers, offer }: {
           <fieldset disabled={refresh.isPending} aria-busy={refresh.isPending} data-testid="offer-edit-fieldset"
             className="m-0 min-w-0 space-y-4 border-0 p-0">
           <StepSection id="offer-price" n={2} title="Price" done={done['offer-price']}>
-            <OfferPriceSection data={data} update={update} editable={editable} currency={cur}
+            <OfferPriceSection data={data} update={priceUpdate} editable={editable} currency={cur}
               annualEffect={offer.totals.annual_effect}
               onRefresh={() => refresh.mutate()} refreshing={refresh.isPending}
-              warnings={offer.warnings ?? []} />
+              warnings={offer.warnings ?? []}
+              offer={offer} stale={dirty}
+              onChooseQuote={(offerId, reason) => chooseQuote.mutate({ offerId, reason })}
+              choosing={chooseQuote.isPending} canChooseQuote={change.status === 'quoting'} />
           </StepSection>
           <StepSection id="offer-risks" n={3} title="Risks" done={done['offer-risks']}
-            hint="Choose which risks the customer reads and price a surcharge where a risk is real money.">
+            hint="Every department's risks, open assumptions and estimates: choose which the customer reads, price a surcharge where a risk is real money, add your own and other notes.">
             <OfferRisksSection data={data} update={update} editable={editable} currency={cur}
               risksTotal={offer.totals.risks_total ?? 0} />
           </StepSection>

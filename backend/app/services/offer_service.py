@@ -59,6 +59,21 @@ DEFAULT_FACTORS = [
     ("expedite", "Expedite surcharge", "pct", 1),
     ("discount", "Discount", "pct", -1),
 ]
+# Christoph 2026-11-09: Sales' own markup on top of the cost blocks: a
+# multiplier (1.15 = +15 % of the cost basis) and/or an overhead in % or a
+# fixed amount. Internal only: never its own row in the customer CBD, always
+# folded into the rows (as the hidden overhead and margin are); the internal
+# breakdown shows it with the margin. (key, label, type)
+SALES_MARKUP_FACTORS = [
+    ("sales_multiplier", "Sales multiplier", "multiplier"),
+    ("sales_overhead", "Sales overhead", "pct"),
+    ("sales_overhead_fixed", "Sales overhead (fixed)", "amount"),
+]
+SALES_MARKUP_KEYS = tuple(k for k, _, _ in SALES_MARKUP_FACTORS)
+# Where a risk on the offer comes from: the register (any department, any
+# stage), an Assumed answer not confirmed yet, a costing position priced on
+# an estimate, or a line Sales wrote himself.
+RISK_SOURCES = ("risk", "assumption", "estimate", "sales")
 SEEDED_LINE_PREFIXES = ("dept:", "dept_ext:", "pos:", "dept_mt:", "dept_smp:")
 # On a department's internal line whose Sales override was reduced by the
 # machine time and sampling lines split out of it (refresh): the amount it
@@ -86,7 +101,29 @@ def customer_category_for_external(department_name: Optional[str]) -> str:
     return "Engineering"
 # Factors the customer does not see as a line by default: their amount is
 # folded into the cost lines on the PDF (the total is the same).
-HIDDEN_FACTOR_KEYS = ("overhead", "margin")
+HIDDEN_FACTOR_KEYS = ("overhead", "margin") + SALES_MARKUP_KEYS
+
+
+def risk_key(r: dict) -> Optional[str]:
+    """A risk row's identity across versions and refreshes: its key, or the
+    register concern it stands for (rows from before keys)."""
+    if r.get("key"):
+        return str(r["key"])
+    return f"c:{r['concern_id']}" if r.get("concern_id") is not None else None
+
+
+def factor_amount(f: dict, base: float) -> float:
+    """One enabled factor's money on the cost basis (sign applied). A
+    multiplier of 1.15 adds 15 % of the basis; 0 or empty adds nothing."""
+    value = _num(f.get("value"))
+    typ = f.get("type", "pct")
+    if typ == "multiplier":
+        amount = (value - 1.0) * base if value > 0 else 0.0
+    elif typ == "pct":
+        amount = value / 100.0 * base
+    else:
+        amount = value
+    return amount * (-1 if f.get("sign", 1) == -1 else 1)
 # What the PDF of a sent version is rendered from (parts, quote plan,
 # letterhead as they were when it was sent). Server-owned: never patched.
 SNAPSHOT_KEY = "_snapshot"
@@ -150,6 +187,9 @@ def default_data() -> dict:
         "terms": {"payment": "30 days net", "incoterms": "", "delivery": "",
                   "notes": ""},
         "show_risk_surcharge": False,
+        # Christoph 2026-11-09: Sales' other notes for the customer, printed
+        # with the risks
+        "other_notes": "",
     }
 
 
@@ -311,7 +351,7 @@ def normalise(data: Optional[dict], *, strict: bool = False,
     if out["changeover"].get("mode") not in ("running_change", "customer_pays_scrap"):
         refuse("changeover.mode must be 'running_change' or 'customer_pays_scrap'",
                lambda: out["changeover"].__setitem__("mode", "running_change"))
-    for key in ("scope_text", "customer_note"):
+    for key in ("scope_text", "customer_note", "other_notes"):
         if out.get(key) is None:
             out[key] = ""
         elif not isinstance(out[key], str):
@@ -345,8 +385,9 @@ def normalise(data: Optional[dict], *, strict: bool = False,
         if "source_amount" in line:
             num(line, "source_amount", "cost line source amount")
     for f in out["factors"] + out["risks"]:
-        if f.get("type", "pct") not in ("pct", "amount"):
-            refuse("factor and risk type must be 'pct' or 'amount'",
+        allowed = ("pct", "amount", "multiplier") if f in out["factors"] else ("pct", "amount")
+        if f.get("type", "pct") not in allowed:
+            refuse("factor type must be 'pct', 'amount' or 'multiplier', risk type 'pct' or 'amount'",
                    lambda: f.__setitem__("type", "pct"))
         num(f, "value", f"{f.get('label') or f.get('key') or 'factor or risk'} value")
     for f in out["factors"]:
@@ -356,6 +397,9 @@ def normalise(data: Optional[dict], *, strict: bool = False,
         # by default; any other factor (custom ones too) is.
         f["show"] = _bool(f.get("show"),
                           default=f.get("key") not in HIDDEN_FACTOR_KEYS)
+        if f.get("key") in SALES_MARKUP_KEYS:
+            # never its own row on the customer's offer
+            f["show"] = False
     out["show_risk_surcharge"] = _bool(out.get("show_risk_surcharge"))
     for f in out["free_fields"]:
         # A free field without an amount is a text line in the terms.
@@ -399,13 +443,12 @@ def compute_totals(data: dict, internal_cost: float) -> dict:
     for f in data.get("factors") or []:
         if not f.get("enabled"):
             continue
-        value = _num(f.get("value"))
-        amount = (value / 100.0 * base if f.get("type", "pct") == "pct" else value)
-        amount *= -1 if f.get("sign", 1) == -1 else 1
+        amount = factor_amount(f, base)
         factors.append({"key": f.get("key"), "label": f.get("label"),
                         "amount": round(amount, 2),
-                        "show": _bool(f.get("show"), default=f.get("key")
-                                      not in HIDDEN_FACTOR_KEYS)})
+                        "show": (False if f.get("key") in SALES_MARKUP_KEYS
+                                 else _bool(f.get("show"), default=f.get("key")
+                                            not in HIDDEN_FACTOR_KEYS))})
     risks_total = 0.0
     for r in data.get("risks") or []:
         value = _num(r.get("value"))
@@ -425,6 +468,17 @@ def compute_totals(data: dict, internal_cost: float) -> dict:
     total = round(total, 2)
     internal_cost = round(float(internal_cost or 0.0), 2)
     margin_abs = round(total - internal_cost, 2)
+    # Christoph 2026-11-09: who is doing what, per department (the included
+    # cost blocks), and Sales' markup on top: the internal view, never the CBD
+    blocks: dict = {}
+    for l in data.get("cost_lines") or []:
+        if not l.get("include", True):
+            continue
+        dept = l.get("department") or "Other"
+        b = blocks.setdefault(dept, {"department": dept, "amount": 0.0, "lines": 0})
+        b["amount"] += _num(l.get("amount"))
+        b["lines"] += 1
+    markup = round(sum(f["amount"] for f in factors if f["key"] in SALES_MARKUP_KEYS), 2)
     return {
         "base": round(base, 2), "factors": factors,
         "risks_total": round(risks_total, 2), "scrap": round(scrap, 2),
@@ -432,6 +486,8 @@ def compute_totals(data: dict, internal_cost: float) -> dict:
         "piece_price_delta": piece, "annual_effect": annual,
         "internal_cost": internal_cost, "margin_abs": margin_abs,
         "margin_pct": (round(margin_abs / total * 100.0, 2) if total else None),
+        "by_department": [{**b, "amount": round(b["amount"], 2)} for b in blocks.values()],
+        "sales_markup": markup,
     }
 
 
@@ -479,6 +535,8 @@ def offer_diff(prev: dict, prev_totals: dict, cur: dict, cur_totals: dict,
         a, b = pf.get(k), cf.get(k)
         label = (b or a).get("label") or k
         if a is None or b is None:
+            if k in SALES_MARKUP_KEYS and not (a or b).get("enabled"):
+                continue   # seeded off on a newer draft: nothing changed
             add(f"Factor {label} {'added' if a is None else 'removed'}",
                 None if a is None else (_num(a.get("value")) if a.get("enabled") else "off"),
                 None if b is None else (_num(b.get("value")) if b.get("enabled") else "off"))
@@ -487,7 +545,8 @@ def offer_diff(prev: dict, prev_totals: dict, cur: dict, cur_totals: dict,
             _num(a.get("value")) if a.get("enabled") else None,
             _num(b.get("value")) if b.get("enabled") else None)
         add(f"Factor {label} shown on offer", a.get("show"), b.get("show"))
-    pr, cr = by(prev.get("risks"), "concern_id"), by(cur.get("risks"), "concern_id")
+    pr = {risk_key(r): r for r in prev.get("risks") or [] if risk_key(r)}
+    cr = {risk_key(r): r for r in cur.get("risks") or [] if risk_key(r)}
     for k in keys(pr, cr):
         a, b = pr.get(k) or {}, cr.get(k) or {}
         label = b.get("label") or a.get("label") or k
@@ -495,13 +554,15 @@ def offer_diff(prev: dict, prev_totals: dict, cur: dict, cur_totals: dict,
             _num(b.get("value")) if b else None)
         if a and b:
             add(f"Risk {label} shown", bool(a.get("show")), bool(b.get("show")))
-            add(f"Risk {k} label", a.get("label") or "", b.get("label") or "")
+            ident = b.get("concern_id") if b.get("concern_id") is not None else k
+            add(f"Risk {ident} label", a.get("label") or "", b.get("label") or "")
             add(f"Risk {label} severity", a.get("severity"), b.get("severity"))
             add(f"Risk {label} department", a.get("department") or "",
                 b.get("department") or "")
             add(f"Risk {label} note", a.get("note") or "", b.get("note") or "")
     add("Risk surcharges shown on offer", bool(prev.get("show_risk_surcharge")),
         bool(cur.get("show_risk_surcharge")))
+    add("Other notes", prev.get("other_notes") or "", cur.get("other_notes") or "")
     pc, cc = prev.get("changeover") or {}, cur.get("changeover") or {}
     add("Changeover", pc.get("mode"), cc.get("mode"))
     add("Scrap quantity", pc.get("scrap_qty"), cc.get("scrap_qty"))
@@ -733,7 +794,12 @@ class OfferService:
         # internal money; the customer reads them as their own lines.
         machine_by_dept: dict[int, float] = {}
         sampling_by_dept: dict[int, float] = {}
+        # Christoph 2026-11-09: our time as hours x rate per department
+        hours_by_dept: dict[int, tuple] = {}
         for agg in summ.get("positions_by_department") or []:
+            if agg.get("hours"):
+                hours_by_dept[agg["department_id"]] = (
+                    float(agg["hours"]), float(agg.get("hours_cost") or 0.0))
             for pos in agg.get("positions") or []:
                 value = pos.get("line_value") or 0.0
                 if pos.get("kind") == "machine_time":
@@ -755,16 +821,24 @@ class OfferService:
             if own > 0.004:
                 line(f"dept:{did}", f"{dname} internal effort", dname,
                      "internal", own, "Engineering")
+                lines[-1]["block"] = "time"
+                hrs, cost = hours_by_dept.get(did, (0.0, 0.0))
+                if hrs > 0:
+                    lines[-1]["hours"] = round(hrs, 2)
+                    lines[-1]["rate"] = round(cost / hrs, 2) if cost else None
             if machine > 0.004:
                 line(f"dept_mt:{did}", f"{dname} machine time", dname,
                      "internal", machine, "Machine time")
+                lines[-1]["block"] = "machine_time"
             if sampling > 0.004:
                 line(f"dept_smp:{did}", f"{dname} sampling and trials", dname,
                      "internal", sampling, "Sampling and trials")
+                lines[-1]["block"] = "sampling"
             rest = row["one_time_external"] - ext_by_dept.get(did, 0.0)
             if rest > 0.004:
                 line(f"dept_ext:{did}", f"{dname} external costs", dname,
                      "external", rest, "Other")
+                lines[-1]["block"] = "external"
         for p in positions:
             offer = p.chosen_offer or p.favorite_offer
             vendor = offer.vendor_name if offer is not None else p.vendor_name
@@ -774,6 +848,19 @@ class OfferService:
                  customer_category_for_external(names.get(p.department_id)))
             # spec §4 (C25): an estimate shows as "estimated" on the offer
             lines[-1]["estimated"] = p.estimated
+            # Christoph 2026-11-09: the block it is, and every supplier quote
+            # Sales may pick instead of the department's favourite
+            lines[-1]["block"] = "spare_part" if p.is_spare_part else "supplier"
+            lines[-1]["position_id"] = p.id
+            rec = p.recommended_offer
+            if len(p.offers) > 1:
+                lines[-1]["quotes"] = [{
+                    "offer_id": o.id, "vendor": o.vendor_name,
+                    "total": round(float(p.offer_total(o) or 0.0), 2),
+                    "recommended": rec is not None and o.id == rec.id,
+                    "chosen": bool(o.chosen),
+                } for o in p.offers]
+                lines[-1]["quote_offer_id"] = offer.id if offer is not None else None
         return lines, float(summ["totals"]["grand_total"] or 0.0)
 
     @staticmethod
@@ -792,6 +879,7 @@ class OfferService:
             if c.kind != "risk" or not c.is_open:
                 continue
             out.append({
+                "key": f"c:{c.id}", "source": "risk",
                 "concern_id": c.id,
                 "label": labels.get(c.risk_type or "", c.risk_type or "Risk"),
                 "severity": c.severity, "department": names.get(c.department_id),
@@ -800,6 +888,37 @@ class OfferService:
                 # customer reads it, whatever its severity.
                 "show": False, "type": "pct", "value": 0,
                 "note": c.note,
+            })
+        # Christoph 2026-11-09: Sales sees ALL risks: also every Assumed
+        # answer not confirmed yet (send_list's rule) and every costing
+        # position priced on an estimate
+        for q in change.concerns:
+            if q.kind == "risk" or q.answer_kind != "assumed" \
+                    or q.confirmed_at is not None or q.retracted_at is not None:
+                continue
+            value = ((q.assumed_value or "") + (
+                f" {q.assumed_unit}" if q.assumed_unit else "")).strip()
+            out.append({
+                "key": f"a:{q.id}", "source": "assumption", "concern_id": None,
+                "label": f"Assumed: {q.note}"[:200] + (f" = {value}" if value else ""),
+                "severity": None,
+                "department": names.get(q.department_id),
+                "show": False, "type": "pct", "value": 0,
+                "note": q.assumed_risk or "",
+            })
+        from app.services import early_costing
+        uncounted = await early_costing.uncounted_position_department_ids(
+            session, change.id)
+        for p in (await session.execute(
+                select(CostingPosition).where(CostingPosition.change_id == change.id)
+                .order_by(CostingPosition.department_id, CostingPosition.id))).scalars().all():
+            if p.department_id in uncounted or not p.estimated:
+                continue
+            out.append({
+                "key": f"e:{p.id}", "source": "estimate", "concern_id": None,
+                "label": f"Priced on an estimate: {p.label}"[:200],
+                "severity": None, "department": names.get(p.department_id),
+                "show": False, "type": "pct", "value": 0, "note": "",
             })
         return out
 
@@ -811,12 +930,24 @@ class OfferService:
         tasks = await ChangePlanService.tasks(session, change, "quote")
         real = [t for t in tasks if not t.is_idea]
         weeks = None
+        split: dict = {}
         if real:
             order = next((t for t in real if t.kind == "milestone"), real[0])
             last = max(t.end_date for t in real)
             weeks = max(1, math.ceil((last - order.start_date).days / 7))
+            # Christoph 2026-11-09: the customer reads the timing WITH the
+            # Sales buffer (plan total); real time and buffer stay internal
+            from app.services import plan_quote
+            summ = plan_quote.timing_summary(
+                tasks, ChangePlanService.calendar(change, "quote"))
+            if summ.get("total_weeks"):
+                weeks = max(1, math.ceil(summ["total_weeks"]))
+            split = {"real_weeks": summ.get("real_weeks"),
+                     "sales_buffer_weeks": summ.get("sales_buffer_weeks"),
+                     "total_weeks": summ.get("total_weeks")}
         milestones = []
         for t in tasks:
+            # a bank build is an estimate (floats with the PO): no fixed date
             if t.kind in ("milestone", "sampling", "customer"):
                 when = (t.start_date if int(t.duration_days or 0) == 0
                         else t.end_date - timedelta(days=1))
@@ -824,7 +955,7 @@ class OfferService:
                 if t.is_idea:
                     m["idea"] = True
                 milestones.append(m)
-        return {"weeks_from_order": weeks, "milestones": milestones}
+        return {"weeks_from_order": weeks, "milestones": milestones, **split}
 
     @staticmethod
     async def seed_data(session: AsyncSession, change: ChangeRequest) -> dict:
@@ -842,6 +973,10 @@ class OfferService:
         data["factors"] = [
             {"key": k, "label": lbl, "type": typ, "value": 0, "sign": sign,
              "enabled": False, "note": ""} for k, lbl, typ, sign in DEFAULT_FACTORS]
+        data["factors"] += [
+            {"key": k, "label": lbl, "type": typ, "value": 1 if typ == "multiplier" else 0,
+             "sign": 1, "enabled": False, "note": "", "show": False}
+            for k, lbl, typ in SALES_MARKUP_FACTORS]
         data["risks"] = await OfferService._risk_rows(session, change)
         if change.bank_build_mode == "planned_scrap":
             data["changeover"]["mode"] = "customer_pays_scrap"
@@ -1104,16 +1239,17 @@ class OfferService:
         lines += [l for l in data["cost_lines"]
                   if not str(l.get("key") or "").startswith(SEEDED_LINE_PREFIXES)]
         data["cost_lines"] = lines
-        old_risks = {r.get("concern_id"): r for r in data["risks"]}
+        old_risks = {risk_key(r): r for r in data["risks"] if risk_key(r)}
         risks = []
         for r in await OfferService._risk_rows(session, change):
-            o = old_risks.get(r["concern_id"])
+            o = old_risks.get(r["key"])
             if o is not None:
                 for k in ("show", "type", "value", "note"):
                     if k in o:
                         r[k] = o[k]
             risks.append(r)
-        data["risks"] = risks
+        # Sales' own risks stay as Sales wrote them
+        data["risks"] = risks + [r for r in data["risks"] if r.get("source") == "sales"]
         offer.data = data
         await OfferService._store_totals(session, change, offer)
         await session.flush()
@@ -1316,6 +1452,7 @@ class OfferService:
                            "high_risks": len(listed["high_risks"])}
                           if listed is not None else {})},
         )
+        await OfferService._tell_pm_offer_sent(session, change, offer, user)
         if listed is not None and offer.version >= 2 and not supplement:
             # a supplement withdraws them on the customer's yes (A4-02)
             await OfferService._withdraw_stale_signatures(session, change, offer, user.id)
@@ -1328,6 +1465,112 @@ class OfferService:
                 new_value={"offer_id": offer.id,
                            "concern_ids": [r["concern_id"] for r in listed["high_risks"]]})
         return offer
+
+    @staticmethod
+    async def _tell_pm_offer_sent(session: AsyncSession, change: ChangeRequest,
+                                  offer: ChangeOffer, user: User) -> int:
+        """Christoph 2026-11-09: Sales is done when the offer is sent: the
+        change lead and the project team's PM hear who offered it and when
+        (once per version, never the sender; mailed as a task_new)."""
+        from app.services.change_people import team_owner_ids
+        from app.services.notification_service import NotificationService
+        pm = [i for (i,) in (await session.execute(select(Department.id).where(
+            Department.name == "Project Manager",
+            Department.is_active.is_(True)))).all()]
+        ids = set(await team_owner_ids(session, change.project_id, pm,
+                                       exclude=[user.id], real_only=True)) if pm else set()
+        if change.lead_id is not None:
+            ids.add(change.lead_id)
+        ids.discard(user.id)
+        when = fmt_date(offer.sent_at.date()) if offer.sent_at else ""
+        word = "Supplement" if offer.kind == "supplement" else "Offer"
+        return await NotificationService.notify_once(
+            session, sorted(ids), kind="task_new",
+            subject_key=f"offer_sent:{change.id}:{offer.version}",
+            title=f"{word} sent: {change.change_number}"[:200],
+            body=(f"{word} v{offer.version} for '{change.title}' sent by "
+                  f"{user.full_name or user.username} on {when}. Sales is done; "
+                  "the customer's answer is next."),
+            link=f"/changes/{change.id}?tab=offer")
+
+    # ------------------------------------------------------------------
+    # Offer package (Christoph 2026-11-09): everything Sales hands over
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _safe_name(text: str) -> str:
+        text = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", str(text or "")).strip()
+        return re.sub(r"\s+", " ", text)[:120] or "file"
+
+    @staticmethod
+    async def package_files(session: AsyncSession, change: ChangeRequest,
+                            offer: ChangeOffer) -> dict:
+        """The supplier quote files behind this offer: per counted external
+        position the chosen (else favourite) quote's attachments, named
+        "<department> - <vendor> - <line>.<ext>", and the internal breakdown
+        (who is doing what, markup, margin) as CSV rows. Files gone from disk
+        are listed in `missing`."""
+        import os
+        from app.models.change import ChangeAttachment
+        from app.services import early_costing
+        names = {i: n for i, n in (await session.execute(
+            select(Department.id, Department.name))).all()}
+        uncounted = await early_costing.uncounted_position_department_ids(
+            session, change.id)
+        positions = [p for p in (await session.execute(
+            select(CostingPosition).where(
+                CostingPosition.change_id == change.id,
+                CostingPosition.kind == "external")
+            .order_by(CostingPosition.department_id, CostingPosition.id)
+        )).scalars().all() if p.department_id not in uncounted]
+        by_offer = {}
+        for p in positions:
+            o = p.chosen_offer or p.favorite_offer
+            if o is not None:
+                by_offer[o.id] = (p, o)
+        files, missing, used = [], [], set()
+        if by_offer:
+            rows = (await session.execute(
+                select(ChangeAttachment)
+                .where(ChangeAttachment.costing_offer_id.in_(list(by_offer)))
+                .order_by(ChangeAttachment.id))).scalars().all()
+            for att in rows:
+                p, o = by_offer[att.costing_offer_id]
+                ext = os.path.splitext(att.filename or "")[1] or ""
+                stem = OfferService._safe_name(
+                    f"{names.get(p.department_id, 'Department')} - {o.vendor_name} - {p.label}")
+                name, n = f"supplier-quotes/{stem}{ext}", 2
+                while name in used:
+                    name = f"supplier-quotes/{stem} ({n}){ext}"
+                    n += 1
+                used.add(name)
+                if att.stored_path and os.path.isfile(att.stored_path):
+                    files.append((name, att.stored_path))
+                else:
+                    missing.append(f"{name} ({att.filename})")
+        data = normalise(offer.data or {})
+        totals = compute_totals(data, await OfferService._internal_cost(session, change))
+        cur = offer.currency or ""
+        csv_rows = [["Department", "Block", "Line", "Hours", "Rate", "Included", f"Amount {cur}".strip()]]
+        for l in data.get("cost_lines") or []:
+            csv_rows.append([l.get("department") or "", l.get("block") or l.get("category") or "",
+                             l.get("label") or "", l.get("hours") or "", l.get("rate") or "",
+                             "yes" if l.get("include", True) else "no",
+                             f"{_num(l.get('amount')):.2f}"])
+        csv_rows.append([])
+        for b in totals["by_department"]:
+            csv_rows.append(["Subtotal " + b["department"], "", "", "", "", "", f"{b['amount']:.2f}"])
+        csv_rows.append(["Cost basis (included blocks)", "", "", "", "", "", f"{totals['base']:.2f}"])
+        for f in totals["factors"]:
+            csv_rows.append([f["label"] or f["key"], "factor", "", "", "", "", f"{f['amount']:.2f}"])
+        csv_rows.append(["Risk surcharges", "", "", "", "", "", f"{totals['risks_total']:.2f}"])
+        csv_rows.append(["Scrap", "", "", "", "", "", f"{totals['scrap']:.2f}"])
+        csv_rows.append(["Additional items", "", "", "", "", "", f"{totals['free']:.2f}"])
+        csv_rows.append(["Price (total one-time)", "", "", "", "", "", f"{totals['total_one_time']:.2f}"])
+        csv_rows.append(["Internal cost", "", "", "", "", "", f"{totals['internal_cost']:.2f}"])
+        csv_rows.append(["Margin", "", "", "", "", "",
+                         f"{totals['margin_abs']:.2f}",
+                         "" if totals["margin_pct"] is None else f"{totals['margin_pct']:.2f} %"])
+        return {"files": files, "missing": missing, "breakdown_rows": csv_rows}
 
     @staticmethod
     async def _clear_acceptance(session: AsyncSession, change: ChangeRequest,
@@ -1537,7 +1780,14 @@ class OfferService:
         already on the change is never overwritten."""
         if change.bank_build_mode is not None:
             return
-        co = normalise(offer.data)["changeover"]
+        co = dict(normalise(offer.data)["changeover"])
+        # Christoph 2026-11-09: Sales' changeover decision on the change
+        # (old-stock block) wins over the offer copy
+        offered = getattr(change, "changeover_offer_mode", None)
+        if offered:
+            co["mode"] = "customer_pays_scrap" if offered == "customer_scrap" else "running_change"
+            if getattr(change, "old_stock_parts", None) is not None:
+                co["scrap_qty"] = change.old_stock_parts
         if co.get("mode") == "customer_pays_scrap":
             price = round(_num(co.get("scrap_qty")) * _num(co.get("scrap_unit_price")), 2)
             if price <= 0:
@@ -1885,11 +2135,17 @@ class OfferService:
             "project_name": project.name if project else "",
             "change_number": change.change_number, "title": change.title,
             "items": items,
-            "tasks": [{"name": t.name, "lane": t.lane or "", "kind": t.kind,
+            # Christoph 2026-11-09: the customer never sees the buffer as a
+            # bar (the milestones after it carry the timing with buffer) and
+            # reads a bank build as an estimate, never as fixed dates
+            "tasks": [{"name": t.name + (" (estimate, floats with the PO)"
+                                         if t.kind == "bank_build" else ""),
+                       "lane": t.lane or "", "kind": t.kind,
                        "start": t.start_date.isoformat(),
                        "end": t.end_date.isoformat(),
                        "duration": int(t.duration_days or 0),
-                       **({"idea": True} if t.is_idea else {})} for t in tasks],
+                       **({"idea": True} if t.is_idea else {})}
+                      for t in tasks if t.kind != "buffer"],
             **({"signer": signer} if signer is not None else {}),
         }
 

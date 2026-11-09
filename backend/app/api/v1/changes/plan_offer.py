@@ -956,6 +956,55 @@ async def offer_pdf(
             f'inline; filename="{change.change_number}-offer-v{offer.version}.pdf"'})
 
 
+@router.get("/{change_id}/offers/{offer_id}/package")
+async def offer_package(
+    change_id: int, offer_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Christoph 2026-11-09: everything Sales hands over as one ZIP: the
+    customer offer PDF, the internal breakdown (CSV: who is doing what,
+    markup, margin) and every supplier quote file of the chosen / favourite
+    quotes, named "<department> - <vendor> - <line>.<ext>". Price readers only."""
+    import csv
+    import io
+    import zipfile
+    change = await _change(db, change_id, current_user)
+    await _require_offer_read(db, change, current_user)
+    try:
+        offer = await OfferService.get_offer(db, change, offer_id)
+        ctx, key = await OfferService.pdf_context(db, change, offer, current_user)
+        pkg = await OfferService.package_files(db, change, offer)
+    except _ERRORS as e:
+        raise _http(e)
+    from starlette.concurrency import run_in_threadpool
+    pdf = OfferService.pdf_cache_get(key)
+    if pdf is None:
+        from app.services.offer_pdf import render_offer_pdf
+        pdf = await run_in_threadpool(render_offer_pdf, ctx)
+        OfferService.pdf_cache_put(key, pdf)
+    stem = f"{change.change_number}-offer-v{offer.version}"
+
+    def build() -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(f"{stem}.pdf", pdf)
+            text = io.StringIO()
+            csv.writer(text).writerows(pkg["breakdown_rows"])
+            # utf-8-sig: Excel reads the umlauts
+            z.writestr(f"{stem}-internal-breakdown.csv", text.getvalue().encode("utf-8-sig"))
+            for name, path in pkg["files"]:
+                z.write(path, name)
+            if pkg["missing"]:
+                z.writestr("supplier-quotes/MISSING.txt",
+                           "Listed on the costing, file not found on the server:\n"
+                           + "\n".join(pkg["missing"]) + "\n")
+        return buf.getvalue()
+
+    data = await run_in_threadpool(build)
+    return Response(content=data, media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{stem}-package.zip"'})
+
+
 # ----------------------------------------------------------------------
 # Release
 # ----------------------------------------------------------------------
