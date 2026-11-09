@@ -456,7 +456,24 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
             ids.append(p.id)
     if not items and not await _has_answer(session, change, department_id):
         items.append({"tag": "empty", "text": "Nothing entered yet: hours or an amount on one line"})
-    return {"reasons": [i["text"] for i in items], "items": items,
+    # Christoph 2026-11-08: the quote status per line as info (no blocker):
+    # received quotes, and shops still out on a line that already has one
+    info: list[dict] = []
+    for p in ext:
+        if p.pricing != "quote":
+            continue
+        for o in p.offers:
+            info.append({"tag": "received", "info": True,
+                         "text": f"{p.label} – {o.vendor_name}: quote received"
+                         + (" (favourite)" if o.favorite else "")})
+    if cm_switches.on("ASSESSMENT_V2"):
+        quoted = {p.id for p in ext if p.offers}
+        for w in await waits.open_waits(session, [change.id], "costing"):
+            if w.department_id == department_id and w.position_id in quoted:
+                info.append({"tag": "waiting_info", "info": True,
+                             "text": f"{w.vendor_name} ({labels.get(w.position_id, '')}): still out, "
+                                     "closed as not received at finalize"})
+    return {"reasons": [i["text"] for i in items], "items": items + info,
             "position_ids": sorted(set(ids))}
 
 

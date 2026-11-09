@@ -70,6 +70,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
     quote_missing: 'bg-red-700 text-white', price_missing: 'bg-red-700 text-white',
     basis_missing: 'bg-red-700 text-white', hours_missing: 'bg-red-700 text-white',
     empty: 'bg-slate-600 text-white', other: 'bg-slate-600 text-white',
+    received: 'bg-emerald-700 text-white', waiting_info: 'bg-sky-800 text-sky-100',
   }
   const items = check?.items ?? reasons.map((r) => ({ tag: 'other', text: r }))
   return (
@@ -78,7 +79,8 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
       {/* Christoph 2026-11-08: one container of line items, a coloured banner each */}
       {!finalized && items.length > 0 && (
         <div className="border-b border-slate-700 px-3 py-2">
-          <p className="mb-1 font-semibold text-slate-200">{t('costing.beforeFinalize')}</p>
+          <p className="mb-1 font-semibold text-slate-200">
+            {reasons.length ? t('costing.beforeFinalize') : t('costing.quoteStatus')}</p>
           <ul data-testid={`costing-why-not-${departmentId}`}
             className="divide-y divide-slate-700/70 rounded border border-slate-700 bg-slate-950/40">
             {items.map((r, n) => (
@@ -95,7 +97,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
         <span className="flex items-center gap-2">
           {finalized
             ? (noCost ? t('nocost.finalized').replace('{x}', noCost) : t('costing.finalizedBody'))
-            : items.length ? null : t('costing.finalizeHint')}
+            : reasons.length ? null : t('costing.finalizeHint')}
           {!finalized && v2 && (
             <NoCostButton changeId={changeId} departmentId={departmentId} departmentName={departmentName} />
           )}

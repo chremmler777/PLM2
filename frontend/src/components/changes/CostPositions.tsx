@@ -45,6 +45,7 @@ import { PositionBasis } from './costing/PositionBasis'
 import { machineClassOriginDetail, machineClassOriginText } from './machineClassOrigin'
 import { TOOL_ENGINEER_DEPARTMENT } from '../../lib/departments'
 import { formatHours, formatMoney, formatNumber } from '../../lib/format'
+import type { Attachment } from '../../types/change'
 import type {
   CostCategory, CostEntryType, CostPosition, CostPositionKind, CostPositionPricing,
   CostingContext, CostingOffer, LeadTimeUnit,
@@ -561,6 +562,53 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged }:
   )
 }
 
+/** Christoph 2026-11-08: the filed quote shows its file name (download),
+ *  with delete (Yes/No) and replace. */
+function QuoteFileCell({ changeId, offerId, file: a, editable, onChanged }: {
+  changeId: number; offerId: number; file: Attachment; editable: boolean; onChanged: () => void
+}) {
+  const [asking, setAsking] = useState(false)
+  const del = useMutation({
+    mutationFn: () => changesApi.deleteAttachment(changeId, a.id),
+    onSuccess: onChanged,
+    onError: (e: unknown) => toastError(e, 'Could not delete the file'),
+  })
+  const replace = useMutation({
+    mutationFn: async (f: File) => {
+      await changesApi.uploadAttachment(changeId, f, { kind: 'vendor_quote', costingOfferId: offerId })
+      await changesApi.deleteAttachment(changeId, a.id)
+    },
+    onSuccess: onChanged,
+    onError: (e: unknown) => toastError(e, 'Could not replace the file'),
+  })
+  return (
+    <span className="inline-flex items-center gap-1">
+      <DownloadIcons changeId={changeId} attachments={[a]} />
+      {editable && !asking && (
+        <>
+          <label className="cursor-pointer text-[11px] text-slate-400 underline hover:text-slate-200"
+            title={t('costpos.replaceFile')}>
+            {t('costpos.replaceFile')}
+            <input type="file" className="sr-only" accept=".pdf,.xlsx,.xls,.doc,.docx,.msg,.eml"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) replace.mutate(f) }} />
+          </label>
+          <button type="button" aria-label={`Delete ${a.filename}`} title={t('risk.confirmDelete')}
+            className="px-1 text-sm leading-none text-red-300 hover:text-red-200" onClick={() => setAsking(true)}>×</button>
+        </>
+      )}
+      {asking && (
+        <span className="inline-flex items-center gap-1">
+          <span className="text-[11px] text-red-200">{t('risk.confirmDelete')}</span>
+          <button type="button" className="rounded bg-red-800 px-1.5 text-[11px] text-white"
+            onClick={() => { setAsking(false); del.mutate() }}>{t('risk.yes')}</button>
+          <button type="button" className="rounded border border-slate-600 px-1.5 text-[11px] text-slate-200"
+            onClick={() => setAsking(false)}>{t('risk.no')}</button>
+        </span>
+      )}
+    </span>
+  )
+}
+
 /** A received quote, editable in its line (Christoph 2026-11-08): quote no.,
  *  file, days, price, transport (empty = no transport costs), favourite. */
 function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, onChanged, onStar, starring }: {
@@ -585,19 +633,28 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
   })
   const files = o.attachments ?? []
   const f = `${fieldCls} tabular-nums text-right`
+  const [askDel, setAskDel] = useState(false)
+  const delOffer = useMutation({
+    mutationFn: () => changesApi.deleteCostingOffer(changeId, o.id),
+    onSuccess: onChanged,
+    onError: (e: unknown) => toastError(e, 'Could not delete the quote'),
+  })
   return (
     <tr data-testid={`supplier-line-${positionId}-${o.vendor_name}`} className="border-t border-slate-700/60">
-      <td className={`${td} font-medium text-slate-100`}>{o.vendor_name}
-        {(o.attachments ?? []).length > 0
-          ? <span className="ml-1 rounded bg-emerald-900/70 px-1.5 text-[11px] font-semibold text-emerald-100">{t('wait.sup.badge.received')}</span>
-          : <span className="ml-1 rounded bg-red-800 px-1.5 text-[11px] font-semibold text-red-100">{t('costpos.openNoFile')}</span>}</td>
+      <td className={`${td} font-medium text-slate-100`}>{o.vendor_name}</td>
       <td className={td}>
+        {(o.attachments ?? []).length > 0
+          ? <span className="rounded bg-emerald-900/70 px-1.5 text-[11px] font-semibold text-emerald-100">{t('wait.sup.badge.received')}</span>
+          : <span className="rounded bg-red-800 px-1.5 text-[11px] font-semibold text-red-100">{t('costpos.openNoFile')}</span>}
         {editable ? <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={t('costpos.shopRef')}
-          aria-label={t('costpos.shopRef')} className={`${fieldCls} w-24`} />
-          : (o.quote_ref ? `#${o.quote_ref}` : '-')}
+          aria-label={t('costpos.shopRef')} className={`${fieldCls} ml-1 w-24`} />
+          : (o.quote_ref ? <span className="ml-1 text-slate-400">#{o.quote_ref}</span> : null)}
       </td>
       <td className={td}>
-        {files.length > 0 && <DownloadIcons changeId={changeId} attachments={files} />}
+        {files.map((f0) => (
+          <QuoteFileCell key={f0.id} changeId={changeId} offerId={o.id} file={f0}
+            editable={editable} onChanged={onChanged} />
+        ))}
         {editable && files.length === 0 && (
           <AttachmentDropzone changeId={changeId} compact kind="vendor_quote"
             costingOfferId={o.id} label={t('costpos.shopFile')} onUploaded={onChanged} />
@@ -632,6 +689,19 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
             className="ml-1 rounded border border-amber-700/70 px-1.5 text-[11px] text-amber-200 hover:bg-amber-900/40">
             ☆ {t('costpos.makeFavorite')}</button>
         ) : null}
+        {editable && !askDel && (
+          <button type="button" aria-label={`Delete the quote from ${o.vendor_name}`} title={t('costpos.deleteQuote')}
+            className="ml-1 px-1 text-sm leading-none text-red-300 hover:text-red-200" onClick={() => setAskDel(true)}>×</button>
+        )}
+        {askDel && (
+          <span className="ml-1 inline-flex items-center gap-1">
+            <span className="text-[11px] text-red-200">{t('risk.confirmDelete')}</span>
+            <button type="button" className="rounded bg-red-800 px-1.5 text-[11px] text-white"
+              onClick={() => { setAskDel(false); delOffer.mutate() }}>{t('risk.yes')}</button>
+            <button type="button" className="rounded border border-slate-600 px-1.5 text-[11px] text-slate-200"
+              onClick={() => setAskDel(false)}>{t('risk.no')}</button>
+          </span>
+        )}
         {o.chosen && (
           <span className="ml-1 rounded bg-violet-800 px-1.5 text-[11px] font-semibold text-violet-100"
             title={o.chosen_reason ?? undefined}>{t('vendor.salesChose')}</span>
@@ -703,6 +773,85 @@ function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel }: {
         <button type="button" className="ml-1 text-[11px] underline text-slate-400" onClick={onCancel}>{t('achk.cancel')}</button>
       </td>
     </tr>
+  )
+}
+
+/** Christoph 2026-11-08: a line carried from an assessment case shows that
+ *  case's documents (inquiry PPT, RFQ, internal change PPT) as downloads. */
+function CaseDocs({ changeId, position: p }: { changeId: number; position: CostPosition }) {
+  const { data: change } = useQuery({
+    queryKey: ['change', changeId],
+    queryFn: () => changesApi.get(changeId),
+  })
+  if (!change || !(p.notes ?? '').startsWith('From the assessment')) return null
+  const a = change.assessments?.find((x) => x.department_id === p.department_id)
+  let details: Record<string, unknown> = {}
+  try { details = typeof a?.details === 'string' ? JSON.parse(a.details) : (a?.details ?? {}) } catch { details = {} }
+  const impacts = (details.impacts as { key?: string; cases?: (string | { id: string; text: string })[] }[] | undefined) ?? []
+  const want = p.label.trim().toLowerCase()
+  let caseId: string | null = null
+  let kind = ''
+  for (const i of impacts) {
+    for (const c of i.cases ?? []) {
+      if (typeof c !== 'string' && c.text.trim().toLowerCase() === want) {
+        caseId = c.id; kind = i.key === 'modification_internal' ? 'internal' : 'external'
+      }
+    }
+  }
+  if (!caseId) return null
+  const docs = (change.attachments ?? []).filter((x) => x.case_ref === caseId)
+  if (!docs.length) return <span className="block text-[11px] text-red-300">{t('costpos.caseNoDocs')}</span>
+  return (
+    <span className="block" data-testid={`case-docs-${p.id}`}>
+      <span className="mb-0.5 block text-[11px] text-slate-500">
+        {t(kind === 'internal' ? 'costpos.caseDocsInternal' : 'costpos.caseDocsExternal')}</span>
+      {docs.map((d) => (
+        <span key={d.id} className="block">
+          <span className="mr-1 rounded bg-slate-700 px-1 text-[10px] text-slate-200">
+            {d.kind === 'rfq' ? 'RFQ' : 'PPT'}</span>
+          <DownloadIcons changeId={changeId} attachments={[d]} />
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** Christoph 2026-11-08: an internal case line fills like the external
+ *  estimate: hours, days, what the figure is based on. */
+function InternalQuickRow({ changeId, position: p, onChanged }: {
+  changeId: number; position: CostPosition; onChanged: () => void
+}) {
+  const [hours, setHours] = useState(p.hours != null ? String(p.hours) : '')
+  const [days, setDays] = useState(p.lead_time_days != null ? String(p.lead_time_days) : '')
+  const [basis, setBasis] = useState(p.notes ?? '')
+  const dirty = num(hours) !== (p.hours ?? null) || num(days) !== (p.lead_time_days ?? null)
+    || basis.trim() !== (p.notes ?? '')
+  const save = useMutation({
+    mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
+      hours: num(hours), lead_time_days: num(days), lead_time_unit: 'calendar_days',
+      notes: basis.trim() || null,
+    }),
+    onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
+    onError: (e: unknown) => toastError(e, 'Could not save the internal work'),
+  })
+  const thin = !(Number(hours) > 0)
+  return (
+    <div className={`flex flex-wrap items-center gap-2 rounded border px-2 py-1 ${thin
+      ? 'border-red-700/70 bg-red-950/20' : 'border-slate-700'}`}>
+      <span className="w-36 text-xs font-medium text-slate-200">{t('costpos.internalWork')}</span>
+      <input type="number" step="0.5" min={0} value={hours} onChange={(e) => setHours(e.target.value)}
+        data-testid={`int-hours-${p.id}`} aria-label={t('costpos.hours')} placeholder={t('costpos.hours')}
+        className={`${fieldCls} w-24 tabular-nums text-right`} />
+      <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
+        data-testid={`int-days-${p.id}`} aria-label={t('costpos.shopDays')} placeholder={t('costpos.shopDays')}
+        className={`${fieldCls} w-24 tabular-nums text-right`} />
+      <input value={basis} onChange={(e) => setBasis(e.target.value)}
+        data-testid={`int-basis-${p.id}`} aria-label={t('costpos.estBasis')} placeholder={t('costpos.estBasis')}
+        className={`${fieldCls} flex-1 min-w-[12rem]`} />
+      <button type="button" className={btnSm.primary} data-testid={`int-save-${p.id}`}
+        disabled={!dirty || save.isPending || (days !== '' && !(Number(days) >= 1))}
+        onClick={() => save.mutate()}>{t('common.save')}</button>
+    </div>
   )
 }
 
@@ -1170,7 +1319,8 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
             <span data-testid={`costpos-tag-${p.id}`} className="text-slate-200">
               {tagLabel(p.tag, categories)}
             </span>
-          ) : <span className="text-slate-600">-</span>}
+          ) : (p.notes ?? '').startsWith('From the assessment') ? null : <span className="text-slate-600">-</span>}
+          <CaseDocs changeId={changeId} position={p} />
         </td>
         <td className={`${cellCls} min-w-[12rem]`}>
           {editing ? (
@@ -1364,6 +1514,14 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
       )}
       {/* Christoph 2026-11-08: an estimated supplier line fills like a quote:
           total cost, days, what it is based on */}
+      {p.kind === 'own_time' && editable && !editing && (
+        <tr data-testid={`costpos-internal-${p.id}`} className="bg-slate-900/40">
+          <td />
+          <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
+            <InternalQuickRow changeId={changeId} position={p} onChanged={onChanged} />
+          </td>
+        </tr>
+      )}
       {p.kind === 'external' && !isQuote && editable && !editing && (
         <tr data-testid={`costpos-estimate-${p.id}`} className="bg-slate-900/40">
           <td />
@@ -1383,7 +1541,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           </td>
         </tr>
       )}
-      {v2 && isExternal && (
+      {v2 && isExternal && editing && (
         <tr className="bg-slate-900/30">
           <td />
           <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>

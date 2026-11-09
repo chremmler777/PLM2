@@ -8949,10 +8949,10 @@ class ChangeService:
         if kind == "vendor_quote" and costing_offer_id is not None:
             # Christoph 2026-11-08: the shop's wait closes when its quote is
             # in WITH the file, not when a price is typed
-            from app.models.change_cost import CostingOffer, CostingPosition
+            from app.models.change_cost import CostingOffer as _Offer, CostingPosition as _Pos
             from app.services import supplier_wait_service as _sw
-            offer = await session.get(CostingOffer, costing_offer_id)
-            pos = await session.get(CostingPosition, offer.position_id) if offer else None
+            offer = await session.get(_Offer, costing_offer_id)
+            pos = await session.get(_Pos, offer.position_id) if offer else None
             if offer is not None and pos is not None:
                 for w in await _sw.open_waits(session, [change.id], "costing"):
                     if (w.department_id == pos.department_id
