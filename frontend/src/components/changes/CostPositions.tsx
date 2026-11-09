@@ -2425,7 +2425,11 @@ export default function CostPositions({
   // Christoph 2026-11-08: three totals: hours spent so far (booked), the
   // internal work (hours x rate + own money lines), the external range
   const cur0 = ctx?.currency ?? (mine[0]?.currency ?? '')
-  const spentHours = mine.filter((p) => p.kind === 'internal_effort').reduce((n, p) => n + (p.hours ?? 0), 0)
+  // booked so far = assessment effort + costing effort (both sums of the
+  // bookings); the costing effort row counted nowhere here (2026-11-09 night:
+  // 3 h shown with 5 h booked)
+  const spentHours = mine.filter((p) => p.kind === 'internal_effort' || p.id === costingEffort?.id)
+    .reduce((n, p) => n + (p.hours ?? 0), 0)
   const internalLines = mine.filter((p) => p.kind !== 'external')
   const internalHours = internalLines.reduce((n, p) => n + (p.kind === 'machine_time' || p.kind === 'sampling' ? 0 : (p.hours ?? 0)), 0)
   const internalMoney = internalLines.reduce((n, p) => n + (p.line_value != null && quantityOf(p) > 0 ? p.line_value : 0), 0)

@@ -405,6 +405,15 @@ describe('CostPositions', () => {
     expect(screen.queryByTestId('offer-new-11')).toBeNull()
   })
 
+  it('counts the costing effort bookings in "spent so far" (2026-11-09 night)', async () => {
+    const costingEffort = { ...effort, id: 12, kind: 'own_time', label: 'Costing effort: time spent on costing (h)',
+      hours: 2, notes: 'From the bookings', effective_cost: 180 }
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([effort, costingEffort, external] as never)
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    expect(screen.getByTestId('costpos-total-spent-2').textContent).toContain(formatHours(14))
+  })
+
   it('sums the department’s money and hours at the foot of the table', async () => {
     positions()
     await screen.findByTestId('costpos-row-11')
