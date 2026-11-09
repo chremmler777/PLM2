@@ -128,10 +128,12 @@ async def test_only_immediate_notices_are_mailed(session_factory, seed, monkeypa
             "Your department has an assessment to give.\n"
             "Info: you are backup here, main: Sam.")
         await s.commit()
-        assert await ecr_mail.send_pending(s, sender=sent.append) == 1
+        # Christoph 2026-11-09: informative notices (stage started) are
+        # mailed too, the informed in CC; reminders and backup copies stay badges
+        assert await ecr_mail.send_pending(s, sender=sent.append) == 2
         rows = (await s.execute(select(Notification))).scalars().all()
         assert all(r.mailed_at is not None for r in rows)    # stamped, never retried
-    assert [m.subject for m in sent] == ["Decision needed"]
+    assert [m.subject for m in sent] == ["Decision needed", "Validation started"]
 
 
 # ---------------------------------------------------------------------------
