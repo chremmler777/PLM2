@@ -478,8 +478,10 @@ async def test_evidence_delete_mirrors_attach_rule_and_freezes(
         assert (await client.delete(url(kind), headers=q)).status_code == 403
         # the department may file it, but the verdict it backs is submitted
         assert (await client.delete(url(kind), headers=tool)).status_code == 409
+    # an admin acting as the department is neither admin nor the assessment's
+    # owner/uploader: refused before the freeze (5288e7ad, owner-only delete)
     assert (await client.delete(url("change_ppt"), headers=await _admin(
-        client, offer_world["depts"]["Tool Engineer"]))).status_code == 409
+        client, offer_world["depts"]["Tool Engineer"]))).status_code == 403
     assert (await client.delete(url("change_ppt"),
                                 headers=await _admin(client))).status_code == 204
 
@@ -491,6 +493,39 @@ async def test_evidence_of_open_assessment_is_removable_by_the_department(
     res = await client.delete(f"/api/v1/changes/{cid}/attachments/{ids['rfq']}",
                               headers=await _off(client, "tool"))
     assert res.status_code == 204, res.text
+
+
+async def test_assessment_document_delete_is_the_owners_not_a_department_members(
+        client, offer_world, session_factory, seed):
+    """Christoph 2026-11-08 (5288e7ad): a department member who does not own
+    the assessment gets 403 deleting its document, even as the uploader; the
+    owner may."""
+    cid = offer_world["change_id"]
+    tool_dept = offer_world["depts"]["Tool Engineer"]
+    member = await _user(session_factory, seed, "tool2")
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=member, department_id=tool_dept))
+        a = ChangeAssessment(change_id=cid, department_id=tool_dept,
+                             rasic_letter="S", status="active",
+                             owner_id=offer_world["users"]["tool"])
+        s.add(a)
+        await s.flush()
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        os.write(fd, b"doc")
+        os.close(fd)
+        att = ChangeAttachment(
+            change_id=cid, filename="ppt.pdf", stored_path=path,
+            content_type="application/pdf", size_bytes=3, sha256="z" * 64,
+            phase="post_scoping", kind="change_ppt", assessment_id=a.id,
+            uploaded_by=member)
+        s.add(att)
+        await s.commit()
+        aid = att.id
+    url = f"/api/v1/changes/{cid}/attachments/{aid}"
+    res = await client.delete(url, headers=await _auth(client, "tool2"))
+    assert res.status_code == 403, res.text                       # NEGATIVE
+    res = await client.delete(url, headers=await _off(client, "tool"))
+    assert res.status_code == 204, res.text                       # the owner
 
 
 async def test_plain_documents_uploader_lead_pm_admin_only(

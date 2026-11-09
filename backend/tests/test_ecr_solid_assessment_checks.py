@@ -727,3 +727,40 @@ async def test_a_question_after_the_submit_holds_nothing_in_its_notice(
         body = (await s.execute(select(Notification.body).where(
             Notification.subject_key == f"ask:{res.json()['id']}"))).scalar_one()
     assert "It holds" not in body
+
+
+async def test_a_closed_question_reopens_for_the_asking_department_only(
+        client, assess, session_factory):
+    """Christoph 2026-11-08 (30111eca): a closed question is reopened to edit
+    its answer by the asking department (or PM / admin); another department
+    is refused; the answer fields are cleared and the old answer is logged."""
+    from app.models.change import ChangeChangelog
+    a = assess
+    res = await client.post(_url(a, "/concerns"), json=_q(a["tool"]), headers=a["te"])
+    assert res.status_code == 200, res.text
+    qid = res.json()["id"]
+    async with session_factory() as s:
+        c = await s.get(ChangeConcern, qid)
+        c.answered_at = c.withdrawn_at = datetime.utcnow()
+        c.answered_by = c.withdrawn_by = a["pe_id"]
+        c.answer_kind, c.answer_ref = "answered", "120000 pcs/yr per customer mail"
+        c.answer_note = c.resolution_note = "120k pcs"
+        c.settled_as = "answered"
+        await s.commit()
+    url = _url(a, f"/concerns/{qid}/reopen")
+    # NEGATIVE: another department (Process) may not reopen Tool's question
+    res = await client.post(url, json={"reason": "volume changed again"}, headers=a["pe"])
+    assert res.status_code == 403, res.text
+    res = await client.post(url, json={"reason": "volume changed again"}, headers=a["te"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        c = await s.get(ChangeConcern, qid)
+        assert c.withdrawn_at is None and c.answered_at is None
+        assert (c.answer_kind, c.answer_ref, c.answer_note, c.resolution_note,
+                c.settled_as) == (None, None, None, None, None)
+        log = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == a["cid"],
+            ChangeChangelog.action == "concern_reopened"))).scalars().all()
+        assert len(log) == 1 and "120000 pcs/yr" in log[0].action_description
+    # open again: it holds Tool's submit
+    assert (await _submit(client, a["te"], a, a["tool"])).status_code == 400

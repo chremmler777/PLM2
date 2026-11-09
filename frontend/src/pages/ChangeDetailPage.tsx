@@ -996,7 +996,7 @@ export default function ChangeDetailPage() {
           data-missing={ourHoursMissing ? 'yes' : 'no'}
           title={ourHoursMissing ? t('hours.notBookedYet') : undefined}
           className={ourHoursMissing
-            ? 'rounded-lg border border-red-600 bg-red-900/50 px-3 py-1.5 text-sm font-medium text-red-100 hover:bg-red-800/60'
+            ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100 hover:bg-red-800/60'
             : btnSm.secondary}
           onClick={() => setHoursDialog({})}>{t('hours.title')}</button>
       )}
