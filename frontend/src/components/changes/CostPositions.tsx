@@ -38,6 +38,7 @@ import ConfirmDialog from '../common/ConfirmDialog'
 import { btnIcon, btnSm } from '../common/buttonStyles'
 import { toastError } from '../../lib/apiError'
 import AttachmentDropzone from './AttachmentDropzone'
+import { DownloadIcons } from './AttachmentRow'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
 import { PositionBasis } from './costing/PositionBasis'
@@ -260,7 +261,7 @@ function ScopeToggle({ testId, partial, onChange }: {
   )
 }
 
-function OfferRow({
+export function OfferRow({
   changeId, positionId, offer, currency, editable, onChanged,
 }: {
   changeId: number; positionId: number; offer: CostingOffer
@@ -437,6 +438,254 @@ function OfferRow({
   )
 }
 
+/** Christoph 2026-11-08: a quoted supplier line as a table, one line per
+ *  supplier: Supplier · Status · Quote file · Days · Price · favourite.
+ *  An asked shop waits until "Quote received", then its line takes the file,
+ *  days, price (and quote no.); the received line shows them, the star picks. */
+function SupplierLines({ changeId, position: p, editable, currency, onChanged }: {
+  changeId: number; position: CostPosition; editable: boolean
+  currency: string | null; onChanged: () => void
+}) {
+  const qc = useQueryClient()
+  const { data: waits } = useQuery({
+    queryKey: ['change', changeId, 'supplier-waits'],
+    queryFn: () => changesApi.listSupplierWaits(changeId),
+  })
+  const key = (v: string) => v.trim().toLowerCase()
+  // a wait without a line belongs to the department's only supplier line
+  const { data: allPositions } = useQuery({
+    queryKey: ['costing-positions', changeId],
+    queryFn: () => changesApi.listCostPositions(changeId),
+  })
+  const soleLine = (allPositions ?? []).filter((x) => x.department_id === p.department_id
+    && x.kind === 'external').length === 1
+  const asked = (waits ?? []).filter((w) => w.position_id === p.id
+    || (w.position_id == null && soleLine && w.department_id === p.department_id))
+  const offers = p.offers ?? []
+  const names: string[] = []
+  for (const v of [...asked.map((w) => w.vendor_name), ...offers.map((o) => o.vendor_name)]) {
+    if (!names.some((n) => key(n) === key(v))) names.push(v)
+  }
+  const [received, setReceived] = useState<Set<string>>(new Set())
+  const [shop, setShop] = useState('')
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['change', changeId] }); onChanged() }
+  const iso = (d: Date) => d.toISOString().slice(0, 10)
+  const ask = useMutation({
+    mutationFn: () => changesApi.startSupplierWait(changeId, {
+      department_id: p.department_id, vendor_name: shop.trim(), asked_on: iso(new Date()),
+      expected_by: iso(new Date(Date.now() + 14 * 86400000)), position_id: p.id }),
+    onSuccess: () => { setShop(''); refresh() },
+    onError: (e: unknown) => toastError(e, 'Could not record the RFQ'),
+  })
+  const star = useMutation({
+    mutationFn: (id: number) => changesApi.updateCostingOffer(changeId, id, { favorite: true }),
+    onSuccess: onChanged,
+    onError: (e: unknown) => toastError(e, 'Could not pick the favourite'),
+  })
+  const th = 'px-2 py-1 text-left text-[11px] font-medium uppercase tracking-wide text-slate-500'
+  const td = 'px-2 py-1 text-xs align-middle'
+  return (
+    <div className="mt-1 rounded-lg border border-slate-600 bg-slate-800/60 p-2">
+    <p className="mb-1 text-xs font-semibold text-slate-200">
+      {t('costpos.quotesBox').replace('{w}', String(asked.filter((w) => w.is_open && !offers.some((x) => key(x.vendor_name) === key(w.vendor_name))).length))
+        .replace('{r}', String(offers.length))}</p>
+    <table className="w-full" data-testid={`supplier-lines-${p.id}`}>
+      <thead>
+        <tr>
+          <th className={th}>{t('costpos.supplier')}</th><th className={th}>{t('costpos.status')}</th>
+          <th className={th}>{t('costpos.shopFile')}</th><th className={`${th} text-right`}>{t('costpos.shopDays')}</th>
+          <th className={`${th} text-right`}>{t('costpos.price')}</th>
+          <th className={`${th} text-right`}>{t('costpos.transport')}</th><th className={th} />
+        </tr>
+      </thead>
+      <tbody>
+        {names.length === 0 && (
+          <tr><td className={`${td} text-slate-600`} colSpan={7}>{t('costpos.rfqNone')}</td></tr>
+        )}
+        {names.map((n) => {
+          const o = offers.find((x) => key(x.vendor_name) === key(n))
+          const w = asked.find((x) => key(x.vendor_name) === key(n))
+          if (o) {
+            return <ReceivedLine key={n} changeId={changeId} positionId={p.id} offer={o} td={td}
+              editable={editable} currency={currency} onChanged={onChanged}
+              onStar={() => star.mutate(o.id)} starring={star.isPending} />
+          }
+          // marked "quote in" elsewhere without the quote: enter it now
+          if (w && editable && (received.has(n) || (!w.is_open && w.close_reason === 'received'))) {
+            return <ShopQuoteLine key={n} changeId={changeId} positionId={p.id} shop={n} td={td}
+              onDone={refresh} onCancel={() => { const r = new Set(received); r.delete(n); setReceived(r) }} />
+          }
+          return (
+            <tr key={n} data-testid={`supplier-line-${p.id}-${n}`} className="border-t border-slate-700/60">
+              <td className={`${td} font-medium text-slate-200`}>{n}</td>
+              <td className={td}>
+                {w && !w.is_open ? (
+                  <span className="rounded bg-slate-700 px-1.5 font-semibold text-slate-200">
+                    {t(`wait.sup.badge.${w.close_reason ?? 'not_needed'}`)}</span>
+                ) : (
+                  <span className={`rounded px-1.5 ${w?.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
+                    {t('wait.sup.badge.open')}{w ? ` · ${w.chip}` : ''}</span>
+                )}
+              </td>
+              <td className={td} colSpan={5}>
+                {editable && w?.is_open && (
+                  <button type="button" className={btnSm.secondary} data-testid={`rfq-received-${w.id}`}
+                    onClick={() => setReceived(new Set([...received, n]))}>{t('costpos.quoteReceived')}</button>
+                )}
+              </td>
+            </tr>
+          )
+        })}
+        {editable && (
+          <tr className="border-t border-slate-700/60">
+            <td className={td} colSpan={7}>
+              <span className="inline-flex items-center gap-1">
+                <input value={shop} onChange={(e) => setShop(e.target.value)}
+                  data-testid={`rfq-shop-new-${p.id}`} placeholder={t('costpos.rfqAddShop')}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && shop.trim().length >= 2) ask.mutate() }}
+                  className={`${fieldCls} w-44`} />
+                <button type="button" className={btnSm.secondary} data-testid={`rfq-shop-add-${p.id}`}
+                  disabled={shop.trim().length < 2 || ask.isPending} onClick={() => ask.mutate()}>
+                  {t('costpos.rfqAdd')}</button>
+              </span>
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+    </div>
+  )
+}
+
+/** A received quote, editable in its line (Christoph 2026-11-08): quote no.,
+ *  file, days, price, transport (empty = no transport costs), favourite. */
+function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, onChanged, onStar, starring }: {
+  changeId: number; positionId: number; offer: CostingOffer; td: string; editable: boolean
+  currency: string | null; onChanged: () => void; onStar: () => void; starring: boolean
+}) {
+  const [ref, setRef] = useState(o.quote_ref ?? '')
+  const [days, setDays] = useState(o.lead_time_days != null ? String(o.lead_time_days) : '')
+  const [cost, setCost] = useState(String(o.cost ?? ''))
+  const [ship, setShip] = useState(!o.shipping_included && o.shipping_cost != null ? String(o.shipping_cost) : '')
+  const shipNum = num(ship)
+  const dirty = ref.trim() !== (o.quote_ref ?? '') || num(days) !== (o.lead_time_days ?? null)
+    || Number(cost) !== Number(o.cost) || (shipNum ?? null) !== (!o.shipping_included ? (o.shipping_cost ?? null) : null)
+  const save = useMutation({
+    mutationFn: () => changesApi.updateCostingOffer(changeId, o.id, {
+      quote_ref: ref.trim() || null, lead_time_days: num(days), lead_time_unit: 'calendar_days',
+      cost: Number(cost) || 0,
+      shipping_included: !(shipNum && shipNum > 0), shipping_cost: shipNum && shipNum > 0 ? shipNum : null,
+    }),
+    onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
+    onError: (e: unknown) => toastError(e, 'Could not save the quote'),
+  })
+  const files = o.attachments ?? []
+  const f = `${fieldCls} tabular-nums text-right`
+  return (
+    <tr data-testid={`supplier-line-${positionId}-${o.vendor_name}`} className="border-t border-slate-700/60">
+      <td className={`${td} font-medium text-slate-100`}>{o.vendor_name}
+        <span className="ml-1 rounded bg-emerald-900/70 px-1.5 text-[11px] font-semibold text-emerald-100">{t('wait.sup.badge.received')}</span></td>
+      <td className={td}>
+        {editable ? <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={t('costpos.shopRef')}
+          aria-label={t('costpos.shopRef')} className={`${fieldCls} w-24`} />
+          : (o.quote_ref ? `#${o.quote_ref}` : '-')}
+      </td>
+      <td className={td}>
+        {files.length > 0 && <DownloadIcons changeId={changeId} attachments={files} />}
+        {editable && files.length === 0 && (
+          <AttachmentDropzone changeId={changeId} compact kind="vendor_quote"
+            costingOfferId={o.id} label={t('costpos.shopFile')} onUploaded={onChanged} />
+        )}
+        {!editable && files.length === 0 && <span className="text-red-300">{t('costpos.noFile')}</span>}
+      </td>
+      <td className={`${td} text-right`}>
+        {editable ? <input type="number" step="1" min={0} value={days} onChange={(e) => setDays(e.target.value)}
+          aria-label={t('costpos.shopDays')} className={`${f} w-16`} /> : (o.lead_time_days ?? '-')}
+      </td>
+      <td className={`${td} text-right`}>
+        {editable ? <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
+          aria-label={t('costpos.price')} className={`${f} w-24`} /> : money(o.cost, currency)}
+      </td>
+      <td className={`${td} text-right`}>
+        {editable ? <input type="number" step="0.01" min={0} value={ship} onChange={(e) => setShip(e.target.value)}
+          placeholder={t('costpos.noTransport')} aria-label={t('costpos.transport')} className={`${f} w-32`} />
+          : (!o.shipping_included && o.shipping_cost ? money(o.shipping_cost, currency) : t('costpos.noTransport'))}
+      </td>
+      <td className={`${td} whitespace-nowrap`}>
+        {editable && dirty && (
+          <button type="button" className={btnSm.primary} disabled={save.isPending}
+            onClick={() => save.mutate()}>{t('common.save')}</button>
+        )}
+        <button type="button" data-testid={`supplier-star-${o.id}`} disabled={!editable || starring}
+          title={t('costpos.favoriteHint')} onClick={onStar}
+          className={`ml-1 ${o.favorite ? 'text-amber-300' : 'text-slate-500 hover:text-amber-200'}`}>
+          {o.favorite ? '★' : '☆'}</button>
+      </td>
+    </tr>
+  )
+}
+
+/** The line of a shop whose quote just came in: file, days, price, quote no. */
+function ShopQuoteLine({ changeId, positionId, shop, td, onDone, onCancel }: {
+  changeId: number; positionId: number; shop: string; td: string
+  onDone: () => void; onCancel: () => void
+}) {
+  const [cost, setCost] = useState('')
+  const [days, setDays] = useState('')
+  const [ref, setRef] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [ship, setShip] = useState('')
+  const save = useMutation({
+    mutationFn: async () => {
+      const offer = await changesApi.addCostingOffer(changeId, positionId, {
+        vendor_name: shop, cost: Number(cost) || 0,
+        // empty transport = no transport costs (Christoph 2026-11-08)
+        shipping_included: !(num(ship) && num(ship)! > 0), shipping_cost: num(ship) && num(ship)! > 0 ? num(ship) : null,
+        lead_time_days: num(days), lead_time_unit: 'calendar_days',
+        ...(ref.trim() ? { quote_ref: ref.trim() } : {}),
+      })
+      if (file) await changesApi.uploadAttachment(changeId, file, { kind: 'vendor_quote', costingOfferId: offer.id })
+      return offer
+    },
+    onSuccess: () => { toast.success(t('costpos.shopQuoteSaved').replace('{x}', shop)); onDone() },
+    onError: (e: unknown) => toastError(e, 'Could not save the quote'),
+  })
+  return (
+    <tr data-testid={`shop-quote-${positionId}-${shop}`} className="border-t border-slate-700/60 bg-amber-950/20">
+      <td className={`${td} font-medium text-amber-100`}>{shop}</td>
+      <td className={td}>
+        <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={t('costpos.shopRef')}
+          aria-label={t('costpos.shopRef')} className={`${fieldCls} w-24`} />
+      </td>
+      <td className={td}>
+        <label className="cursor-pointer rounded border border-slate-600 px-1.5 py-0.5 text-[11px] text-slate-200 hover:bg-slate-700/60">
+          {file ? file.name : t('costpos.shopFile')}
+          <input type="file" className="sr-only" accept=".pdf,.xlsx,.xls,.doc,.docx,.msg,.eml"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        </label>
+      </td>
+      <td className={`${td} text-right`}>
+        <input type="number" step="1" min={0} value={days} onChange={(e) => setDays(e.target.value)}
+          aria-label={t('costpos.shopDays')} className={`${fieldCls} w-16 tabular-nums text-right`} />
+      </td>
+      <td className={`${td} text-right`}>
+        <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
+          aria-label={t('costpos.price')} className={`${fieldCls} w-24 tabular-nums text-right`} />
+      </td>
+      <td className={`${td} text-right`}>
+        <input type="number" step="0.01" min={0} value={ship} onChange={(e) => setShip(e.target.value)}
+          placeholder={t('costpos.noTransport')} aria-label={t('costpos.transport')}
+          className={`${fieldCls} w-32 tabular-nums text-right`} />
+      </td>
+      <td className={`${td} whitespace-nowrap`}>
+        <button type="button" className={btnSm.primary} data-testid={`shop-quote-save-${positionId}-${shop}`}
+          disabled={!(Number(cost) > 0) || save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
+        <button type="button" className="ml-1 text-[11px] underline text-slate-400" onClick={onCancel}>{t('achk.cancel')}</button>
+      </td>
+    </tr>
+  )
+}
+
 /** An estimated supplier line, same shape as a shop's quote: total cost,
  *  days, what the figure is based on (earlier tool, supplier figure + date). */
 function EstimateQuickRow({ changeId, position: p, onChanged }: {
@@ -529,7 +778,7 @@ function ShopQuoteRow({ changeId, positionId, shop, onDone }: {
 
 /** Christoph 2026-11-08: the shops this line's RFQ went to, each a supplier
  *  wait on the line (asked today, expected in 14 days); its quote closes it. */
-function RfqShops({ changeId, position: p, editable, onChanged }: {
+export function RfqShops({ changeId, position: p, editable, onChanged }: {
   changeId: number; position: CostPosition; editable: boolean; onChanged: () => void
 }) {
   const qc = useQueryClient()
@@ -1109,19 +1358,8 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
         <tr data-testid={`costpos-offers-${p.id}`} className="bg-slate-900/40">
           <td />
           <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
-            <RfqShops changeId={changeId} position={p} editable={editable} onChanged={onChanged} />
-            <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('costpos.receivedQuotes')}</p>
-            {offerCount === 0 ? (
-              <p className="text-xs text-slate-600">{t('costpos.noOffers')}</p>
-            ) : (
-              <ul>
-                {(p.offers ?? []).map((o) => (
-                  <OfferRow key={o.id} changeId={changeId} positionId={p.id} offer={o}
-                    currency={cur} editable={editable} onChanged={onChanged} />
-                ))}
-              </ul>
-            )}
-            {/* a quote comes in from an asked shop: "+ asked", then "Quote received" */}
+            <SupplierLines changeId={changeId} position={p} editable={editable}
+              currency={cur} onChanged={onChanged} />
           </td>
         </tr>
       )}

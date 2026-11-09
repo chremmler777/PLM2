@@ -110,8 +110,10 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
     queryKey: ['change', changeId, 'supplier-waits'],
     queryFn: () => changesApi.listSupplierWaits(changeId),
   })
-  const mine = (all ?? waits).filter((w) => w.department_id === departmentId && w.is_open)
-  const done = (all ?? []).filter((w) => w.department_id === departmentId && !w.is_open)
+  // Christoph 2026-11-08: a wait on a supplier line is handled in that line's
+  // quote table; here only the department's other waits
+  const mine = (all ?? waits).filter((w) => w.department_id === departmentId && w.is_open && w.position_id == null)
+  const done = (all ?? []).filter((w) => w.department_id === departmentId && !w.is_open && w.position_id == null)
   // Christoph 2026-11-08: with two or more supplier lines (cases) the wait
   // names which one it is for
   const { data: positions } = useQuery({
@@ -143,6 +145,7 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
       {mine.map((w) => (
         <div key={w.id} className="flex flex-wrap items-center gap-2 rounded border border-sky-800/60 bg-sky-950/20 px-2 py-1 text-xs text-sky-100"
           data-testid={`supwait-${w.id}`}>
+          <span className="rounded bg-sky-800 px-1.5 font-semibold text-sky-100">{t('wait.sup.badge.open')}</span>
           <span>{t('wait.sup.line').replace('{v}', w.vendor_name)
             .replace('{a}', formatDate(w.asked_on)).replace('{e}', formatDate(w.expected_by))}</span>
           {lineName(w.position_id) && (
@@ -163,6 +166,10 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
       {done.map((w) => (
         <div key={w.id} data-testid={`supwait-done-${w.id}`}
           className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400">
+          <span className={`mr-1 rounded px-1.5 font-semibold ${w.close_reason === 'received'
+            ? 'bg-emerald-900/70 text-emerald-100' : w.close_reason === 'price_on_estimate'
+              ? 'bg-amber-900/70 text-amber-100' : 'bg-slate-700 text-slate-200'}`}>
+            {t(`wait.sup.badge.${w.close_reason ?? 'not_needed'}`)}</span>
           {lineName(w.position_id) && (
             <span className="mr-1 rounded bg-slate-700 px-1 text-slate-200">{lineName(w.position_id)}</span>)}
           {t('wait.sup.doneLine').replace('{v}', w.vendor_name)
