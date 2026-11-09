@@ -878,6 +878,30 @@ function CaseDocs({ changeId, position: p }: { changeId: number; position: CostP
   )
 }
 
+/** Costing effort: the hours booked after the assessment submit, read-only;
+ *  corrected through Book hours (red until something is booked). */
+function BookedRow({ changeId, position: p, editable }: {
+  changeId: number; position: CostPosition; editable: boolean
+}) {
+  const { data: fc } = useQuery({
+    queryKey: ['change', changeId, 'finalize-check', p.department_id],
+    queryFn: () => changesApi.finalizeCheck(changeId, p.department_id),
+    enabled: editable,
+  })
+  const missing = !!fc?.items?.some((i) => i.tag === 'book_hours')
+  return (
+    <div className="flex items-center gap-2 text-xs text-slate-300">
+      <span>{t('costpos.bookedHint')}</span>
+      {editable && (
+        <button type="button" onClick={() => requestBookHours({ departmentId: p.department_id })}
+          className={missing
+            ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100'
+            : btnSm.secondary}>{t('hours.title')}</button>
+      )}
+    </div>
+  )
+}
+
 /** Christoph 2026-11-08: an internal case line fills like the external
  *  estimate: hours, days, what the figure is based on. */
 function InternalQuickRow({ changeId, position: p, onChanged }: {
@@ -922,32 +946,46 @@ function InternalQuickRow({ changeId, position: p, onChanged }: {
 function EstimateQuickRow({ changeId, position: p, onChanged }: {
   changeId: number; position: CostPosition; onChanged: () => void
 }) {
+  // Christoph 2026-11-08: a bought item (spare part) states amount, price,
+  // vendor and delivery time; the days feed the offer timing
+  const part = /spare part/i.test(p.label)
+  const [qty, setQty] = useState(p.quantity != null ? String(p.quantity) : '1')
   const [cost, setCost] = useState(p.est_cost != null ? String(p.est_cost) : '')
+  const [vendor, setVendor] = useState(p.vendor_name ?? '')
   const [days, setDays] = useState(p.lead_time_days != null ? String(p.lead_time_days) : '')
   const [basis, setBasis] = useState(p.basis_ref ?? '')
   const dirty = num(cost) !== (p.est_cost ?? null) || num(days) !== (p.lead_time_days ?? null)
-    || basis.trim() !== (p.basis_ref ?? '')
+    || basis.trim() !== (p.basis_ref ?? '') || vendor.trim() !== (p.vendor_name ?? '')
+    || num(qty) !== (p.quantity ?? null)
   const save = useMutation({
     mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
       est_cost: num(cost), lead_time_days: num(days), lead_time_unit: 'calendar_days',
       basis: 'estimate', basis_ref: basis.trim() || null,
+      vendor_name: vendor.trim() || null,
+      quantity: num(qty), quantity_unit: part ? 'pcs' : (p.quantity_unit ?? 'job'),
     }),
     onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
     onError: (e: unknown) => toastError(e, 'Could not save the estimate'),
   })
   const thin = !(num(cost) && num(cost)! > 0) || basis.trim().length < 5 || !(Number(days) >= 1)
+    || (part && (!(Number(qty) > 0) || vendor.trim().length < 2))
+  const f = `${fieldCls} tabular-nums text-right`
   return (
     <div className={`flex flex-wrap items-center gap-2 rounded border px-2 py-1 ${thin
-      ? 'border-red-700/70 bg-red-950/20' : 'border-slate-700'}`}>
-      <span className="w-36 text-xs font-medium text-slate-200">{t('costpos.type.estimate')}</span>
-      <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
-        data-testid={`est-cost-${p.id}`}
-        aria-label={t('costpos.shopTotal')} placeholder={t('costpos.shopTotal')}
-        className={`${fieldCls} w-28 tabular-nums text-right`} />
-      <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
-        data-testid={`est-days-${p.id}`} title={t('costpos.daysMin')}
-        aria-label={t('costpos.shopDays')} placeholder={t('costpos.shopDays')}
-        className={`${fieldCls} w-24 tabular-nums text-right`} />
+      ? 'border-red-700/70 bg-red-950/20' : 'border-slate-700'}`} data-testid={`est-row-${p.id}`}>
+      <span className="w-28 text-xs font-medium text-slate-200">{t('costpos.type.estimate')}</span>
+      <label className="text-[11px] text-slate-400">{t('costpos.qty')}
+        <input type="number" step="1" min={1} value={qty} onChange={(e) => setQty(e.target.value)}
+          data-testid={`est-qty-${p.id}`} className={`${f} ml-1 w-16`} /></label>
+      <label className="text-[11px] text-slate-400">{t('costpos.price')}
+        <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
+          data-testid={`est-cost-${p.id}`} className={`${f} ml-1 w-28`} /></label>
+      <label className="text-[11px] text-slate-400">{t('costpos.vendor')}
+        <input value={vendor} onChange={(e) => setVendor(e.target.value)}
+          data-testid={`est-vendor-${p.id}`} className={`${fieldCls} ml-1 w-32`} /></label>
+      <label className="text-[11px] text-slate-400">{part ? t('costpos.deliveryDays') : t('costpos.daysShort')}
+        <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
+          data-testid={`est-days-${p.id}`} title={t('costpos.daysMin')} className={`${f} ml-1 w-16`} /></label>
       <input value={basis} onChange={(e) => setBasis(e.target.value)}
         data-testid={`est-basis-${p.id}`}
         aria-label={t('costpos.estBasis')} placeholder={t('costpos.estBasis')}
@@ -1542,9 +1580,10 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
               {/* Christoph 2026-11-08: a carried case line is filled in its rows
                   below (estimate / quotes); Edit only for other lines, and it
                   says what it edits */}
-              {(p.notes ?? '').startsWith('From the assessment') ? (
-                <span className="text-[11px] text-slate-500" title={t('costpos.carriedHint')}>
-                  {t('costpos.carried')}</span>
+              {((p.notes ?? '').startsWith('From the assessment') || p.notes === 'From the bookings') ? (
+                <span className="text-[11px] text-slate-500"
+                  title={p.notes === 'From the bookings' ? t('costpos.bookedHint') : t('costpos.carriedHint')}>
+                  {p.notes === 'From the bookings' ? t('costpos.fromBookings') : t('costpos.carried')}</span>
               ) : (
                 <button type="button" data-testid={`costpos-edit-${p.id}`}
                   onClick={() => setEditing(true)} aria-label={`${t('costpos.edit')}: ${p.label}`}
@@ -1585,7 +1624,15 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
       )}
       {/* Christoph 2026-11-08: an estimated supplier line fills like a quote:
           total cost, days, what it is based on */}
-      {p.kind === 'own_time' && editable && !editing && (
+      {p.kind === 'own_time' && p.notes === 'From the bookings' && (
+        <tr data-testid={`costpos-costing-effort-${p.id}`} className="bg-slate-900/40">
+          <td />
+          <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
+            <BookedRow changeId={changeId} position={p} editable={editable} />
+          </td>
+        </tr>
+      )}
+      {p.kind === 'own_time' && p.notes !== 'From the bookings' && editable && !editing && (
         <tr data-testid={`costpos-internal-${p.id}`} className="bg-slate-900/40">
           <td />
           <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
@@ -1654,7 +1701,7 @@ function EffortRow({
     queryFn: () => changesApi.finalizeCheck(changeId, departmentId),
     enabled: editable && kind === 'internal_effort',
   })
-  const bookMissing = !!fc?.items?.some((i) => i.tag === 'book_hours')
+  const bookMissing = false && !!fc?.items?.some((i) => i.tag === 'book_hours')
   // Blur and the Save click (or Enter, then blur) arrive in the same moment,
   // and isPending is only true after a render. One save at a time: a change
   // made while one is out (a second hours commit, a labour position pick) is

@@ -233,39 +233,57 @@ class HoursService:
     # the department's bookings made before the offer, never typed
     PRE_OFFER = ("draft", "captured", "scoping", "in_assessment", "costing")
 
+    COSTING_EFFORT_LABEL = "Costing effort: time spent on costing (h)"
+    FROM_BOOKINGS = "From the bookings"
+
     @staticmethod
     async def sync_assessment_effort(session: AsyncSession, change: ChangeRequest,
                                      department_id: int, actor_id: int) -> None:
+        """Christoph 2026-11-08: two read-only rows from the bookings before the
+        offer: 'Assessment effort' = booked up to the department's assessment
+        submit, 'Costing effort' = booked after it."""
         from sqlalchemy import func as _f
-        total = float((await session.execute(
-            select(_f.coalesce(_f.sum(ImplementationBooking.hours), 0)).where(
-                ImplementationBooking.change_id == change.id,
-                ImplementationBooking.department_id == department_id,
-                ImplementationBooking.status_at_booking.in_(HoursService.PRE_OFFER)))
-        ).scalar() or 0)
-        row = (await session.execute(select(CostingPosition).where(
-            CostingPosition.change_id == change.id,
-            CostingPosition.department_id == department_id,
-            CostingPosition.kind == "internal_effort"))).scalars().first()
-        if row is None:
-            if total <= 0:
-                return
-            routed = (await session.execute(select(ChangeAssessment.id).where(
-                ChangeAssessment.change_id == change.id,
-                ChangeAssessment.department_id == department_id).limit(1))).scalar_one_or_none()
-            if routed is None:
-                return
-            row = CostingPosition(
-                change_id=change.id, department_id=department_id,
-                label="Internal effort: time spent on assessment (h)",
-                kind="internal_effort", pricing="estimate", created_by=actor_id,
-                lead_time_unit="calendar_days")
-            session.add(row)
-        row.hours = round(total, 2) if total > 0 else None
-        await session.flush()
+        rows = (await session.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == change.id,
+            ChangeAssessment.department_id == department_id))).scalars().all()
+        if not rows:
+            return
+        since = max((a.submitted_at for a in rows if a.submitted_at), default=None)
+        base = select(_f.coalesce(_f.sum(ImplementationBooking.hours), 0)).where(
+            ImplementationBooking.change_id == change.id,
+            ImplementationBooking.department_id == department_id,
+            ImplementationBooking.status_at_booking.in_(HoursService.PRE_OFFER))
+        if since is None:
+            assess = float((await session.execute(base)).scalar() or 0)
+            costing = 0.0
+        else:
+            assess = float((await session.execute(
+                base.where(ImplementationBooking.booked_at <= since))).scalar() or 0)
+            costing = float((await session.execute(
+                base.where(ImplementationBooking.booked_at > since))).scalar() or 0)
         from app.services import costing_rates
-        await costing_rates.snapshot_position(session, change, row)
-        await session.flush()
+
+        async def put(kind: str, label: str, total: float, notes):
+            row = (await session.execute(select(CostingPosition).where(
+                CostingPosition.change_id == change.id,
+                CostingPosition.department_id == department_id,
+                CostingPosition.kind == kind,
+                *( [CostingPosition.label == label] if kind == "own_time" else [] )))).scalars().first()
+            if row is None:
+                if total <= 0:
+                    return
+                row = CostingPosition(
+                    change_id=change.id, department_id=department_id, label=label,
+                    kind=kind, pricing="estimate", created_by=actor_id,
+                    lead_time_unit="calendar_days", notes=notes)
+                session.add(row)
+            row.hours = round(total, 2) if total > 0 else None
+            await session.flush()
+            await costing_rates.snapshot_position(session, change, row)
+            await session.flush()
+
+        await put("internal_effort", "Internal effort: time spent on assessment (h)", assess, None)
+        await put("own_time", HoursService.COSTING_EFFORT_LABEL, costing, HoursService.FROM_BOOKINGS)
 
     @staticmethod
     async def state(session: AsyncSession, change: ChangeRequest, actor: User) -> dict:
