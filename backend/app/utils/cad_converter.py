@@ -14,11 +14,23 @@ from typing import Optional, Tuple, List
 logger = logging.getLogger(__name__)
 
 
+#: Preview mesh by STEP size (Christoph 2026-11-09: big files always rougher).
+#: (max size in MB, linear deflection mm, angular deflection rad)
+MESH_BY_SIZE = ((20, 0.05, 0.3), (80, 0.25, 0.5), (200, 0.5, 0.5), (float("inf"), 2.0, 1.0))
+
+
+def mesh_for(path: str) -> tuple[float, float]:
+    """Linear and angular deflection for a STEP file of this size."""
+    import os
+    mb = os.path.getsize(path) / 1e6
+    return next((lin, ang) for limit, lin, ang in MESH_BY_SIZE if mb < limit)
+
+
 async def convert_step_to_gltf(
     step_file_path: str,
     output_gltf_path: str,
-    linear_deflection: float = 0.05,
-    angular_deflection: float = 0.3,
+    linear_deflection: float | None = None,
+    angular_deflection: float | None = None,
     timeout_seconds: float = 300.0,
 ) -> bool:
     """
@@ -39,6 +51,10 @@ async def convert_step_to_gltf(
         True if conversion successful, False otherwise
     """
     import sys
+    if linear_deflection is None or angular_deflection is None:
+        lin, ang = mesh_for(step_file_path)
+        linear_deflection = lin if linear_deflection is None else linear_deflection
+        angular_deflection = ang if angular_deflection is None else angular_deflection
 
     if not os.path.exists(step_file_path):
         logger.error(f"Input STEP file not found: {step_file_path}")

@@ -40,9 +40,7 @@ async def main():
             rf = await s.get(RevisionFile, fid)
             out = os.path.join(os.path.dirname(rf.file_path), f"{uuid.uuid4().hex}.glb")
             mb = rf.file_size / 1e6
-            lin = 0.05 if mb < 20 else 0.25 if mb < 80 else 0.5
-            ok = await convert_step_to_gltf(rf.file_path, out, linear_deflection=lin,
-                                            angular_deflection=0.5, timeout_seconds=5400)
+            ok = await convert_step_to_gltf(rf.file_path, out, timeout_seconds=5400)  # mesh by size
             size = os.path.getsize(out) if ok and os.path.exists(out) else 0
             if ok and size > PLACEHOLDER_MAX:
                 rf.viewer_file_path, rf.has_viewer = out, True
