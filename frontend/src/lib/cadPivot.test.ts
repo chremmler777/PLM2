@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { BoxGeometry, BufferGeometry, Group, LineSegments, Mesh, PerspectiveCamera, Vector3 } from 'three'
-import { dragAngle, orbitAboutPivot, solidBounds } from './cadPivot'
+import { dragAngle, orbitAboutPivot, solidBounds, trackballAboutPivot, trackballAngle } from './cadPivot'
 
 const UP = new Vector3(0, 1, 0)
 
@@ -86,5 +86,61 @@ describe('solidBounds', () => {
 describe('dragAngle', () => {
   it('a full viewport height is one turn', () => {
     expect(dragAngle(600, 600)).toBeCloseTo(2 * Math.PI)
+  })
+})
+
+describe('trackballAboutPivot (free CAD rotation)', () => {
+  const H = 800
+
+  function apply(cam: PerspectiveCamera, target: Vector3, pivot: Vector3, dx: number, dy: number) {
+    const r = trackballAboutPivot(cam.position, target, cam.up, pivot, dx, dy, H)
+    cam.position.copy(r.position)
+    cam.up.copy(r.up)
+    target.copy(r.target)
+    cam.lookAt(target)
+  }
+
+  it('keeps the grabbed point fixed on screen', () => {
+    const cam = new PerspectiveCamera(50, 1.5, 0.1, 1000)
+    cam.position.set(20, 15, 20)
+    const target = new Vector3()
+    cam.lookAt(target)
+    const pivot = new Vector3(3, -1, 2)
+    const before = screenPos(cam, pivot)
+    apply(cam, target, pivot, 120, -70)
+    const after = screenPos(cam, pivot)
+    expect(after.x).toBeCloseTo(before.x, 5)
+    expect(after.y).toBeCloseTo(before.y, 5)
+  })
+
+  it('turns on continuously over the top: no pole, a full vertical turn comes back', () => {
+    const cam = new PerspectiveCamera(50, 1, 0.1, 1000)
+    cam.position.set(0, 0, 30)
+    const target = new Vector3()
+    cam.lookAt(target)
+    const start = cam.position.clone()
+    const heights: number[] = []
+    // 2 viewport heights = 2 x 180 deg, in small steps like a real drag
+    for (let i = 0; i < 160; i++) {
+      apply(cam, target, new Vector3(), 0, (2 * H) / 160)
+      heights.push(cam.position.y)
+    }
+    // passed straight over the top and under the bottom (an orbit would stop near the pole)
+    expect(Math.max(...heights)).toBeCloseTo(30, 3)
+    expect(Math.min(...heights)).toBeCloseTo(-30, 3)
+    expect(cam.position.distanceTo(start)).toBeLessThan(1e-6)
+  })
+
+  it('drags right -> the part front moves right (camera goes left)', () => {
+    const cam = new PerspectiveCamera(50, 1, 0.1, 1000)
+    cam.position.set(0, 0, 30)
+    const target = new Vector3()
+    cam.lookAt(target)
+    apply(cam, target, new Vector3(), 50, 0)
+    expect(cam.position.x).toBeLessThan(0)
+  })
+
+  it('half a turn per viewport height', () => {
+    expect(trackballAngle(H, H)).toBeCloseTo(Math.PI)
   })
 })

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { useThree } from '@react-three/fiber'
 import { SNAPSHOT_HIDDEN_NAME } from '../lib/canvasCapture'
-import { dragAngle, orbitAboutPivot } from '../lib/cadPivot'
+import { trackballAboutPivot } from '../lib/cadPivot'
 
 const PIVOT_MARKER = 'cad-pivot-marker'
 
@@ -16,7 +16,7 @@ interface OrbitLike {
 interface CadPivotProps {
   /** Ref to the drei <OrbitControls> instance. */
   controlsRef: React.MutableRefObject<OrbitLike | null>
-  /** Off while another tool owns left clicks (measuring). */
+  /** Left-drag rotation; off while another tool owns left clicks (measuring). Middle-drag always rotates. */
   enabled: boolean
   /** Pivot when the press hits no part (empty background): the model's bounding-box centre. */
   fallbackPivot: [number, number, number] | null
@@ -41,20 +41,22 @@ function isClipped(hit: THREE.Intersection, localClipping: boolean): boolean {
 }
 
 /**
- * CAD-style rotation: a left-drag spins the view about the surface point under
- * the cursor (NX / CATIA / SolidWorks behaviour), or about the part centre
- * when the press lands on empty background. The point stays under the cursor,
- * nothing jumps. Pan (right drag), zoom (wheel) and touch gestures stay with
- * OrbitControls. Ctrl/Shift + left drag keep OrbitControls' pan.
+ * CAD-style rotation: left-drag or middle-drag turns the part freely
+ * (trackball: no fixed up axis, no pole, continuous in every direction) about
+ * the surface point under the cursor (NX / CATIA / Cimatron behaviour), or
+ * about the part centre when the press lands on empty background. The point
+ * stays under the cursor, nothing jumps. Pan (right drag, Shift + middle,
+ * Ctrl/Shift + left), wheel zoom to cursor and touch stay with OrbitControls.
  */
 export function CadPivot({ controlsRef, enabled, fallbackPivot, markerSize = 0.08 }: CadPivotProps) {
   const { gl, camera, scene, raycaster } = useThree()
   const [marker, setMarker] = useState<THREE.Vector3 | null>(null)
   const fallbackRef = useRef(fallbackPivot)
   fallbackRef.current = fallbackPivot
+  const enabledRef = useRef(enabled)
+  enabledRef.current = enabled
 
   useEffect(() => {
-    if (!enabled) return
     const el = gl.domElement
     let drag: { id: number; x: number; y: number; pivot: THREE.Vector3 } | null = null
 
@@ -76,12 +78,17 @@ export function CadPivot({ controlsRef, enabled, fallbackPivot, markerSize = 0.0
     const onDown = (e: PointerEvent) => {
       const controls = controlsRef.current
       if (!controls || drag) return
-      if (e.button !== 0 || e.pointerType === 'touch') return
+      if (e.pointerType === 'touch') return
       if (e.ctrlKey || e.metaKey || e.shiftKey) return // OrbitControls pans with these
+      const left = e.button === 0
+      const middle = e.button === 1
+      if (!(middle || (left && enabledRef.current))) return
       const pivot = pickPivot(e)
       if (!pivot) return
-      // Runs in the capture phase, before OrbitControls' own pointerdown, so
-      // OrbitControls sees rotation disabled and stays idle for this drag.
+      // Capture phase on the canvas, registered before OrbitControls: it never
+      // sees this press (no orbit, no middle-button dolly).
+      e.stopImmediatePropagation()
+      e.preventDefault()
       controls.enableRotate = false
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, pivot }
       setMarker(pivot)
@@ -93,13 +100,12 @@ export function CadPivot({ controlsRef, enabled, fallbackPivot, markerSize = 0.0
     const onMove = (e: PointerEvent) => {
       const controls = controlsRef.current
       if (!drag || e.pointerId !== drag.id || !controls) return
-      const h = el.clientHeight
-      const yaw = dragAngle(e.clientX - drag.x, h)
-      const pitch = dragAngle(e.clientY - drag.y, h)
+      const r = trackballAboutPivot(camera.position, controls.target, camera.up, drag.pivot,
+        e.clientX - drag.x, e.clientY - drag.y, el.clientHeight)
       drag.x = e.clientX
       drag.y = e.clientY
-      const r = orbitAboutPivot(camera.position, controls.target, drag.pivot, camera.up, yaw, pitch)
       camera.position.copy(r.position)
+      camera.up.copy(r.up)
       controls.target.copy(r.target)
       camera.lookAt(controls.target)
       controls.update()
@@ -119,12 +125,17 @@ export function CadPivot({ controlsRef, enabled, fallbackPivot, markerSize = 0.0
       window.removeEventListener('pointercancel', onUp)
     }
 
+    // Middle press must not start the browser's auto-scroll.
+    const noAutoScroll = (e: MouseEvent) => { if (e.button === 1) e.preventDefault() }
+
     el.addEventListener('pointerdown', onDown, { capture: true })
+    el.addEventListener('mousedown', noAutoScroll)
     return () => {
       el.removeEventListener('pointerdown', onDown, { capture: true })
+      el.removeEventListener('mousedown', noAutoScroll)
       if (drag) end()
     }
-  }, [enabled, gl, camera, scene, raycaster, controlsRef])
+  }, [gl, camera, scene, raycaster, controlsRef])
 
   if (!marker) return null
   return (

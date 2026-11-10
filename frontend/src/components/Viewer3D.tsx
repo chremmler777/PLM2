@@ -229,6 +229,8 @@ export default function Viewer3D({
     controls.enableDamping = damping
 
     controls.target.set(center[0], center[1], center[2])
+    // Free rotation tilts the camera's up vector; the fitted view starts upright again.
+    camera.up.set(0, 1, 0)
     // Position camera to view from diagonal
     const d = distance / Math.sqrt(2)
     camera.position.set(center[0] + d, center[1] + d, center[2] + d)
@@ -507,6 +509,8 @@ export default function Viewer3D({
                 enableDamping={true}
                 dampingFactor={0.05}
                 zoomToCursor={true}
+                // Middle drag rotates (CadPivot takes it first); Shift + middle and right drag pan.
+                mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }}
                 onChange={() => {
                   // Save camera state on change
                   if (orbitControlsRef.current) {

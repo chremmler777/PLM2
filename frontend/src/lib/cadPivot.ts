@@ -84,3 +84,47 @@ export function orbitAboutPivot(
 
   return { position: pos.add(pivot), target: tgt.add(pivot) }
 }
+
+export interface TrackballResult extends OrbitResult {
+  up: Vector3
+}
+
+/** Rotation per pixel of drag: half a turn per viewport height (CAD feel; OrbitControls is a full turn). */
+export function trackballAngle(pixels: number, viewportHeight: number): number {
+  return (Math.PI * pixels) / Math.max(viewportHeight, 1)
+}
+
+/**
+ * Free (trackball) rotation about a pivot, the way NX / CATIA / Cimatron turn
+ * a part: the drag direction on screen decides the axis, there is no fixed
+ * "up" axis and no pole, so the part turns on continuously in every direction.
+ *
+ * The part should follow the cursor: dragging right turns its front to the
+ * right. For a screen move m (world, in the view plane) and the direction to
+ * the viewer v, the part's rotation axis is v x m; the camera (position, target
+ * and its up vector) turns the opposite way about the same axis through the
+ * pivot. `dx` > 0 is left->right, `dy` > 0 is top->bottom (screen pixels).
+ */
+export function trackballAboutPivot(
+  position: Vector3,
+  target: Vector3,
+  up: Vector3,
+  pivot: Vector3,
+  dx: number,
+  dy: number,
+  viewportHeight: number,
+): TrackballResult {
+  const len = Math.hypot(dx, dy)
+  if (len === 0) return { position: position.clone(), target: target.clone(), up: up.clone() }
+  const toViewer = position.clone().sub(target).normalize()
+  const camUp = up.clone().sub(toViewer.clone().multiplyScalar(up.dot(toViewer))).normalize()
+  const camRight = camUp.clone().cross(toViewer).normalize()
+  const move = camRight.multiplyScalar(dx).add(camUp.clone().multiplyScalar(-dy)).normalize()
+  const axis = toViewer.clone().cross(move).normalize()
+  const q = new Quaternion().setFromAxisAngle(axis, -trackballAngle(len, viewportHeight))
+  return {
+    position: position.clone().sub(pivot).applyQuaternion(q).add(pivot),
+    target: target.clone().sub(pivot).applyQuaternion(q).add(pivot),
+    up: camUp.applyQuaternion(q).normalize(),
+  }
+}
