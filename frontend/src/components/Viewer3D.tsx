@@ -6,6 +6,7 @@ import { Model } from './Model'
 import ViewerToolbar from './ViewerToolbar'
 import { CutPlane } from './CutPlane'
 import { CadPivot } from './CadPivot'
+import { CadCamera, PERSP_FOV, type CadCameraHandle, type Projection } from './CadCamera'
 import { CutPlaneControls } from './CutPlaneControls'
 import { ObjectTree } from './ObjectTree'
 import { MeasurementReadout } from './MeasurementReadout'
@@ -78,6 +79,18 @@ export default function Viewer3D({
 
   // Camera state preservation
   const cameraStateRef = useRef<CameraState | null>(null)
+  // CAD default: parallel (orthographic) projection; perspective on request, remembered per browser.
+  const [projection, setProjection] = useState<Projection>(() => {
+    try { return window.localStorage.getItem('plm2.viewer.projection') === 'persp' ? 'persp' : 'ortho' } catch { return 'ortho' }
+  })
+  const toggleProjection = useCallback(() => {
+    setProjection((p) => {
+      const next = p === 'ortho' ? 'persp' : 'ortho'
+      try { window.localStorage.setItem('plm2.viewer.projection', next) } catch { /* private mode */ }
+      return next
+    })
+  }, [])
+  const cadCameraRef = useRef<CadCameraHandle>(null)
   const [boundingBox, setBoundingBox] = useState<BoundingBoxInfo | null>(null)
 
   // Assembly mode state
@@ -219,8 +232,10 @@ export default function Viewer3D({
     if (!controls || !camera || !boundingBox) return
     const { center, size } = boundingBox
     const maxDim = Math.max(size[0], size[1], size[2]) || 1
-    const fov = camera.fov * (Math.PI / 180) // Convert to radians
-    const distance = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5
+    const isOrtho = camera.isOrthographicCamera === true
+    const fov = (camera.fov ?? PERSP_FOV) * (Math.PI / 180) // Convert to radians
+    // Parallel projection: the distance only has to clear the part; the scale is the zoom.
+    const distance = isOrtho ? maxDim * 3 : Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5
 
     // Flush leftover damped pan/rotate so it does not drift the fitted view.
     const damping = controls.enableDamping
@@ -234,8 +249,14 @@ export default function Viewer3D({
     // Position camera to view from diagonal
     const d = distance / Math.sqrt(2)
     camera.position.set(center[0] + d, center[1] + d, center[2] + d)
-    camera.near = Math.max(distance / 1000, 1e-4)
-    camera.far = distance * 10
+    if (isOrtho) {
+      camera.zoom = (camera.top - camera.bottom) / (maxDim * 1.4)
+      camera.near = -maxDim * 50
+      camera.far = maxDim * 50 + distance * 10
+    } else {
+      camera.near = Math.max(distance / 1000, 1e-4)
+      camera.far = distance * 10
+    }
     camera.updateProjectionMatrix()
     controls.update()
   }, [boundingBox])
@@ -401,6 +422,8 @@ export default function Viewer3D({
         isCutPlaneActive={isCutPlaneActive}
         onCutPlaneToggle={() => setIsCutPlaneActive(!isCutPlaneActive)}
         onResetView={handleResetView}
+        projection={projection}
+        onProjectionToggle={toggleProjection}
       />
 
       {/* Main Content Area with Sidebar and Canvas */}
@@ -497,11 +520,18 @@ export default function Viewer3D({
               <CutPlane
                 active={isCutPlaneActive}
               />
+              <CadCamera
+                ref={cadCameraRef}
+                projection={projection}
+                controlsRef={orbitControlsRef}
+                modelSize={boundingBox ? Math.max(...boundingBox.size) : 10}
+              />
               <CadPivot
                 controlsRef={orbitControlsRef}
                 enabled={!isMeasuring}
                 fallbackPivot={boundingBox?.center ?? null}
                 markerSize={boundingBox ? Math.max(...boundingBox.size) * 0.008 : 0.08}
+                modelSize={boundingBox ? Math.max(...boundingBox.size) : 10}
               />
               <OrbitControls
                 ref={orbitControlsRef}

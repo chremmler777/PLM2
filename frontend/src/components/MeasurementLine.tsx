@@ -32,6 +32,10 @@ export function MeasurementLine({
         color="#ff0000"
         lineWidth={2}
         dashed={false}
+        // Always on top like in CAD: a straight line across a curved part runs partly inside it.
+        depthTest={false}
+        transparent
+        renderOrder={999}
       />
 
       {/* Fixed-size marker at point 1 */}

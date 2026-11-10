@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { useThree } from '@react-three/fiber'
 import { SNAPSHOT_HIDDEN_NAME } from '../lib/canvasCapture'
-import { trackballAboutPivot } from '../lib/cadPivot'
+import { orthoZoomAbout, trackballAboutPivot, wheelFactor, zoomTowardPoint } from '../lib/cadPivot'
 
 const PIVOT_MARKER = 'cad-pivot-marker'
+/** Size of the view cube's corner square (CadCamera: margin 70 px around the cube centre). */
+const VIEW_CUBE_PX = 140
 
 /** The parts of the drei/three-stdlib OrbitControls instance this component touches. */
 interface OrbitLike {
@@ -22,6 +24,8 @@ interface CadPivotProps {
   fallbackPivot: [number, number, number] | null
   /** Pivot marker size in scene units. */
   markerSize?: number
+  /** Largest model dimension (scene units): sets the smallest wheel-zoom step. */
+  modelSize?: number
 }
 
 /** True when the object or one of its parents is hidden or a helper we never pivot on. */
@@ -48,17 +52,62 @@ function isClipped(hit: THREE.Intersection, localClipping: boolean): boolean {
  * stays under the cursor, nothing jumps. Pan (right drag, Shift + middle,
  * Ctrl/Shift + left), wheel zoom to cursor and touch stay with OrbitControls.
  */
-export function CadPivot({ controlsRef, enabled, fallbackPivot, markerSize = 0.08 }: CadPivotProps) {
+export function CadPivot({ controlsRef, enabled, fallbackPivot, markerSize = 0.08, modelSize = 10 }: CadPivotProps) {
   const { gl, camera, scene, raycaster } = useThree()
   const [marker, setMarker] = useState<THREE.Vector3 | null>(null)
   const fallbackRef = useRef(fallbackPivot)
   fallbackRef.current = fallbackPivot
   const enabledRef = useRef(enabled)
   enabledRef.current = enabled
+  const sizeRef = useRef(modelSize)
+  sizeRef.current = modelSize
 
   useEffect(() => {
     const el = gl.domElement
     let drag: { id: number; x: number; y: number; pivot: THREE.Vector3 } | null = null
+
+    const surfaceHit = (e: MouseEvent): THREE.Vector3 | null => {
+      const rect = el.getBoundingClientRect()
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      raycaster.setFromCamera(ndc, camera)
+      const hit = raycaster.intersectObjects(scene.children, true)
+        .find((h) => (h.object as THREE.Mesh).isMesh && !isExcluded(h.object) && !isClipped(h, gl.localClippingEnabled))
+      return hit ? hit.point.clone() : null
+    }
+
+    // CAD wheel zoom: toward the surface under the cursor, never stuck (see zoomTowardPoint).
+    const onWheel = (e: WheelEvent) => {
+      const controls = controlsRef.current
+      if (!controls) return
+      e.preventDefault()
+      e.stopImmediatePropagation() // OrbitControls' own dolly slows down and stops at its target
+      const px = e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1)
+      if (px === 0) return
+      let point = surfaceHit(e)
+      if (!point) {
+        // Empty background: a point on the cursor ray at the target's depth.
+        const depth = controls.target.clone().sub(camera.position).length()
+        point = raycaster.ray.at(depth, new THREE.Vector3())
+      }
+      const ortho = camera as THREE.OrthographicCamera
+      if (ortho.isOrthographicCamera) {
+        // Parallel projection: scale the view about the cursor point, slide sideways only.
+        const z = orthoZoomAbout(camera.position, controls.target, point, ortho.zoom, wheelFactor(px))
+        ortho.zoom = z.zoom
+        ortho.updateProjectionMatrix()
+        camera.position.add(z.shift)
+        controls.target.add(z.shift)
+      } else {
+        const r = zoomTowardPoint(camera.position, controls.target, point, wheelFactor(px), sizeRef.current * 0.05)
+        camera.position.copy(r.position)
+        controls.target.copy(r.target)
+      }
+      camera.lookAt(controls.target)
+      controls.update()
+    }
 
     const pickPivot = (e: PointerEvent): THREE.Vector3 | null => {
       const rect = el.getBoundingClientRect()
@@ -82,13 +131,19 @@ export function CadPivot({ controlsRef, enabled, fallbackPivot, markerSize = 0.0
       if (e.ctrlKey || e.metaKey || e.shiftKey) return // OrbitControls pans with these
       const left = e.button === 0
       const middle = e.button === 1
+      // Bottom-right corner belongs to the view cube (CadCamera).
+      const rect = el.getBoundingClientRect()
+      if (e.clientX > rect.right - VIEW_CUBE_PX && e.clientY > rect.bottom - VIEW_CUBE_PX) return
       if (!(middle || (left && enabledRef.current))) return
       const pivot = pickPivot(e)
       if (!pivot) return
-      // Capture phase on the canvas, registered before OrbitControls: it never
-      // sees this press (no orbit, no middle-button dolly).
-      e.stopImmediatePropagation()
-      e.preventDefault()
+      // Capture phase on the canvas, before OrbitControls: with rotation off it
+      // stays idle on a left press (R3F still gets it: view cube, measuring
+      // clicks). A middle press is ours alone (OrbitControls would pan).
+      if (middle) {
+        e.stopImmediatePropagation()
+        e.preventDefault()
+      }
       controls.enableRotate = false
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, pivot }
       setMarker(pivot)
@@ -130,7 +185,9 @@ export function CadPivot({ controlsRef, enabled, fallbackPivot, markerSize = 0.0
 
     el.addEventListener('pointerdown', onDown, { capture: true })
     el.addEventListener('mousedown', noAutoScroll)
+    el.addEventListener('wheel', onWheel, { capture: true, passive: false })
     return () => {
+      el.removeEventListener('wheel', onWheel, { capture: true })
       el.removeEventListener('pointerdown', onDown, { capture: true })
       el.removeEventListener('mousedown', noAutoScroll)
       if (drag) end()

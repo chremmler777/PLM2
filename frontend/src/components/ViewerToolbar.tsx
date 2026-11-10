@@ -11,6 +11,9 @@ interface ViewerToolbarProps {
   isCutPlaneActive: boolean
   onCutPlaneToggle: () => void
   onResetView: () => void
+  /** Parallel (CAD default) or perspective projection. */
+  projection?: 'ortho' | 'persp'
+  onProjectionToggle?: () => void
 }
 
 export default function ViewerToolbar({
@@ -25,6 +28,8 @@ export default function ViewerToolbar({
   isCutPlaneActive,
   onCutPlaneToggle,
   onResetView,
+  projection,
+  onProjectionToggle,
 }: ViewerToolbarProps) {
   return (
     <div className="bg-slate-800 px-3 py-2 flex items-center gap-2 border-b border-slate-700 flex-wrap">
@@ -100,6 +105,19 @@ export default function ViewerToolbar({
         🏠 Reset
       </button>
 
+      {/* Projection: parallel like CAD, or perspective */}
+      {onProjectionToggle && (
+        <button
+          onClick={onProjectionToggle}
+          className="px-3 py-1 text-xs font-medium rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+          title={projection === 'ortho'
+            ? 'Parallel projection (like CAD). Click for perspective'
+            : 'Perspective projection. Click for parallel (like CAD)'}
+        >
+          {projection === 'ortho' ? '⬜ Parallel' : '🔺 Perspective'}
+        </button>
+      )}
+
       {/* Fullscreen Button */}
       <button
         onClick={onFullscreenToggle}
@@ -118,8 +136,8 @@ export default function ViewerToolbar({
 
       {/* Instructions */}
       <div className="text-xs text-slate-400 max-w-xs">
-        <span title="Mouse Controls: Left drag = rotate, Scroll = zoom, Right drag = pan">
-          🖱️ Left: rotate • Scroll: zoom • Right: pan
+        <span title="Mouse: left or middle drag = rotate about the point you grab, scroll = zoom at the cursor, right drag or Shift+middle = pan, view cube (bottom right) = standard views">
+          🖱️ Left/Middle: rotate • Scroll: zoom • Right: pan • Cube: views
         </span>
         <span className="mx-2">|</span>
         <span title="Keyboard Shortcuts: F=fullscreen, S=solid, W=wireframe, G=grid, M=measure, C=cut, Esc=close">

@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { BoxGeometry, BufferGeometry, Group, LineSegments, Mesh, PerspectiveCamera, Vector3 } from 'three'
-import { dragAngle, orbitAboutPivot, solidBounds, trackballAboutPivot, trackballAngle } from './cadPivot'
+import { BoxGeometry, BufferGeometry, Group, LineSegments, Mesh, OrthographicCamera, PerspectiveCamera, Vector3 } from 'three'
+import { dragAngle, orbitAboutPivot, solidBounds, trackballAboutPivot, trackballAngle, wheelFactor, zoomTowardPoint, orthoZoomAbout, snapUp } from './cadPivot'
 
 const UP = new Vector3(0, 1, 0)
 
-function screenPos(cam: PerspectiveCamera, p: Vector3) {
+function screenPos(cam: PerspectiveCamera | OrthographicCamera, p: Vector3) {
   cam.updateMatrixWorld()
   cam.updateProjectionMatrix()
   return p.clone().project(cam)
@@ -142,5 +142,79 @@ describe('trackballAboutPivot (free CAD rotation)', () => {
 
   it('half a turn per viewport height', () => {
     expect(trackballAngle(H, H)).toBeCloseTo(Math.PI)
+  })
+})
+
+describe('zoomTowardPoint (CAD wheel zoom)', () => {
+  it('keeps the point under the cursor on the same pixel', () => {
+    const cam = new PerspectiveCamera(50, 1.5, 0.01, 1000)
+    cam.position.set(20, 15, 20)
+    const target = new Vector3()
+    cam.lookAt(target)
+    const p = new Vector3(2, 1, -1)
+    const before = screenPos(cam, p)
+    const r = zoomTowardPoint(cam.position, target, p, wheelFactor(-100), 0.1)
+    cam.position.copy(r.position)
+    cam.lookAt(r.target)
+    const after = screenPos(cam, p)
+    expect(after.x).toBeCloseTo(before.x, 5)
+    expect(after.y).toBeCloseTo(before.y, 5)
+  })
+
+  it('never gets stuck: close to the point it still moves by the minimum step and passes it', () => {
+    let pos = new Vector3(0, 0, 10)
+    let target = new Vector3()
+    const p = new Vector3()
+    for (let i = 0; i < 200; i++) {
+      const r = zoomTowardPoint(pos, target, p, wheelFactor(-100), 0.5)
+      pos = r.position
+      target = r.target
+    }
+    expect(pos.z).toBeLessThan(0) // went through the point instead of creeping toward it
+  })
+
+  it('zooming out by the inverse factor comes back', () => {
+    const pos = new Vector3(0, 0, 10)
+    const target = new Vector3()
+    const p = new Vector3(1, 0, 0)
+    const inn = zoomTowardPoint(pos, target, p, 0.8, 0.01)
+    const out = zoomTowardPoint(inn.position, inn.target, p, 1 / 0.8, 0.01)
+    expect(out.position.distanceTo(p)).toBeGreaterThan(inn.position.distanceTo(p))
+  })
+})
+
+describe('orthoZoomAbout (parallel projection)', () => {
+  it('keeps the point under the cursor on the same pixel while the scale changes', () => {
+    const cam = new OrthographicCamera(-400, 400, 300, -300, -1000, 1000)
+    cam.position.set(10, 8, 10)
+    const target = new Vector3()
+    cam.lookAt(target)
+    cam.zoom = 40
+    const p = new Vector3(1.5, 0.5, -2)
+    const before = screenPos(cam, p)
+    const r = orthoZoomAbout(cam.position, target, p, cam.zoom, wheelFactor(-100))
+    cam.zoom = r.zoom
+    cam.position.add(r.shift)
+    target.add(r.shift)
+    cam.lookAt(target)
+    const after = screenPos(cam, p)
+    expect(r.zoom).toBeGreaterThan(40)
+    expect(after.x).toBeCloseTo(before.x, 5)
+    expect(after.y).toBeCloseTo(before.y, 5)
+  })
+})
+
+describe('snapUp', () => {
+  it('is world Y for side views and Z for top / bottom', () => {
+    expect(snapUp(new Vector3(0, 0, 1)).toArray()).toEqual([0, 1, 0])
+    expect(snapUp(new Vector3(0, 1, 0)).toArray()).toEqual([0, 0, -1])
+    expect(snapUp(new Vector3(0, -1, 0)).toArray()).toEqual([0, 0, 1])
+  })
+})
+
+describe('wheelFactor', () => {
+  it('scroll up (negative deltaY) zooms in, scroll down zooms out', () => {
+    expect(wheelFactor(-100)).toBeLessThan(1)
+    expect(wheelFactor(100)).toBeGreaterThan(1)
   })
 })

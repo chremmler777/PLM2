@@ -128,3 +128,70 @@ export function trackballAboutPivot(
     up: camUp.applyQuaternion(q).normalize(),
   }
 }
+
+/** Wheel delta (WheelEvent.deltaY in px) -> zoom factor. Wheel forward / scroll up (deltaY < 0)
+ *  zooms in (factor < 1); one notch (100 px) moves about 15 % closer. */
+export function wheelFactor(deltaPixels: number): number {
+  return Math.exp(deltaPixels * 0.0016)
+}
+
+/**
+ * CAD-style wheel zoom toward the point under the cursor.
+ *
+ * The camera moves along the cursor ray (so that point stays under the cursor)
+ * by a share of its distance to the point, but never by less than a share of
+ * `minDistance`: OrbitControls scales the distance to its target, so steps
+ * shrink to nothing near it and the view gets stuck; here it keeps going and
+ * may pass through a wall (the near plane cuts it open). The target is
+ * re-placed on the view axis at the new distance of the zoom point, so pan
+ * speed (which scales with the target distance) fits the zoom level.
+ * `factor` < 1 zooms in, > 1 zooms out.
+ */
+export function zoomTowardPoint(
+  position: Vector3,
+  target: Vector3,
+  point: Vector3,
+  factor: number,
+  minDistance: number,
+): OrbitResult {
+  const viewDir = target.clone().sub(position).normalize()
+  const toPoint = point.clone().sub(position)
+  const dist = toPoint.length()
+  if (dist < 1e-12) return { position: position.clone(), target: target.clone() }
+  const rayDir = toPoint.clone().divideScalar(dist)
+  const step = Math.max(dist, minDistance) * (1 - factor) // > 0 in, < 0 out
+  const move = rayDir.multiplyScalar(step)
+  const newPos = position.clone().add(move)
+  const along = Math.max(point.clone().sub(newPos).dot(viewDir), minDistance)
+  return { position: newPos, target: newPos.clone().add(viewDir.multiplyScalar(along)) }
+}
+
+/**
+ * Parallel-projection (orthographic) wheel zoom about the point under the
+ * cursor: the view scale changes, the camera only slides sideways so that
+ * point stays on its pixel. Nothing moves toward the part, so nothing can get
+ * stuck or cut into it. Returns the new zoom and the sideways shift to add to
+ * camera position and target.
+ */
+export function orthoZoomAbout(
+  position: Vector3,
+  target: Vector3,
+  point: Vector3,
+  zoom: number,
+  factor: number,
+  minZoom = 1e-4,
+  maxZoom = 1e6,
+): { zoom: number; shift: Vector3 } {
+  const newZoom = Math.min(maxZoom, Math.max(minZoom, zoom / factor))
+  const viewDir = target.clone().sub(position).normalize()
+  const rel = point.clone().sub(position)
+  const perp = rel.sub(viewDir.multiplyScalar(rel.dot(viewDir))) // in the view plane
+  return { zoom: newZoom, shift: perp.multiplyScalar(1 - zoom / newZoom) }
+}
+
+/** Camera up vector for a snapped view direction (camera sits at target + dir): world Y up, except looking straight down / up. */
+export function snapUp(dir: Vector3): Vector3 {
+  const d = dir.clone().normalize()
+  if (Math.abs(d.y) > 0.99) return new Vector3(0, 0, d.y > 0 ? -1 : 1)
+  return new Vector3(0, 1, 0)
+}
