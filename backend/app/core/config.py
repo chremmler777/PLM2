@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     jwt_cookie_name: str = "access_token"
     role_system: str = "plm2"
 
+    # Sandbox instance (app/sandbox.py): one database per person, cloned from
+    # sandbox_template_db; only plm2_Admin + sandbox_hub_roles get in.
+    sandbox_mode: bool = False
+    sandbox_template_db: str = "plm_sbx_template"
+    sandbox_meta_db: str = "plm_sbx_meta"
+    sandbox_hub_roles: str = "plm2_ProjectManager,plm2_Sales"
+    sandbox_landing: str = "/changes"
+
     # Service-to-service bearer token (env PLM2_SERVICE_TOKEN). A machine
     # caller sending `Authorization: Bearer <token>` is bridged to a read-only
     # principal — the same pattern TWOS exposes to PDB. Empty = disabled.

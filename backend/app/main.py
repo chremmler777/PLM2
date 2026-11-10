@@ -457,6 +457,13 @@ async def lifespan(app: FastAPI):
             logger.error(f"Legacy sep_risks not copied into risk_assessment forms: {e}")
             await session.rollback()
 
+    if settings.sandbox_mode:
+        # Sandbox (app/sandbox.py): no reminders, no mails, no syncs. Nothing
+        # in a person's copy is real, so nothing may leave the instance.
+        logger.info("Sandbox mode: background jobs and mail are off")
+        yield
+        return
+
     # Periodic overdue lesson-action reminders (every 6h, deduped to 1/24h per action)
     import asyncio
 
@@ -544,6 +551,11 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(api_router, prefix="/api")
+
+if settings.sandbox_mode:
+    from app import sandbox as _sandbox
+    app.include_router(_sandbox.router, prefix="/api/v1")
+    app.add_middleware(_sandbox.SandboxMiddleware)
 
 
 @app.get("/")

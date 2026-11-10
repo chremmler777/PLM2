@@ -35,6 +35,7 @@ import TrainingRunPage from './pages/TrainingRunPage';
 import TrainingHandoutPage from './pages/TrainingHandoutPage';
 import DepartmentsAdminPage from './pages/DepartmentsAdminPage';
 import AppLayout from './components/layout/AppLayout';
+import SandboxBanner, { IS_SANDBOX_INSTANCE } from './sandboxInstance/SandboxBanner';
 
 // Defaults against refetch storms (a change page made 32 to 72 calls on load):
 // data counts as fresh for 30 s, a tab switch does not refetch everything,
@@ -310,7 +311,8 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
-          <BrowserRouter basename="/plm2">
+          <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+            {IS_SANDBOX_INSTANCE && <SandboxBanner />}
             <AppRoutes />
             <OpenChangeBridge />
             <Toaster position="bottom-right" theme="dark" richColors closeButton />

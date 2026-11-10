@@ -1,9 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// VITE_BASE: the sandbox instance is built under /plm2-sandbox/ (src/sandboxInstance)
+const base = process.env.VITE_BASE || '/plm2/'
+const devApi = process.env.VITE_DEV_API || 'http://claude-plm2-backend-1:8000'
+
 export default defineConfig({
   plugins: [react()],
-  base: '/plm2/',
+  base,
   server: {
     host: '0.0.0.0',
     port: 5173,
@@ -16,12 +20,12 @@ export default defineConfig({
     proxy: {
       // Depending on base handling the request reaches the middleware with
       // or without the /plm2 prefix — cover both spellings.
-      '/plm2/api': {
-        target: 'http://claude-plm2-backend-1:8000',
+      [`${base}api`]: {
+        target: devApi,
         changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/plm2\/api/, '/api'),
+        rewrite: (p) => p.replace(new RegExp(`^${base}api`), '/api'),
       },
-      '/api': { target: 'http://claude-plm2-backend-1:8000', changeOrigin: true },
+      '/api': { target: devApi, changeOrigin: true },
     },
   },
   // prod may serve the built bundle via `vite preview` behind nginx (TWOS/KPI
@@ -30,7 +34,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
-    allowedHosts: ['localhost', 'plm2-frontend', 'apps.ad.us.ktx.group'],
+    allowedHosts: ['localhost', 'plm2-frontend', 'plm2-sandbox-frontend', 'apps.ad.us.ktx.group'],
   },
   build: { outDir: 'dist', sourcemap: false, minify: 'esbuild' },
 })

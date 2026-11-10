@@ -25,11 +25,23 @@ engine = create_async_engine(
     **engine_kwargs
 )
 
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+if settings.sandbox_mode:
+    # Sandbox: every session binds to the current person's own database copy
+    # (app/sandbox.py); outside a request it falls back to this engine.
+    from app import sandbox as _sandbox
+    _sandbox.set_default_engine(engine)
+    AsyncSessionLocal = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        sync_session_class=_sandbox.RoutingSession,
+        expire_on_commit=False,
+    )
+else:
+    AsyncSessionLocal = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
 
 
 class Base(DeclarativeBase):

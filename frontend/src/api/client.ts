@@ -5,7 +5,7 @@ import axios from 'axios';
 import { ACTS_AS_HEADER, ACTS_AS_USER_HEADER, getActsAsDepartmentId, getActsAsUserId } from '../lib/actsAs';
 import { assertContained } from '../training/sandbox/containment';
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL ?? '/plm2/api';
+export const API_BASE_URL = import.meta.env.VITE_API_URL ?? `${import.meta.env.BASE_URL}api`;
 
 const client = axios.create({
   baseURL: API_BASE_URL,
