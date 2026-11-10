@@ -6,6 +6,7 @@ import { useViewMode } from '../hooks/useViewMode'
 import { useCutPlane } from '../hooks/useCutPlane'
 import { useMeasurement } from '../hooks/useMeasurement'
 import { MeasurementLine } from './MeasurementLine'
+import { solidBounds } from '../lib/cadPivot'
 
 import { SceneNode } from '../hooks/useGLTFLoader'
 
@@ -95,7 +96,7 @@ export function Model({
   // Calculate and report bounding box
   useEffect(() => {
     if (scene && !isLoading && onBoundingBoxReady) {
-      const bbox = new THREE.Box3().setFromObject(scene)
+      const bbox = solidBounds(scene)
       const size = bbox.getSize(new THREE.Vector3())
       const center = bbox.getCenter(new THREE.Vector3())
 

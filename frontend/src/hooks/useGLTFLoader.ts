@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 // @ts-ignore - GLTFLoader types are not always properly exported
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { solidBounds } from '../lib/cadPivot'
 
 export interface SceneNode {
   id: string
@@ -118,18 +119,22 @@ export function useGLTFLoader(url: string | null): UseGLTFLoaderResult {
             // Extract the scene from the GLTF
             const scene = gltf.scene
 
-            // Center and scale the model
-            const bbox = new THREE.Box3().setFromObject(scene)
+            // Center and scale the model on its solid geometry (meshes).
+            // Edge/wire lines in CAD exports can reach back to the CAD origin
+            // and would drag the centre (and the orbit pivot) off the part.
+            const bbox = solidBounds(scene)
             const center = bbox.getCenter(new THREE.Vector3())
             const size = bbox.getSize(new THREE.Vector3())
-
-            // Center model at origin
-            scene.position.sub(center)
 
             // Calculate scale to fit in standard size
             const maxDim = Math.max(size.x, size.y, size.z)
             const scale = maxDim > 0 ? 10 / maxDim : 1
             scene.scale.multiplyScalar(scale)
+
+            // Center model at origin. world = scale * local + position, so the
+            // offset must be scaled too; subtracting the raw centre left parts
+            // in vehicle coordinates (far from the CAD origin) off-centre.
+            scene.position.sub(center.multiplyScalar(scale))
 
             // Build scene tree
             const tree = buildSceneTree(scene)

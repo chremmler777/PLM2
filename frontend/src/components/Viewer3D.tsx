@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo, Suspense, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, Suspense, useRef } from 'react'
 import * as THREE from 'three'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import { Model } from './Model'
 import ViewerToolbar from './ViewerToolbar'
 import { CutPlane } from './CutPlane'
+import { CadPivot } from './CadPivot'
 import { CutPlaneControls } from './CutPlaneControls'
 import { ObjectTree } from './ObjectTree'
 import { MeasurementReadout } from './MeasurementReadout'
@@ -210,36 +211,36 @@ export default function Viewer3D({
     }
   }, [assemblyMode, models, modelTrees])
 
-  // Fit camera to model's bounding box
+  // Fit camera to the model's bounding box: orbit target = part centre, so a
+  // plain orbit (touch, keyboard) turns the part about its own middle.
+  const fitView = useCallback(() => {
+    const controls = orbitControlsRef.current
+    const camera = controls?.object
+    if (!controls || !camera || !boundingBox) return
+    const { center, size } = boundingBox
+    const maxDim = Math.max(size[0], size[1], size[2]) || 1
+    const fov = camera.fov * (Math.PI / 180) // Convert to radians
+    const distance = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5
+
+    // Flush leftover damped pan/rotate so it does not drift the fitted view.
+    const damping = controls.enableDamping
+    controls.enableDamping = false
+    controls.update()
+    controls.enableDamping = damping
+
+    controls.target.set(center[0], center[1], center[2])
+    // Position camera to view from diagonal
+    const d = distance / Math.sqrt(2)
+    camera.position.set(center[0] + d, center[1] + d, center[2] + d)
+    camera.near = Math.max(distance / 1000, 1e-4)
+    camera.far = distance * 10
+    camera.updateProjectionMatrix()
+    controls.update()
+  }, [boundingBox])
+
   useEffect(() => {
-    if (orbitControlsRef.current && boundingBox && !loading) {
-      const controls = orbitControlsRef.current
-      const camera = controls.object
-
-      if (camera) {
-        const { center, size } = boundingBox
-        const maxDim = Math.max(size[0], size[1], size[2])
-        const fov = camera.fov * (Math.PI / 180) // Convert to radians
-        let distance = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5
-
-        // Set target to model center
-        controls.target.set(center[0], center[1], center[2])
-
-        // Position camera to view from diagonal
-        const direction = Math.sqrt(2)
-        camera.position.set(
-          center[0] + distance / direction,
-          center[1] + distance / direction,
-          center[2] + distance / direction
-        )
-
-        // Adjust far plane if needed
-        camera.far = distance * 10
-        camera.updateProjectionMatrix()
-        controls.update()
-      }
-    }
-  }, [boundingBox, loading])
+    if (!loading) fitView()
+  }, [fitView, loading])
 
   // Snapshot: hand out a capture once the model is loaded, the camera fitted
   // and a frame drawn; null again as soon as that no longer holds.
@@ -370,12 +371,8 @@ export default function Viewer3D({
     return () => window.removeEventListener('keydown', handleKeydown)
   }, [showGrid, isMeasuring, isCutPlaneActive])
 
-  // Reset view - will be used by toolbar
-  const handleResetView = () => {
-    // This will be handled by passing a ref to OrbitControls
-    // For now, just a placeholder
-    console.log('Reset view clicked')
-  }
+  // Reset view (toolbar Home button): back to the fitted diagonal view
+  const handleResetView = fitView
 
   return (
     <div ref={containerRef} className="w-full h-full flex flex-col relative">
@@ -497,6 +494,12 @@ export default function Viewer3D({
               ) : null}
               <CutPlane
                 active={isCutPlaneActive}
+              />
+              <CadPivot
+                controlsRef={orbitControlsRef}
+                enabled={!isMeasuring}
+                fallbackPivot={boundingBox?.center ?? null}
+                markerSize={boundingBox ? Math.max(...boundingBox.size) * 0.008 : 0.08}
               />
               <OrbitControls
                 ref={orbitControlsRef}
