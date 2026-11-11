@@ -123,6 +123,8 @@ class Project(Base):
     # "vw" (VW group / Brose / Audi), "scout", or NULL = none. Used to read the
     # customer index and data kind from uploaded filenames.
     customer_naming: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Project LOP (list of open points) is switched on per project.
+    lop_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
