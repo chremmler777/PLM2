@@ -170,7 +170,7 @@ async def test_comment_counts_as_update(client, pm_auth, quality_auth, line, lop
 
 async def test_empty_comment_is_refused(client, pm_auth, line):
     assert (await client.post(f"{BASE}/lines/{line}/comments", headers=pm_auth,
-                              json={"text": "   "})).status_code in (400, 422)
+                              json={"text": "   "})).status_code == 400
 
 
 async def test_team_member_comments_on_someone_elses_line(client, sales_auth, line):
@@ -226,3 +226,46 @@ async def test_mine_lists_my_open_lines_across_projects(client, pm_auth, quality
     assert (await client.get(f"{BASE}/mine", headers=pm_auth)).json() == []
     await client.patch(f"{BASE}/lines/{line}", headers=pm_auth, json={"status": "closed"})
     assert (await client.get(f"{BASE}/mine", headers=quality_auth)).json() == []
+
+
+async def test_clearing_and_resetting_a_due_date_keeps_the_first_and_needs_reasons(client, pm_auth, line):
+    url = f"{BASE}/lines/{line}"
+    assert (await client.patch(url, headers=pm_auth, json={"due_date": None})).status_code == 400
+    b = (await client.patch(url, headers=pm_auth, json={"due_date": None, "reason": "dropped"})).json()
+    assert b["due_date"] is None and b["first_due_date"] == "2026-11-20"
+    assert (await client.patch(url, headers=pm_auth, json={"due_date": "2027-01-10"})).status_code == 400
+    b = (await client.patch(url, headers=pm_auth, json={"due_date": "2027-01-10", "reason": "back"})).json()
+    assert b["due_date"] == "2027-01-10" and b["first_due_date"] == "2026-11-20"
+
+
+async def test_business_date_is_local_in_the_lop_zone():
+    from datetime import datetime
+    from app.services.lop_service import local_date
+    assert local_date(datetime(2026, 11, 12, 2, 30)) == datetime(2026, 11, 11).date()
+    assert local_date(datetime(2026, 11, 12, 6, 0)) == datetime(2026, 11, 12).date()
+
+
+@pytest.mark.parametrize("extra", [
+    {"due_date": "2026-12-01"}, {"title": "renamed"}, "responsible"])
+async def test_done_check_cannot_carry_other_changes(client, quality_auth, pm_auth, line, lop_project, extra):
+    if extra == "responsible":
+        extra = {"responsible_id": lop_project.sales_user_id}
+    url = f"{BASE}/lines/{line}"
+    assert (await client.patch(url, headers=quality_auth, json={"status": "done_check", **extra})).status_code == 403
+    b = (await client.get(f"{BASE}/projects/{lop_project.id}", headers=pm_auth)).json()["lines"][0]
+    assert b["status"] == "open" and b["due_date"] == "2026-11-20" and b["title"] == "Gauge concept"
+    assert b["responsible_id"] == lop_project.quality_user_id
+
+
+async def test_responsible_cannot_report_on_a_closed_line(client, quality_auth, pm_auth, line, lop_project):
+    url = f"{BASE}/lines/{line}"
+    await client.patch(url, headers=pm_auth, json={"status": "closed"})
+    assert (await client.patch(url, headers=quality_auth, json={"status": "done_check"})).status_code == 403
+    b = (await client.get(f"{BASE}/projects/{lop_project.id}?view=closed", headers=pm_auth)).json()["lines"]
+    assert [x["status"] for x in b] == ["closed"]
+
+
+async def test_clear_and_name_responsible_together_is_refused(client, pm_auth, line, lop_project):
+    r = await client.patch(f"{BASE}/lines/{line}", headers=pm_auth, json={
+        "clear_responsible": True, "responsible_id": lop_project.sales_user_id})
+    assert r.status_code == 400

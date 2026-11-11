@@ -8,7 +8,8 @@ Datetimes are naive UTC.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from sqlalchemy import select
@@ -37,8 +38,26 @@ class LopForbidden(LopError):
     status_code = 403
 
 
+def _zone() -> ZoneInfo:
+    return ZoneInfo(get_settings().lop_timezone)
+
+
 def _today() -> date:
-    return datetime.utcnow().date()
+    """The business date: today in the LOP time zone (the one source of
+    "today" for the LOP)."""
+    return datetime.now(_zone()).date()
+
+
+def to_local(dt: Optional[datetime]) -> Optional[datetime]:
+    """A stored naive UTC datetime as an aware one in the LOP time zone."""
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc).astimezone(_zone())
+
+
+def local_date(dt: datetime) -> date:
+    """The business date of a stored naive UTC datetime."""
+    return to_local(dt).date()
 
 
 def _iso(v) -> Optional[str]:
@@ -204,6 +223,8 @@ class LopService:
             if not (only_done and line.responsible_id == user.id and line.status != "closed"):
                 raise LopForbidden("Only the Project Manager changes a line; "
                                    "the responsible person can report it as done")
+        if body.get("clear_responsible") and body.get("responsible_id") is not None:
+            raise LopError("Clear the responsible or name one, not both")
         reason = (reason or "").strip() or None
         old_status = line.status
         changed = False
@@ -234,18 +255,16 @@ class LopService:
                     await LopService._set_responsible(session, line, user, uid, dflt, reason)
 
         if body.get("clear_responsible"):
-            await LopService._set_responsible(session, line, user, None, False, reason)
-            changed = True
+            changed |= await LopService._set_responsible(session, line, user, None, False, reason)
         elif body.get("responsible_id") is not None:
             await LopService._check_responsible(session, line.project_id, body["responsible_id"])
-            await LopService._set_responsible(
+            changed |= await LopService._set_responsible(
                 session, line, user, body["responsible_id"], False, reason)
-            changed = True
 
         if "due_date" in body:
             new_due = body["due_date"]
             if new_due != line.due_date:
-                if line.due_date is None:
+                if line.first_due_date is None:
                     line.first_due_date = new_due       # the first date, no reason
                 elif not reason:
                     raise LopError("Moving a due date needs a reason")
@@ -287,12 +306,15 @@ class LopService:
 
     @staticmethod
     async def _set_responsible(session: AsyncSession, line: LopLine, user: User,
-                               uid: Optional[int], is_default: bool, reason) -> None:
-        if uid != line.responsible_id:
+                               uid: Optional[int], is_default: bool, reason) -> bool:
+        """True when the responsible person really changed."""
+        differs = uid != line.responsible_id
+        if differs:
             old = await session.get(User, line.responsible_id) if line.responsible_id else None
             new = await session.get(User, uid) if uid else None
             LopService._event(session, line, user, "responsible", _uname(old), _uname(new), reason)
         line.responsible_id, line.responsible_is_default = uid, is_default
+        return differs
 
     @staticmethod
     async def _dept_name(session: AsyncSession, department_id: Optional[int]) -> Optional[str]:
@@ -410,7 +432,8 @@ class LopService:
             kind=line.kind, status=line.status, responsible_id=line.responsible_id,
             responsible_active=bool(resp and resp.is_active), due_date=line.due_date,
             first_due_date=line.first_due_date, next_check_date=line.next_check_date,
-            last_update_at=line.last_update_at, closed_at=line.closed_at, pinned=False,
+            last_update_at=to_local(line.last_update_at), closed_at=to_local(line.closed_at),
+            pinned=False,
             reopened=line.id in ctx.reopened)
 
     @staticmethod
@@ -419,7 +442,7 @@ class LopService:
         today, stale_days = ctx.today, get_settings().lop_stale_days
         text, label = LopService._text_and_label(line)
         # last_meeting is None until Task 7 adds meetings
-        created_on = (line.created_at or datetime.utcnow()).date()
+        created_on = local_date(line.created_at or datetime.utcnow())
         return {
             "id": line.id, "project_id": line.project_id, "kind": line.kind,
             "ref_key": line.ref_key, "title": line.title,
