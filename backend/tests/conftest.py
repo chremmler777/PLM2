@@ -731,3 +731,86 @@ def _manual_close_by_default(monkeypatch, request):
     if request.node.get_closest_marker("auto_advance") is None:
         from app.services import auto_advance
         monkeypatch.setattr(auto_advance, "ON", False)
+
+
+# ---- Project LOP fixtures (tests/test_lop_*.py) ----------------------------
+
+async def _lop_user(session_factory, org_id: int, name: str) -> int:
+    from app.auth.security import get_password_hash as _hash
+    async with session_factory() as s:
+        u = User(organization_id=org_id, username=name, email=f"{name}@test.io",
+                 full_name=name.title(), hashed_password=_hash(f"{name}-secret-1"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.commit()
+        return u.id
+
+
+@pytest_asyncio.fixture
+async def lop_project(client, session_factory, seed, admin_auth):
+    """A LOP-enabled project. Team: the seeded engineer is the Project Manager,
+    `quality` the APQP responsible, `sales` the Sales responsible. Logistics
+    exists as a department but has nobody on the team. `outsider` is an active
+    user who is not in the team."""
+    from types import SimpleNamespace
+    from sqlalchemy import select
+    async with session_factory() as s:
+        plant_id = (await s.execute(select(Plant.id))).scalars().first()
+        p = Project(plant_id=plant_id, name="LOP Project", code="lop1",
+                    status="active", lop_enabled=True)
+        s.add(p)
+        await s.commit()
+        project_id = p.id
+    quality = await _lop_user(session_factory, seed["org_id"], "quality")
+    sales = await _lop_user(session_factory, seed["org_id"], "sales")
+    outsider = await _lop_user(session_factory, seed["org_id"], "outsider")
+    pm_dept = await make_department_member(session_factory, seed["engineer_id"], "Project Manager")
+    apqp = await make_department_member(session_factory, quality, "APQP")
+    sales_dept = await make_department_member(session_factory, sales, "Sales")
+    logistics = await make_department_member(session_factory, outsider, "Logistics")
+    # the outsider sits in Logistics but is never put on the team
+    for dept, uid in ((pm_dept, seed["engineer_id"]), (apqp, quality), (sales_dept, sales)):
+        r = await client.put(f"/api/v1/projects/{project_id}/team", headers=admin_auth,
+                             json={"department_id": dept, "user_id": uid})
+        assert r.status_code == 200, r.text
+    return SimpleNamespace(
+        id=project_id, code="lop1", pm_id=seed["engineer_id"], pm_dept_id=pm_dept,
+        apqp_id=apqp, quality_user_id=quality, sales_dept_id=sales_dept,
+        sales_user_id=sales, logistics_id=logistics, outsider_id=outsider)
+
+
+@pytest_asyncio.fixture
+async def plain_project(session_factory, seed):
+    """A project that has not switched LOP on."""
+    from types import SimpleNamespace
+    return SimpleNamespace(id=seed["project_id"])
+
+
+@pytest_asyncio.fixture
+async def pm_auth(client, lop_project):
+    return await login(client, "eng@test.io")
+
+
+@pytest_asyncio.fixture
+async def quality_auth(client, lop_project):
+    return await login(client, "quality@test.io")
+
+
+@pytest_asyncio.fixture
+async def sales_auth(client, lop_project):
+    return await login(client, "sales@test.io")
+
+
+@pytest_asyncio.fixture
+async def outsider_auth(client, lop_project):
+    return await login(client, "outsider@test.io")
+
+
+@pytest_asyncio.fixture
+async def line(client, lop_project, pm_auth):
+    """A PM task for the APQP department, due 2026-11-20 (responsible: quality)."""
+    r = await client.post(f"/api/v1/lop/projects/{lop_project.id}/lines", headers=pm_auth,
+                          json={"title": "Gauge concept", "department_id": lop_project.apqp_id,
+                                "due_date": "2026-11-20"})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
