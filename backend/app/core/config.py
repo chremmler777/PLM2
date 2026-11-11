@@ -105,6 +105,14 @@ class Settings(BaseSettings):
     #: as one digest mail.
     notify_digest_minutes: int = 5
 
+    # Project LOP (app/services/lop_rules.py): a line with no update for this
+    # many days is stale; due soon looks this many days ahead; the daily
+    # digest goes out at this hour (Monday to Friday) in this time zone.
+    lop_stale_days: int = 14
+    lop_due_soon_days: int = 3
+    lop_digest_hour: int = 7
+    lop_timezone: str = "America/New_York"
+
     # Password reset settings
     password_reset_expire_hours: int = 24
 
