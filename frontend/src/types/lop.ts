@@ -101,6 +101,20 @@ export interface PdbTool {
   ts?: string | null
   es?: string | null
   open_topics?: number
+  /** The next sampling on PDB's calendar that has not ended (never a cancelled one). */
+  next_sampling?: PdbNextSampling | null
+  /** Monday of the week of an open sampling wish that has no slot yet. */
+  sampling_requested_week?: string | null
+}
+
+export interface PdbNextSampling {
+  id: number
+  start_date: string
+  start_shift?: number | null
+  end_date?: string | null
+  machine?: string | null
+  state: 'requested' | 'confirmed' | string
+  purpose?: string | null
 }
 
 export interface PdbStatus {

@@ -110,6 +110,7 @@ export default function LopPanel({ projectId }: { projectId: number }) {
     <div data-testid="lop-panel" className="flex flex-col">
       {pdbOn && (
         <PdbStatusBox
+          projectId={projectId}
           pdb={pdb.data}
           loading={pdb.isLoading}
           error={pdb.isError ? lopErrorMessage(pdb.error, 'no answer') : null}
