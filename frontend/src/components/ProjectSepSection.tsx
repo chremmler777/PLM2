@@ -19,7 +19,7 @@ import FormPanel from '../forms/FormPanel';
 import ProjectFormsTab from '../forms/ProjectFormsTab';
 import SepItemFiles from './sep/SepItemFiles';
 import SepDocumentsTab from './sep/SepDocumentsTab';
-import type { SepItem, SepGate, SepState } from '../types/sep';
+import type { SepItem, SepItemUpdateResponse, SepGate, SepState } from '../types/sep';
 
 interface UserOption { id: number; name: string }
 
@@ -75,6 +75,9 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
 }) {
   const queryClient = useQueryClient();
   const [remark, setRemark] = useState(item.remark ?? '');
+  // An item on the project LOP that the caller may not close stays open and
+  // its line waits for the PM (lop_status done_check): say so at the item.
+  const [reportedDone, setReportedDone] = useState(false);
 
   // The form behind a work package may not exist yet — first click creates it.
   // A racing second creation of a `single` form comes back as 409 with the
@@ -104,8 +107,12 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
 
   const update = useMutation({
     mutationFn: async (patch: Record<string, unknown>) =>
-      client.patch(`/v1/sep/items/${item.id}`, patch),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sep'] }),
+      (await client.patch(`/v1/sep/items/${item.id}`, patch)).data as SepItemUpdateResponse,
+    onSuccess: (data) => {
+      if (data?.lop_status === 'done_check') setReportedDone(true);
+      else if (data?.lop_status) setReportedDone(false);
+      queryClient.invalidateQueries({ queryKey: ['sep'] });
+    },
     onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Update failed')),
   });
 
@@ -152,6 +159,11 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
             placeholder="Remark / actions…"
             className="mt-0.5 w-full bg-transparent border-b border-slate-700/60 focus:border-slate-500 text-xs text-slate-400 placeholder-slate-600 outline-none disabled:border-transparent"
           />
+        )}
+        {reportedDone && item.status === 'open' && (
+          <p role="status" data-testid={`sep-item-done-check-${item.id}`} className="mt-0.5 text-[11px] text-amber-300">
+            Reported done. Waiting for the PM to confirm in the LOP.
+          </p>
         )}
       </div>
       <select

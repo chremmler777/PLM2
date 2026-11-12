@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import ProjectSepSection from './ProjectSepSection'
@@ -58,5 +58,37 @@ describe('ProjectSepSection file counts', () => {
     fireEvent.click(await screen.findByText(/SEP Q-Gates/))
     fireEvent.click(await screen.findByText('Documents'))
     expect(await screen.findByTestId('sep-documents-empty')).toBeTruthy()
+  })
+})
+
+describe('ProjectSepSection item on the project LOP', () => {
+  beforeEach(() => {
+    clientMocks.get.mockReset()
+    clientMocks.patch.mockReset()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/sep/projects/2') return Promise.resolve({ data: sep })
+      return Promise.resolve({ data: [] })
+    })
+  })
+  afterEach(cleanup)
+
+  const NOTE = 'Reported done. Waiting for the PM to confirm in the LOP.'
+
+  it('says the item was reported done when the LOP keeps it open for the PM', async () => {
+    clientMocks.patch.mockResolvedValue({ data: { ...item, lop_status: 'done_check' } })
+    wrap()
+    fireEvent.click(await screen.findByText(/SEP Q-Gates/))
+    fireEvent.click(await screen.findByRole('button', { name: 'done' }))
+    await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/sep/items/7', { status: 'done' }))
+    expect((await screen.findByTestId('sep-item-done-check-7')).textContent).toBe(NOTE)
+  })
+
+  it('shows nothing extra for an item that is not on the LOP', async () => {
+    clientMocks.patch.mockResolvedValue({ data: { ...item, status: 'done' } })
+    wrap()
+    fireEvent.click(await screen.findByText(/SEP Q-Gates/))
+    fireEvent.click(await screen.findByRole('button', { name: 'done' }))
+    await waitFor(() => expect(clientMocks.patch).toHaveBeenCalled())
+    expect(screen.queryByText(NOTE)).toBeNull()
   })
 })

@@ -36,6 +36,12 @@ export interface SepItem {
   file_count?: number;
 }
 
+/** PATCH /v1/sep/items/{id}: the item, plus the status of its project-LOP line when it has one.
+ * `done_check`: someone who may not close it reported it done; the item stays open until the PM confirms. */
+export interface SepItemUpdateResponse extends SepItem {
+  lop_status?: 'new' | 'open' | 'in_work' | 'done_check' | 'closed';
+}
+
 export interface SepGate {
   id: number;
   project_id: number;
