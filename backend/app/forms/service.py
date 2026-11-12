@@ -79,8 +79,10 @@ def _diff(old: dict, new: dict, prefix: str = "") -> dict:
 
 
 async def save_instance(db: AsyncSession, inst: FormInstance, data: dict, user: User,
-                        owner_id: int | None = None) -> FormInstance:
-    if inst.status == "submitted":
+                        owner_id: int | None = None, *, allow_submitted: bool = False) -> FormInstance:
+    """allow_submitted: only for system writes that keep a submitted form's
+    content (the LOP stamping a row key, or finishing a row it closed)."""
+    if inst.status == "submitted" and not allow_submitted:
         raise FormError(409, "Form is submitted; reopen it to edit")
     problems = validate_data(inst.definition.body, data)
     if problems:

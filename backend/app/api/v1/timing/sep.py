@@ -30,6 +30,8 @@ from app.models.sep import (
 )
 from app.forms.risks import risk_rows_by_gate
 from app.services.sep_file_service import SepFileService
+from app.services import lop_sources
+from app.services.sep_status import apply_item_status, make_audit as _audit
 
 logger = logging.getLogger(__name__)
 
@@ -221,14 +223,6 @@ def _names_in_gates(gates: list[SepGate]) -> set[int | None]:
     return ids
 
 
-def _audit(item: SepWorkItem, user_id: int, field: str, old, new) -> SepItemAudit:
-    return SepItemAudit(
-        item_id=item.id, user_id=user_id, field=field,
-        old_value=str(old) if old is not None else None,
-        new_value=str(new) if new is not None else None,
-    )
-
-
 # ---------------------------------------------------------------- endpoints
 
 @router.post("/projects/{project_id}/activate", response_model=dict, status_code=status.HTTP_201_CREATED)
@@ -415,9 +409,11 @@ async def update_item(
         if body.status not in SEP_ITEM_STATUSES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=f"Invalid status; allowed: {', '.join(SEP_ITEM_STATUSES)}")
-        db.add(_audit(item, current_user.id, "status", item.status, body.status))
-        item.status = body.status
-        item.completed_at = datetime.utcnow() if body.status == "done" else None
+        # An item on the project LOP is closed through the LOP: anyone who may
+        # not manage that LOP only reports it as done (line -> done_check).
+        if not await lop_sources.report_done_instead(db, item, body.status, current_user):
+            apply_item_status(db, item, body.status, current_user.id)
+            await lop_sources.item_status_changed(db, item, current_user.id)
 
     if body.remark is not None and body.remark != item.remark:
         db.add(_audit(item, current_user.id, "remark", item.remark, body.remark))
@@ -437,7 +433,11 @@ async def update_item(
     await db.refresh(item)
     names = await _user_names(db, {item.responsible_id})
     counts = await SepFileService.file_counts(db, item.project_id)
-    return _item_dict(item, names, file_counts=counts)
+    out = _item_dict(item, names, file_counts=counts)
+    lop_status = await lop_sources.item_line_status(db, item)
+    if lop_status is not None:
+        out["lop_status"] = lop_status
+    return out
 
 
 @router.get("/items/{item_id}/audits", response_model=list[dict])

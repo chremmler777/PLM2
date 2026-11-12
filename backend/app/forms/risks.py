@@ -1,6 +1,10 @@
 """Risk rows of the risk_assessment form, and the one-off copy from sep_risks."""
 from __future__ import annotations
 
+import copy
+import logging
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -9,7 +13,10 @@ from app.forms.compute import recompute
 from app.models.forms import FormInstance, FormDefinition, FormEvent
 from app.models.sep import SepRisk, SepGate
 
+logger = logging.getLogger(__name__)
+
 KEY = "risk_assessment"
+LOP_KEY = "lop_key"
 MIGRATED_MARK = "migrated_from_sep_risk"
 
 
@@ -29,6 +36,68 @@ async def risk_rows_by_gate(db: AsyncSession, project_id: int) -> dict[str, list
     for row in (inst.data or {}).get("risks") or []:
         out.setdefault(row.get("gate") or "", []).append(row)
     return out
+
+
+async def _save_rows(db: AsyncSession, inst: FormInstance, rows: list[dict], user) -> None:
+    """Save changed risk rows through the forms service like a normal save
+    (validation, recompute, `saved` event with the diff). A submitted form
+    keeps its status. Raises FormError when the stored data does not validate."""
+    from app.forms.service import load_instance, save_instance
+    from app.models import User
+    if user is None:
+        user = await db.get(User, inst.updated_by or inst.created_by)
+    inst = await load_instance(db, inst.id)             # with its events
+    data = copy.deepcopy(inst.data or {})
+    data["risks"] = rows
+    await save_instance(db, inst, data, user, allow_submitted=True)
+
+
+async def ensure_risk_keys(db: AsyncSession, project_id: int, user=None) -> int:
+    """Give every risk row without a `lop_key` one (uuid4 hex) and save the
+    newest instance; other row data is untouched. Returns how many were added.
+    The key is how a LOP line finds its row again, whatever its position."""
+    from app.forms.service import FormError
+    inst = await _newest_instance(db, project_id)
+    if not inst:
+        return 0
+    rows = copy.deepcopy((inst.data or {}).get("risks") or [])
+    added = 0
+    for row in rows:
+        if not row.get(LOP_KEY):
+            row[LOP_KEY] = uuid.uuid4().hex
+            added += 1
+    if not added:
+        return 0
+    try:
+        await _save_rows(db, inst, rows, user)
+    except FormError as e:
+        logger.warning("risk keys not saved for project %s: %s", project_id, e.detail)
+        return 0
+    return added
+
+
+async def risk_rows_by_key(db: AsyncSession, project_id: int) -> dict[str, dict] | None:
+    """Rows of the newest instance by `lop_key`; None when there is no instance."""
+    inst = await _newest_instance(db, project_id)
+    if not inst:
+        return None
+    return {r[LOP_KEY]: r for r in (inst.data or {}).get("risks") or [] if r.get(LOP_KEY)}
+
+
+async def set_risk_row_status(db: AsyncSession, project_id: int, lop_key: str,
+                              status: str, user) -> bool:
+    """Set one row's status (finished / started) in the newest instance.
+    False when the row is gone or already has that status. FormError passes up."""
+    inst = await _newest_instance(db, project_id)
+    if not inst:
+        return False
+    rows = copy.deepcopy((inst.data or {}).get("risks") or [])
+    row = next((r for r in rows if r.get(LOP_KEY) == lop_key), None)
+    if row is None or row.get("status") == status:
+        return False
+    row["status"] = status
+    await _save_rows(db, inst, rows, user)
+    return True
 
 
 async def copy_sep_risks_to_forms(db: AsyncSession) -> int:

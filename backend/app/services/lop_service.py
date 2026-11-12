@@ -38,6 +38,10 @@ class LopForbidden(LopError):
     status_code = 403
 
 
+class LopConflict(LopError):
+    status_code = 409
+
+
 def _zone() -> ZoneInfo:
     return ZoneInfo(get_settings().lop_timezone)
 
@@ -78,6 +82,8 @@ class LineContext:
     departments: dict[int, str] = field(default_factory=dict)
     last_comments: dict[int, dict] = field(default_factory=dict)
     reopened: set[int] = field(default_factory=set)
+    # line id -> what its source says (SEP item, risk row); see lop_sources
+    sources: dict[int, dict] = field(default_factory=dict)
 
 
 class LopService:
@@ -225,6 +231,8 @@ class LopService:
                                    "the responsible person can report it as done")
         if body.get("clear_responsible") and body.get("responsible_id") is not None:
             raise LopError("Clear the responsible or name one, not both")
+        from app.services import lop_sources
+        await lop_sources.assert_editable(session, line)        # 409 when the SEP gate is closed
         reason = (reason or "").strip() or None
         old_status = line.status
         changed = False
@@ -284,6 +292,7 @@ class LopService:
                 raise LopError("Unknown status")
             if new_status != line.status:
                 LopService._apply_status(line, user, new_status)
+                await lop_sources.push_status(session, line, user, old_status, new_status)
                 LopService._event(session, line, user, "status", old_status, new_status, reason)
                 changed = True
         elif (line.status == "new" and line.department_id is not None
@@ -411,6 +420,8 @@ class LopService:
         if dept_ids:
             ctx.departments = dict((await session.execute(
                 select(Department.id, Department.name).where(Department.id.in_(dept_ids)))).all())
+        from app.services import lop_sources
+        ctx.sources = await lop_sources.load_sources(session, lines)
         ctx.reopened = set((await session.execute(
             select(LopEvent.line_id).where(
                 LopEvent.line_id.in_(ids), LopEvent.field == "status",
@@ -419,17 +430,27 @@ class LopService:
 
     # ----------------------------------------------------------- line_dict
     @staticmethod
-    def _text_and_label(line: LopLine) -> tuple[Optional[str], str]:
-        """What the line says and where it comes from. Task 5/6 add the SEP,
-        risk and PDB kinds here."""
+    def _text_and_label(line: LopLine, ctx: Optional[LineContext] = None) -> tuple[Optional[str], str]:
+        """What the line says and where it comes from. SEP items and risks
+        read their source (lop_sources); Task 6 adds PDB topics."""
+        src = ctx.sources.get(line.id) if ctx is not None else None
+        if src is not None:
+            return src["text"], src["label"]
         return line.title, "PM"
+
+    @staticmethod
+    def _display_status(line: LopLine, ctx: LineContext) -> str:
+        """The line's status, or closed when its source closed (SEP item done,
+        gate closed, risk finished or removed) and a sync has not caught up."""
+        src = ctx.sources.get(line.id)
+        return "closed" if src is not None and src["closed"] else line.status
 
     @staticmethod
     def _state(line: LopLine, ctx: LineContext) -> rules.LineState:
         """The rule inputs. Task 5/6 read a source's own closed state here."""
         resp = ctx.users.get(line.responsible_id) if line.responsible_id else None
         return rules.LineState(
-            kind=line.kind, status=line.status, responsible_id=line.responsible_id,
+            kind=line.kind, status=LopService._display_status(line, ctx), responsible_id=line.responsible_id,
             responsible_active=bool(resp and resp.is_active), due_date=line.due_date,
             first_due_date=line.first_due_date, next_check_date=line.next_check_date,
             last_update_at=to_local(line.last_update_at), closed_at=to_local(line.closed_at),
@@ -440,7 +461,9 @@ class LopService:
     def line_dict(line: LopLine, ctx: LineContext) -> dict:
         s = LopService._state(line, ctx)
         today, stale_days = ctx.today, get_settings().lop_stale_days
-        text, label = LopService._text_and_label(line)
+        text, label = LopService._text_and_label(line, ctx)
+        src = ctx.sources.get(line.id) or {}
+        status = LopService._display_status(line, ctx)
         # last_meeting is None until Task 7 adds meetings
         created_on = local_date(line.created_at or datetime.utcnow())
         return {
@@ -450,10 +473,11 @@ class LopService:
             "responsible_is_default": line.responsible_is_default,
             "due_date": _iso(line.due_date), "first_due_date": _iso(line.first_due_date),
             "due_is_default": line.due_is_default, "next_check_date": _iso(line.next_check_date),
-            "status": line.status, "closed_at": _iso(line.closed_at), "closed_by": line.closed_by,
+            "status": status, "closed_at": _iso(line.closed_at), "closed_by": line.closed_by,
             "last_update_at": _iso(line.last_update_at), "last_update_by": line.last_update_by,
             "created_at": _iso(line.created_at), "created_by": line.created_by,
-            "source_label": label, "text": text,
+            "source_label": label, "text": text, "source_context": src.get("context"),
+            "source_closed": bool(src.get("closed")),
             "department_name": ctx.departments.get(line.department_id),
             "responsible_name": _uname(ctx.users.get(line.responsible_id)),
             "days_late": rules.days_late(s, today),
@@ -465,6 +489,6 @@ class LopService:
             "reopened": s.reopened,
             "last_comment": ctx.last_comments.get(line.id),
             "can_manage": ctx.can_manage,
-            "can_report": (line.responsible_id == ctx.user_id and line.status != "closed"
+            "can_report": (line.responsible_id == ctx.user_id and status != "closed"
                            and not ctx.can_manage),
         }

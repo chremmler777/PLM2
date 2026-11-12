@@ -4,12 +4,13 @@ in app/services/lop_service.py."""
 from datetime import date
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
 from app.models import User, get_db
+from app.services import lop_sources
 from app.services.lop_service import LopError, LopService
 
 router = APIRouter(prefix="/lop", tags=["lop"])
@@ -34,6 +35,13 @@ class LinePatch(BaseModel):
     reason: Optional[str] = None
 
 
+class FromSep(BaseModel):
+    item_id: Optional[int] = None
+    due_date: Optional[date] = None
+    gate_id: Optional[int] = None
+    only_open: bool = False
+
+
 class CommentIn(BaseModel):
     text: str
 
@@ -53,6 +61,12 @@ async def _one(db: AsyncSession, user: User, line, can_manage: Optional[bool] = 
 async def mine(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """The caller's open lines across all projects with LOP switched on."""
     rows = await LopService.my_open_lines(db, user)
+    # lines whose source closed since the last visit leave the list
+    synced = {p.id for ln, p in rows if ln.kind in lop_sources.SOURCE_KINDS}
+    for pid in synced:
+        await lop_sources.sync_project_lines(db, pid, user.id)
+    if synced:
+        rows = await LopService.my_open_lines(db, user)
     ctx = await LopService.context(db, user, [ln for ln, _ in rows], can_manage=False)
     out = []
     for line, project in rows:
@@ -71,6 +85,7 @@ async def project_lop(project_id: int, view: Literal["meeting", "open", "closed"
         project = await LopService.get_project(db, project_id, user)
     except LopError as e:
         raise _http(e)
+    await lop_sources.sync_project_lines(db, project_id, user.id)   # risk rows only
     can_manage = await LopService.can_manage(db, user, project_id)
     lines = await LopService.lines_for_project(db, project_id, view)
     ctx = await LopService.context(db, user, lines, can_manage=can_manage)
@@ -91,6 +106,40 @@ async def create_line(project_id: int, body: LineCreate,
     except LopError as e:
         raise _http(e)
     return await _one(db, user, line)
+
+
+@router.get("/projects/{project_id}/sep-candidates")
+async def sep_candidates(project_id: int, user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    """Open SEP items that are not on the LOP yet, by gate."""
+    try:
+        await LopService.get_project(db, project_id, user)
+    except LopError as e:
+        raise _http(e)
+    return {"gates": await lop_sources.sep_candidates(db, project_id)}
+
+
+@router.post("/projects/{project_id}/lines/from-sep", status_code=201)
+async def add_from_sep(project_id: int, body: FromSep, response: Response,
+                       user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The PM adds one SEP item `{item_id, due_date?}` or all open items of a
+    gate `{gate_id, only_open: true}`. Nothing from SEP enters the LOP otherwise."""
+    if (body.item_id is None) == (body.gate_id is None):
+        raise HTTPException(400, "Send item_id or gate_id")
+    try:
+        if body.item_id is not None:
+            line, created = await lop_sources.add_sep_item(
+                db, user, project_id, body.item_id, body.due_date)
+            if not created:
+                response.status_code = 200
+            return await _one(db, user, line)
+        if not body.only_open:
+            raise HTTPException(400, "Adding a gate needs only_open: true")
+        lines = await lop_sources.add_sep_gate(db, user, project_id, body.gate_id)
+    except LopError as e:
+        raise _http(e)
+    ctx = await LopService.context(db, user, lines, can_manage=True)
+    return {"added": len(lines), "lines": [LopService.line_dict(ln, ctx) for ln in lines]}
 
 
 @router.patch("/lines/{line_id}")
