@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import MyTasksPage from './MyTasksPage'
 import { changesApi } from '../api/changes'
 import { t } from '../i18n/cmLabels'
+import { lopLine } from '../components/lop/lop.fixtures'
 
 // MyTasksPage fetches workflow tasks via useMyTasks -> workflowApi.getMyTasks ->
 // client.get('/v1/workflow-instances/my-tasks'); departments + SEP + lessons all
@@ -786,5 +787,63 @@ describe('MyTasksPage for a read-only user', () => {
     wrap(<MyTasksPage />)
     expect(await screen.findByText(t('tasks.emptyMine'))).toBeDefined()
     expect(screen.queryByTestId('viewer-read-only-notice')).toBeNull()
+  })
+})
+
+describe('MyTasksPage LOP group', () => {
+  const mine = (over: Parameters<typeof lopLine>[0], code = '2277') =>
+    ({ ...lopLine(over), project_code: code, project_name: 'Backpanel', can_manage: false, can_report: true })
+  afterEach(cleanup)
+
+  it('lists my LOP lines in their own group, late first', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      // /mine sends by due date, undated last; late is not first by itself
+      if (url === '/v1/lop/mine') return Promise.resolve({ data: [
+        mine({ id: 1, project_id: 2, text: 'Packaging proposal', due_date: '2026-11-14', status: 'in_work' }),
+        mine({ id: 2, project_id: 2, text: 'Undated check', due_date: null }),
+        mine({ id: 3, project_id: 5, text: 'Gauge concept', due_date: '2026-11-20', late: false }, '1748'),
+        mine({ id: 4, project_id: 5, text: 'Clip drawing', due_date: '2026-11-16', late: true, days_late: 2 }, '1748'),
+      ] })
+      return Promise.resolve({ data: [] })
+    })
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    wrap(<MyTasksPage />)
+    const group = await screen.findByRole('region', { name: /LOP/ })
+    const rows = within(group).getAllByTestId('lop-task-row')
+    expect(rows.map((r) => within(r).getByTestId('lop-task-text').textContent)).toEqual([
+      'Clip drawing', 'Packaging proposal', 'Gauge concept', 'Undated check',
+    ])
+    expect(rows[0].textContent).toContain('1748')
+    expect(rows[0].textContent).toContain('Nov 16 · 2 d late')
+    expect(rows[1].textContent).toContain('In work')
+    expect(rows[3].textContent).toContain('not set')
+    expect(within(rows[0]).getByRole('link', { name: '1748' }).getAttribute('href')).toBe('/projects/5/lop')
+    expect(within(group).getByRole('heading').textContent).toContain('(4)')
+  })
+
+  it('the LOP group failing to load leaves the other My Tasks groups intact', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/lop/mine') return Promise.reject({ response: { status: 500, data: { detail: 'LOP is down' } } })
+      if (url === '/v1/sep/my-items') return Promise.resolve({ data: [{
+        id: 1, item_no: 3, title_en: 'Moldflow report', department: 'Engineering', project_id: 2,
+        project_name: 'Backpanel', gate_code: 'K0/RG1', gate_target_date: null,
+      }] })
+      return Promise.resolve({ data: [] })
+    })
+    vi.mocked(changesApi.myTasks).mockResolvedValue([changeTask({ kind: 'kickoff', status: 'captured' })] as never)
+    wrap(<MyTasksPage />)
+    expect(await screen.findByText('Moldflow report')).toBeDefined()
+    expect(await screen.findByText('GB-CM-0007')).toBeDefined()
+    const group = await screen.findByRole('region', { name: /LOP/ })
+    expect((await within(group).findByRole('alert')).textContent).toContain('LOP is down')
+  })
+
+  it('shows no LOP group when I have no open lines', async () => {
+    clientMocks.get.mockResolvedValue({ data: [] })
+    vi.mocked(changesApi.myTasks).mockResolvedValue([changeTask({ kind: 'kickoff', status: 'captured' })] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    await waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/lop/mine'))
+    expect(screen.queryByRole('region', { name: /LOP/ })).toBeNull()
   })
 })

@@ -10,7 +10,7 @@ import { useState, type ComponentType } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   BookOpen, Building2, ChartColumn, CircleDollarSign, Factory, FolderKanban, GitPullRequestArrow, GraduationCap,
-  LayoutDashboard, ListChecks, LogOut, Palette, PanelLeftClose, PanelLeftOpen, Receipt, Settings2,
+  LayoutDashboard, ListChecks, ListTodo, LogOut, Palette, PanelLeftClose, PanelLeftOpen, Receipt, Settings2,
   ShoppingCart, Workflow, type LucideProps,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -70,6 +70,8 @@ export default function Sidebar() {
     // any price (all, or the changes they lead).
     ...(priceView === 'none' ? [] : [{ path: '/pnl', label: 'P&L', icon: CircleDollarSign }]),
     { path: '/reports', label: 'Reports', icon: ChartColumn },
+    // Project LOPs across all projects: who has a name and a date (everyone reads it)
+    { path: '/lop', label: 'LOP overview', icon: ListTodo },
     { path: '/my-tasks', label: 'My Tasks', icon: ListChecks },
     { path: '/training', label: 'Training', icon: GraduationCap },
   ];

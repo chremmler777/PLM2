@@ -27,6 +27,8 @@ import ChangesPage from './pages/ChangesPage';
 import ChangeDetailPage from './pages/ChangeDetailPage';
 import ReportsPage from './pages/ReportsPage';
 import EcrKpiBoardPage from './pages/EcrKpiBoardPage';
+import LopOverviewPage from './pages/LopOverviewPage';
+import ProjectLopPage from './pages/ProjectLopPage';
 import PnlPage from './pages/PnlPage';
 import CostSheetPage from './pages/CostSheetPage';
 import ProcessMapPage from './pages/ProcessMapPage';
@@ -88,6 +90,15 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ProjectDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* The project's LOP on its own page (minutes mail and notifications link here). */}
+      <Route
+        path="/projects/:projectId/lop"
+        element={
+          <ProtectedRoute>
+            <ProjectLopPage />
           </ProtectedRoute>
         }
       />
@@ -229,6 +240,15 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ReportsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Project LOPs across all projects: control KPIs, by project and department. */}
+      <Route
+        path="/lop"
+        element={
+          <ProtectedRoute>
+            <LopOverviewPage />
           </ProtectedRoute>
         }
       />

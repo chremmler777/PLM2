@@ -232,6 +232,7 @@ describe('ProjectStatusNav', () => {
     expect(buttons.findIndex((t) => t.startsWith('LOP'))).toBeLessThan(buttons.findIndex((t) => t.startsWith('Changes')))
     fireEvent.click(btn)
     expect(within(panel()).getByTestId('lop-panel-stub').textContent).toBe('lop 2')
+    expect(within(panel()).getByRole('link', { name: /open full page/i }).getAttribute('href')).toBe('/projects/2/lop')
   })
 
   it('hides LOP when the project has not switched it on (404)', async () => {

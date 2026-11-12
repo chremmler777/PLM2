@@ -157,3 +157,82 @@ export interface PinBody {
   due_date?: string | null
   next_check_date?: string | null
 }
+
+// ------------------------------------------------------------------ overview
+// Shapes of GET /v1/lop/overview, /lines, /escalations and /mine
+// (backend/app/services/lop_kpi.py, lop_meetings.escalations, api/v1/lop.py).
+
+/** The line filters behind an overview count (GET /v1/lop/lines?flag=). */
+export type LopFlag = 'open' | 'stale' | 'late' | 'no_control' | 'untouched'
+
+/** lop_kpi.kpi(): one row of control KPIs. Percentages are null without a base. */
+export interface LopKpi {
+  open: number
+  no_control: number
+  with_name_and_date_pct: number | null
+  stale: number
+  late: number
+  avg_days_late: number
+  untouched_last_meeting: number
+  on_time_pct_4w: number | null
+  dates_moved_4w: number
+  opened_week: number
+  closed_week: number
+}
+
+/** The first SEP gate of the project that is not closed. */
+export interface LopGateSummary {
+  code: string
+  done_pct: number | null
+  target_date: string | null
+}
+
+/** PDB numbers of a project; every count is null when PDB did not answer. */
+export interface LopPdbSummary {
+  available: boolean
+  tools_c: number | null
+  tools_b: number | null
+  tools_a: number | null
+  open_topics: number | null
+  escalated: number | null
+  pinned: number
+  pdb_without_name_and_date: number | null
+}
+
+export interface LopProjectKpi extends LopKpi {
+  project_id: number
+  code: string
+  name: string
+  gate: LopGateSummary | null
+  pdb: LopPdbSummary
+}
+
+/** department_id null = "No department". */
+export interface LopDepartmentKpi extends LopKpi {
+  department_id: number | null
+  name: string
+}
+
+export type LopEscalation =
+  | { kind: 'line'; line: LopLine; project_code: string; project_id: number; since: string }
+  | { kind: 'no_meeting'; project_code: string; project_id: number; pm_name: string | null; since: string }
+
+export interface LopOverview {
+  totals: LopKpi & { pdb_without_name_and_date: number }
+  projects: LopProjectKpi[]
+  departments: LopDepartmentKpi[]
+  escalations: LopEscalation[]
+}
+
+/** A line of GET /lines or /mine: the line plus its project number (and name on /mine). */
+export interface LopLineInProject extends LopLine {
+  project_code: string
+  project_name?: string
+}
+
+export interface LopLinesQuery {
+  project_id?: number
+  /** 0 = lines without a department. */
+  department_id?: number
+  flag?: LopFlag
+}

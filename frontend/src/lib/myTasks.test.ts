@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { byUrgency, changeTaskMine, foldChangeTasks, foldWorkflowTasks, isBackup, mainFirst } from './myTasks'
+import { byUrgency, changeTaskMine, lopByUrgency, foldChangeTasks, foldWorkflowTasks, isBackup, mainFirst } from './myTasks'
 import type { ChangeTask } from '../types/change'
 import type { MyTask } from '../types/workflow'
 
@@ -86,5 +86,14 @@ describe('project team roles (spec §18)', () => {
     ].sort(mainFirst)
     expect(rows.map((r) => r.role)).toEqual(['main', 'main', 'backup'])
     expect(rows[0].overdue).toBe(true)
+  })
+})
+
+describe('lopByUrgency', () => {
+  const l = (id: number, late: boolean, due_date: string | null) => ({ id, late, due_date })
+  it('puts late lines first, then the nearest due date, undated last', () => {
+    const sorted = [l(1, false, '2026-11-14'), l(2, false, null), l(3, true, '2026-11-20'), l(4, false, '2026-11-12')]
+      .sort(lopByUrgency).map((x) => x.id)
+    expect(sorted).toEqual([3, 4, 1, 2])
   })
 })

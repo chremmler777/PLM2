@@ -116,3 +116,8 @@ export function mainFirst<T extends { role?: string | null; overdue: boolean; du
   if (isBackup(a) !== isBackup(b)) return isBackup(a) ? 1 : -1
   return byUrgency(a, b)
 }
+
+/** My LOP lines: late first, then the nearest due date, undated last (the server sends them by due date only). */
+export function lopByUrgency<T extends { late: boolean; due_date: string | null }>(a: T, b: T): number {
+  return byUrgency({ overdue: a.late, due_date: a.due_date }, { overdue: b.late, due_date: b.due_date })
+}

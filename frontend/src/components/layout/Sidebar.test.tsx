@@ -92,6 +92,15 @@ describe('Sidebar nav groups', () => {
     expect(screen.queryByText('Users')).toBeNull()
   })
 
+  it('links the LOP overview next to Reports', async () => {
+    authMock.current = { role: 'viewer', username: 'tester', logout: vi.fn() }
+    wrap(<Sidebar />)
+    const link = (await screen.findByText('LOP overview')).closest('a')
+    expect(link?.getAttribute('href')).toBe('/lop')
+    const labels = screen.getAllByRole('link').map((a) => a.textContent ?? '')
+    expect(labels.findIndex((l) => l.startsWith('LOP overview'))).toBe(labels.findIndex((l) => l.startsWith('Reports')) + 1)
+  })
+
   it('renders My Tasks badge with open task count', async () => {
     authMock.current = { role: 'admin', username: 'tester', logout: vi.fn() }
     wrap(<Sidebar />)

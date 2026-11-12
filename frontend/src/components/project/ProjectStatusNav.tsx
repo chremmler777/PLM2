@@ -8,6 +8,7 @@
  * pressing Escape closes it. Nothing is remembered across reloads.
  */
 import { useEffect, useId, useState } from 'react';
+import { Link } from 'react-router-dom';
 import ProjectSepSection from '../ProjectSepSection';
 import ProjectChangesSection from '../ProjectChangesSection';
 import ProjectLessonsSection from '../ProjectLessonsSection';
@@ -107,7 +108,16 @@ export default function ProjectStatusNav({ projectId }: { projectId: number }) {
         className="flex-shrink-0 max-h-[45vh] overflow-y-auto border-b border-slate-700 bg-slate-800 px-4 py-3 [&>div]:mb-0"
       >
         {open?.kind === 'gate' && <ProjectSepSection projectId={projectId} view="gate" gateId={open.gateId} />}
-        {open?.kind === 'lop' && <LopPanel key={projectId} projectId={projectId} />}
+        {open?.kind === 'lop' && (
+          <>
+            <p className="mb-2 flex justify-end">
+              <Link to={`/projects/${projectId}/lop`} className="text-xs text-sky-400 hover:text-sky-300 hover:underline">
+                Open full page
+              </Link>
+            </p>
+            <LopPanel key={projectId} projectId={projectId} />
+          </>
+        )}
         {open?.kind === 'changes' && <ProjectChangesSection projectId={projectId} />}
         {open?.kind === 'lessons' && <ProjectLessonsSection projectId={projectId} />}
         {open?.kind === 'dfm' && <ToolDfmTab key={projectId} scope={projectScope(projectId)} />}

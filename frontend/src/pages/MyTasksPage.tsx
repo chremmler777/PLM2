@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
@@ -15,10 +15,13 @@ import { DeadlineChip } from '../components/changes/DeadlineChip';
 import { btnSm } from '../components/common/buttonStyles';
 import EmptyState from '../components/common/EmptyState';
 import { toastError } from '../lib/apiError';
-import { BookOpen, ClipboardList, FileText } from 'lucide-react';
+import { BookOpen, ClipboardList, FileText, ListTodo } from 'lucide-react';
 import { STATUS_LABELS } from '../lib/changeStatus';
 import { humanize, taskKindLabel } from '../lib/humanLabels';
-import { dueNote, foldChangeTasks, lateHint, foldWorkflowTasks, isBackup, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
+import { dueNote, foldChangeTasks, lateHint, foldWorkflowTasks, isBackup, lopByUrgency, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
+import { lopApi, lopOverviewKeys } from '../api/lop';
+import { dueLabel, STATUS_LABEL } from '../lib/lop';
+import { lopErrorMessage } from '../components/lop/useLopWrite';
 import BackupChip, { CoveringChip } from '../components/common/BackupChip';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
@@ -210,6 +213,67 @@ interface MyForm {
   project_id: number;
   project_name: string;
   updated_at: string;
+}
+
+/** My open lines of every project LOP: late first, then by due date. A row
+ *  opens the project's LOP page, where the line is updated; a failed load
+ *  stays inside this group. */
+function LopLinesSection() {
+  const { data, isError, error } = useQuery({
+    queryKey: lopOverviewKeys.mine,
+    queryFn: lopApi.mine,
+    refetchInterval: 60_000,
+  });
+  const lines = Array.isArray(data) ? [...data].sort(lopByUrgency) : [];
+  if (!isError && lines.length === 0) return null;
+
+  return (
+    <section aria-labelledby="my-lop-heading">
+      <h2 id="my-lop-heading" className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+        <ListTodo aria-hidden="true" size={14} className="text-slate-400" />LOP{isError ? '' : ` (${lines.length})`}
+      </h2>
+      {isError ? (
+        <p role="alert" className="rounded-lg border border-red-900/50 bg-slate-800 px-4 py-3 text-sm text-red-300">
+          Your LOP lines could not be loaded: {lopErrorMessage(error, 'no answer from the server')}
+        </p>
+      ) : (
+        <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-700 bg-slate-900">
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">Project</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">Line</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">Due</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((l) => (
+                <tr key={l.id ?? `${l.project_code}-${l.ref_key}`} data-testid="lop-task-row"
+                  className="border-b border-slate-700 last:border-0 hover:bg-slate-700/30">
+                  <td className="px-4 py-3 align-top whitespace-nowrap">
+                    <Link to={`/projects/${l.project_id}/lop`}
+                      className="text-sky-400 hover:text-sky-300 underline underline-offset-2 tabular-nums">
+                      {l.project_code}
+                    </Link>
+                    {l.project_name && <span className="text-xs text-slate-500 ml-2">{l.project_name}</span>}
+                  </td>
+                  <td className="px-4 py-3 align-top text-slate-100">
+                    <span data-testid="lop-task-text">{l.text ?? l.title}</span>
+                    {l.department_name && <span className="text-xs text-slate-500 ml-2">{l.department_name}</span>}
+                  </td>
+                  <td className={`px-4 py-3 align-top text-xs tabular-nums whitespace-nowrap ${l.late ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
+                    {dueLabel(l)}
+                  </td>
+                  <td className="px-4 py-3 align-top text-xs text-slate-300">{STATUS_LABEL[l.status] ?? l.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function FormsSection() {
@@ -884,6 +948,8 @@ export default function MyTasksPage() {
       <CostSheetReviewTask />
 
       <SepItemsSection />
+
+      <LopLinesSection />
 
       <FormsSection />
 
