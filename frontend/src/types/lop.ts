@@ -213,8 +213,12 @@ export interface LopDepartmentKpi extends LopKpi {
   name: string
 }
 
+/** Why a line is escalated: hand-marked by the PM in the newest closed meeting
+ *  (wins), or late / stale / a mix of both at the two newest closed meetings. */
+export type LopEscalationReason = 'hand' | 'late' | 'stale' | 'late_or_stale'
+
 export type LopEscalation =
-  | { kind: 'line'; line: LopLine; project_code: string; project_id: number; since: string }
+  | { kind: 'line'; line: LopLine; project_code: string; project_id: number; since: string; reason: LopEscalationReason }
   | { kind: 'no_meeting'; project_code: string; project_id: number; pm_name: string | null; since: string }
 
 export interface LopOverview {

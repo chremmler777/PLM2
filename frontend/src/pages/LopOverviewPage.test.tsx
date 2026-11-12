@@ -120,6 +120,47 @@ describe('LopOverviewPage', () => {
     expect(row.textContent).not.toContain('0 / 0 / 0')
   })
 
+  const pdbDown = { available: false, tools_c: null, tools_b: null, tools_a: null, open_topics: null,
+    escalated: null, pinned: 0, pdb_without_name_and_date: null }
+
+  it('shows the PDB topic total alone when PDB answered for every project', async () => {
+    mount()
+    const tile = (await screen.findAllByTestId('lop-tile'))[7]
+    expect(tile.querySelector('dd')?.textContent).toBe('8')
+    expect(tile.textContent).not.toContain('not reachable')
+  })
+
+  it('says n/a for the PDB topic total when PDB answered for no project', async () => {
+    data = overview({
+      totals: { ...kpi(), pdb_without_name_and_date: 0 },
+      projects: [projectRow({ pdb: pdbDown }), projectRow({ project_id: 5, code: '1748', pdb: pdbDown })],
+    })
+    mount()
+    const tile = (await screen.findAllByTestId('lop-tile'))[7]
+    expect(tile.querySelector('dd')?.textContent).toBe('n/a')
+    expect(tile.textContent).toContain('PDB not reachable')
+  })
+
+  it('names how many projects are missing from the PDB topic total', async () => {
+    data = overview({
+      totals: { ...kpi(), pdb_without_name_and_date: 8 },
+      projects: [projectRow({ project_id: 5, code: '1748', pdb: pdbDown }), projectRow()],
+    })
+    mount()
+    const tile = (await screen.findAllByTestId('lop-tile'))[7]
+    expect(tile.querySelector('dd')?.textContent).toBe('8')
+    expect(tile.textContent).toContain('PDB not reachable for 1 of 2 projects')
+  })
+
+  it('scopes the grouped headers of the project table', async () => {
+    mount()
+    await screen.findByRole('table', { name: 'By project' })
+    const heads = within(table('By project')).getAllByRole('columnheader')
+    expect(heads[0].textContent).toBe('Project')
+    expect(heads.filter((h) => h.getAttribute('scope') === 'colgroup').map((h) => h.textContent)).toEqual(['LOP lines', 'PDB'])
+    expect(heads.every((h) => ['col', 'colgroup'].includes(h.getAttribute('scope') ?? ''))).toBe(true)
+  })
+
   it('shows n/a for a null percentage', async () => {
     data = overview({
       totals: { ...kpi({ with_name_and_date_pct: null, on_time_pct_4w: null, open: 0, no_control: 0 }), pdb_without_name_and_date: 0 },
@@ -190,7 +231,7 @@ describe('LopOverviewPage', () => {
   it('shows the escalation list with project number and days', async () => {
     data = overview({
       escalations: [{
-        kind: 'line', project_code: '2277', project_id: 2, since: '2026-11-03',
+        kind: 'line', project_code: '2277', project_id: 2, since: '2026-11-03', reason: 'late',
         line: lopLine({ id: 14, project_id: 2, text: 'Gauge concept', department_name: 'Quality',
           responsible_name: 'Quinn Quality', late: true, days_late: 8, due_date: '2026-11-03' }),
       }],
@@ -213,6 +254,21 @@ describe('LopOverviewPage', () => {
     const item = within(list).getByRole('listitem')
     expect(item.textContent).toContain('1748 · no LOP meeting since Oct 28 · PM Paula PM')
     expect(within(item).getByRole('link').getAttribute('href')).toBe('/projects/5/lop')
+  })
+
+  it('words the reason the server gives for each escalated line', async () => {
+    const esc = (id: number, reason: 'hand' | 'late' | 'stale' | 'late_or_stale') => ({
+      kind: 'line' as const, project_code: '2277', project_id: 2, since: '2026-11-03', reason,
+      // the line's own flags today say nothing about why it escalated
+      line: lopLine({ id, project_id: 2, text: `Line ${id}`, late: true, stale: true }),
+    })
+    data = overview({ escalations: [esc(1, 'hand'), esc(2, 'late'), esc(3, 'stale'), esc(4, 'late_or_stale')] })
+    mount()
+    const items = within(await screen.findByRole('list', { name: 'Escalated' })).getAllByRole('listitem')
+    expect(items[0].textContent).toContain('escalated by the PM in the last meeting (Nov 3)')
+    expect(items[1].textContent).toContain('late at two meetings in a row since Nov 3')
+    expect(items[2].textContent).toContain('no update at two meetings in a row since Nov 3')
+    expect(items[3].textContent).toContain('late or without update at two meetings in a row since Nov 3')
   })
 
   it('says when nothing is escalated', async () => {

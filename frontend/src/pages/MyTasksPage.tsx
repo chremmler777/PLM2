@@ -630,6 +630,9 @@ function TaskList() {
     refetchInterval: LIVE_REFETCH_MS,
   });
   const activeDepartments = departments.filter((d) => d.is_active);
+  // Someone whose only open work is LOP lines has tasks: no "nothing to do" above them.
+  const { data: lopLines } = useQuery({ queryKey: lopOverviewKeys.mine, queryFn: lopApi.mine, refetchInterval: 60_000 });
+  const hasLopLines = selectedDeptId === 0 && Array.isArray(lopLines) && lopLines.length > 0;
 
   const allRows: Row[] = [
     ...foldChangeTasks(changeTasks).map((task): Row => ({
@@ -734,7 +737,8 @@ function TaskList() {
 
       {(loadingWf || loadingChange) && allRows.length === 0 ? (
         <LoadingSkeleton count={4} />
-      ) : rows.length === 0 ? (needsYou.length > 0 ? null :
+      ) : rows.length === 0 ? (needsYou.length > 0 ? null : hasLopLines
+        ? <p data-testid="task-list-empty-lop" className="text-sm text-slate-400">No change or workflow tasks. Your LOP lines are listed below.</p> :
         // esc P3-4: a read-only user (no department) is told why nothing comes.
         (readOnlyViewer && selectedDeptId === 0
           ? <EmptyState data-testid="task-list-empty" title={t('tasks.emptyViewer')}

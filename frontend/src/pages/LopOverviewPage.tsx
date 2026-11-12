@@ -17,7 +17,7 @@ import Dialog from '../components/common/Dialog'
 import { lopErrorMessage } from '../components/lop/useLopWrite'
 import { dueLabel, shortDay, staleLabel } from '../lib/lop'
 import type {
-  LopDepartmentKpi, LopEscalation, LopFlag, LopKpi, LopLinesQuery, LopProjectKpi,
+  LopDepartmentKpi, LopEscalation, LopEscalationReason, LopFlag, LopKpi, LopLinesQuery, LopProjectKpi,
 } from '../types/lop'
 
 /** "82 %", or "n/a" when there is nothing to measure against. */
@@ -102,8 +102,19 @@ function Tile({ kpi, label, children, note, wide = false }: {
   )
 }
 
-function Tiles({ totals, onOpen }: { totals: LopKpi & { pdb_without_name_and_date: number }; onOpen: Open }) {
+/** The PDB total only counts projects PDB answered for: say which part is missing. */
+function pdbTotal(projects: LopProjectKpi[], total: number): { value: string; note: string } {
+  const down = projects.filter((p) => !p.pdb?.available).length
+  if (projects.length > 0 && down === projects.length) return { value: 'n/a', note: 'PDB not reachable' }
+  if (down > 0) return { value: String(total), note: `PDB not reachable for ${down} of ${projects.length} projects` }
+  return { value: String(total), note: 'not pinned to a LOP' }
+}
+
+function Tiles({ totals, projects, onOpen }: {
+  totals: LopKpi & { pdb_without_name_and_date: number }; projects: LopProjectKpi[]; onOpen: Open
+}) {
   const controlled = totals.open - totals.no_control
+  const pdb = pdbTotal(projects, totals.pdb_without_name_and_date)
   return (
     <section aria-label="All projects" className="mb-4 rounded-lg border border-slate-700 bg-slate-800">
       <dl className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-[1.4fr_repeat(7,minmax(0,1fr))] [&>div]:border-slate-700/70 max-xl:[&>div]:border-b xl:[&>div:not(:first-child)]:border-l">
@@ -133,8 +144,8 @@ function Tiles({ totals, onOpen }: { totals: LopKpi & { pdb_without_name_and_dat
         <Tile kpi="week" label="Opened / closed this week">
           {totals.opened_week} <span className="font-normal text-slate-500">/</span> {totals.closed_week}
         </Tile>
-        <Tile kpi="pdb" label="PDB topics without name and date" note="not pinned to a LOP">
-          {totals.pdb_without_name_and_date}
+        <Tile kpi="pdb" label="PDB topics without name and date" note={pdb.note}>
+          {pdb.value}
         </Tile>
       </dl>
     </section>
@@ -142,11 +153,18 @@ function Tiles({ totals, onOpen }: { totals: LopKpi & { pdb_without_name_and_dat
 }
 
 // ------------------------------------------------------------- escalations
+const REASON_TEXT: Record<LopEscalationReason, string> = {
+  hand: 'escalated by the PM in the last meeting',
+  late: 'late at two meetings in a row',
+  stale: 'no update at two meetings in a row',
+  late_or_stale: 'late or without update at two meetings in a row',
+}
+
+/** The server says why (LopMeetings.escalations); `since` is that meeting's day. */
 function lineReason(e: Extract<LopEscalation, { kind: 'line' }>): string {
   const day = shortDay(e.since)
-  if (e.line.late) return `late at two meetings in a row since ${day}`
-  if (e.line.stale) return `no update at two meetings in a row since ${day}`
-  return `escalated in the meeting of ${day}`
+  if (e.reason === 'hand') return `${REASON_TEXT.hand} (${day})`
+  return `${REASON_TEXT[e.reason] ?? 'escalated'} since ${day}`
 }
 
 function Escalations({ rows }: { rows: LopEscalation[] }) {
@@ -202,13 +220,13 @@ const tdNum = `${td} text-right tabular-nums whitespace-nowrap`
 function KpiHeads() {
   return (
     <>
-      <th className={thNum}>Open</th>
-      <th className={thNum}>Name + date %</th>
-      <th className={thNum}>Stale</th>
-      <th className={thNum}>Late</th>
-      <th className={thNum}>Not touched</th>
-      <th className={thNum}>On time %</th>
-      <th className={thNum}>Moved</th>
+      <th scope="col" className={thNum}>Open</th>
+      <th scope="col" className={thNum}>Name + date %</th>
+      <th scope="col" className={thNum}>Stale</th>
+      <th scope="col" className={thNum}>Late</th>
+      <th scope="col" className={thNum}>Not touched</th>
+      <th scope="col" className={thNum}>On time %</th>
+      <th scope="col" className={thNum}>Moved</th>
     </>
   )
 }
@@ -256,19 +274,19 @@ function ProjectTable({ rows, onOpen }: { rows: LopProjectKpi[]; onOpen: Open })
         <table aria-labelledby={id} className="w-full text-sm">
           <thead>
             <tr className="text-[11px] uppercase tracking-wide text-slate-500">
-              <th className={th} />
-              <th colSpan={7} className={`${th} border-b border-slate-700/70 text-center`}>LOP lines</th>
-              <th className={`${th} border-b border-slate-700/70 pl-3`}>SEP</th>
-              <th colSpan={4} className={`${th} border-b border-slate-700/70 text-center`}>PDB</th>
+              <th scope="col" className={th}><span className="sr-only">Project</span></th>
+              <th scope="colgroup" colSpan={7} className={`${th} border-b border-slate-700/70 text-center`}>LOP lines</th>
+              <th scope="col" className={`${th} border-b border-slate-700/70 pl-3`}>SEP</th>
+              <th scope="colgroup" colSpan={4} className={`${th} border-b border-slate-700/70 text-center`}>PDB</th>
             </tr>
             <tr className="border-b border-slate-700 text-left text-xs text-slate-400">
-              <th className={th}>Project</th>
+              <th scope="col" className={th}>Project</th>
               <KpiHeads />
-              <th className={`${th} pl-3`}>Current gate</th>
-              <th className={thNum}>Tools C / B / A</th>
-              <th className={thNum}>Topics open</th>
-              <th className={thNum}>Escalated</th>
-              <th className={thNum}>Without name and date</th>
+              <th scope="col" className={`${th} pl-3`}>Current gate</th>
+              <th scope="col" className={thNum}>Tools C / B / A</th>
+              <th scope="col" className={thNum}>Topics open</th>
+              <th scope="col" className={thNum}>Escalated</th>
+              <th scope="col" className={thNum}>Without name and date</th>
             </tr>
           </thead>
           <tbody>
@@ -314,7 +332,7 @@ function DepartmentTable({ rows, onOpen }: { rows: LopDepartmentKpi[]; onOpen: O
         <table aria-labelledby={id} className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-700 text-left text-xs text-slate-400">
-              <th className={th}>Department</th>
+              <th scope="col" className={th}>Department</th>
               <KpiHeads />
             </tr>
           </thead>
@@ -425,7 +443,7 @@ export default function LopOverviewPage() {
         <p className="text-sm text-slate-400">Loading the overview… (it asks PDB for every project)</p>
       ) : (
         <>
-          <Tiles totals={data.totals} onOpen={open} />
+          <Tiles totals={data.totals} projects={Array.isArray(data.projects) ? data.projects : []} onOpen={open} />
           <Escalations rows={Array.isArray(data.escalations) ? data.escalations : []} />
           <ProjectTable rows={Array.isArray(data.projects) ? data.projects : []} onOpen={open} />
           <DepartmentTable rows={Array.isArray(data.departments) ? data.departments : []} onOpen={open} />

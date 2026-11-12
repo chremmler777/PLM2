@@ -85,6 +85,16 @@ async def _open_line_states(session: AsyncSession, project_id: int):
     return [ln for ln in lines if LopService._display_status(ln, ctx) != "closed"], ctx
 
 
+def _escalation_reason(marks: list) -> str:
+    """Why a line is late or stale at the two newest closed meetings:
+    "late" at both, "stale" at both (not late at both), else "late_or_stale"."""
+    if all(m.was_late for m in marks):
+        return "late"
+    if all(m.was_stale for m in marks):
+        return "stale"
+    return "late_or_stale"
+
+
 class LopMeetings:
     # ------------------------------------------------------------------ read
     @staticmethod
@@ -235,16 +245,16 @@ class LopMeetings:
                 newest = closed[0]
                 for ln in states:
                     hist = [marks.get(m.id, {}).get(ln.id) for m in closed]
-                    since = None
+                    since, reason = None, None
                     if hist[0] is not None and hist[0].mark == "escalated":
-                        since = newest.held_on
+                        since, reason = newest.held_on, "hand"
                     elif len(closed) == 2 and all(h is not None for h in hist) and \
                             rules.needs_escalation([(h.was_late, h.was_stale) for h in hist]):
-                        since = closed[1].held_on
+                        since, reason = closed[1].held_on, _escalation_reason(hist)
                     if since is not None:
                         out.append({"kind": "line", "line": LopService.line_dict(ln, ctx),
                                     "project_code": p.code, "project_id": p.id,
-                                    "since": since.isoformat()})
+                                    "since": since.isoformat(), "reason": reason})
             since = closed[0].held_on if closed else min(
                 local_date(ln.created_at) for ln in states)
             if (today - since).days > gap:

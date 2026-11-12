@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Sidebar from './Sidebar'
@@ -178,6 +178,29 @@ describe('Sidebar My Tasks counter', () => {
     wrap(<Sidebar />)
     const badge = await screen.findByText('2')
     expect(badge.closest('a')?.textContent).toContain('My Tasks')
+  })
+
+  it('adds my open LOP lines to the badge', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/workflow-instances/my-tasks') return Promise.resolve({ data: wfTasks(3) })
+      if (url === '/v1/lop/mine') return Promise.resolve({ data: [{ id: 1 }, { id: 2 }] })
+      return Promise.resolve({ data: [] })
+    })
+    wrap(<Sidebar />)
+    expect(await screen.findByText('5')).toBeDefined()
+  })
+
+  it('keeps the badge when my LOP lines cannot be loaded', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/workflow-instances/my-tasks') return Promise.resolve({ data: wfTasks(3) })
+      if (url === '/v1/lop/mine') return Promise.reject({ response: { status: 500 } })
+      return Promise.resolve({ data: [] })
+    })
+    wrap(<Sidebar />)
+    await waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/lop/mine'))
+    await waitFor(() => expect(screen.getByTestId('sidebar-task-count').textContent).toMatch(/^3/))
   })
 })
 

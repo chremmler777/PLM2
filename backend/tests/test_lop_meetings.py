@@ -146,12 +146,45 @@ async def test_untouched_lines_are_counted(client, pm_auth, lop_project):
     assert g["last_meeting"] == m["held_on"] and g["meeting"]["open"] is False
 
 
+async def _reasons(client, auth, project):
+    r = await client.get(f"{BASE}/escalations?project_id={project.id}", headers=auth)
+    assert r.status_code == 200, r.text
+    return {e["line"]["id"]: e["reason"] for e in r.json() if e["kind"] == "line"}
+
+
 async def test_late_at_two_meetings_in_a_row_escalates(client, pm_auth, lop_project):
     late = await _line(client, pm_auth, lop_project, "Late", due_date=_d(-3))
     for _ in range(2):
         m = await _start(client, pm_auth, lop_project)
         await _close(client, pm_auth, m["id"])
     assert late in await _escalated_ids(client, pm_auth, lop_project)
+    assert (await _reasons(client, pm_auth, lop_project))[late] == "late"
+
+
+async def test_late_then_stale_escalates_as_late_or_stale(client, pm_auth, lop_project, session_factory):
+    a = await _line(client, pm_auth, lop_project, "Mixed", due_date=_d(-3))
+    m = await _start(client, pm_auth, lop_project)
+    assert _marks(m)[a]["was_late"] is True and _marks(m)[a]["was_stale"] is False
+    await _close(client, pm_auth, m["id"])
+    await client.patch(f"{BASE}/lines/{a}", headers=pm_auth,
+                       json={"due_date": _d(7), "reason": "new plan"})
+    async with session_factory() as s:
+        (await s.get(LopLine, a)).last_update_at = datetime.utcnow() - timedelta(days=30)
+        await s.commit()
+    m = await _start(client, pm_auth, lop_project)
+    assert _marks(m)[a]["was_late"] is False and _marks(m)[a]["was_stale"] is True
+    await _close(client, pm_auth, m["id"])
+    assert (await _reasons(client, pm_auth, lop_project))[a] == "late_or_stale"
+
+
+async def test_hand_mark_wins_over_late_twice(client, pm_auth, lop_project):
+    a = await _line(client, pm_auth, lop_project, "Late", due_date=_d(-3))
+    m = await _start(client, pm_auth, lop_project)
+    await _close(client, pm_auth, m["id"])
+    m = await _start(client, pm_auth, lop_project)
+    await client.put(f"{BASE}/meetings/{m['id']}/marks/{a}", headers=pm_auth, json={"mark": "escalated"})
+    await _close(client, pm_auth, m["id"])
+    assert (await _reasons(client, pm_auth, lop_project))[a] == "hand"
 
 
 async def test_late_once_then_fixed_does_not_escalate(client, pm_auth, lop_project):
@@ -181,6 +214,7 @@ async def test_stale_alone_at_one_meeting_does_not_escalate(client, pm_auth, lop
     assert _marks(m)[a]["was_stale"] is True
     await _close(client, pm_auth, m["id"])
     assert a in await _escalated_ids(client, pm_auth, lop_project)
+    assert (await _reasons(client, pm_auth, lop_project))[a] == "stale"
 
 
 async def test_hand_escalated_line_is_listed_and_closed_line_is_not(client, pm_auth, lop_project):
@@ -191,6 +225,7 @@ async def test_hand_escalated_line_is_listed_and_closed_line_is_not(client, pm_a
         await client.put(f"{BASE}/meetings/{m['id']}/marks/{x}", headers=pm_auth, json={"mark": "escalated"})
     await _close(client, pm_auth, m["id"])
     assert {a, b} <= await _escalated_ids(client, pm_auth, lop_project)
+    assert (await _reasons(client, pm_auth, lop_project))[a] == "hand"
     await client.patch(f"{BASE}/lines/{b}", headers=pm_auth, json={"status": "closed"})
     ids = await _escalated_ids(client, pm_auth, lop_project)
     assert a in ids and b not in ids

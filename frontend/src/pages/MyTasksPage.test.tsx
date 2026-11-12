@@ -838,6 +838,28 @@ describe('MyTasksPage LOP group', () => {
     expect((await within(group).findByRole('alert')).textContent).toContain('LOP is down')
   })
 
+  it('a user whose only tasks are LOP lines sees them, not the empty state', async () => {
+    clientMocks.get.mockImplementation((url: string) => Promise.resolve(
+      url === '/v1/lop/mine' ? { data: [mine({ id: 1, project_id: 2, text: 'Packaging proposal' })] } : { data: [] }))
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    wrap(<MyTasksPage />)
+    expect(await screen.findByText('Packaging proposal')).toBeDefined()
+    expect(await screen.findByTestId('task-list-empty-lop')).toBeDefined()
+    expect(screen.queryByTestId('task-list-empty')).toBeNull()
+    await waitFor(() => expect(screen.getByTestId('my-tasks-total').textContent).toBe('(1)'))
+  })
+
+  it('counts my LOP lines in the total; a failing /mine leaves the other count', async () => {
+    clientMocks.get.mockImplementation((url: string) => url === '/v1/lop/mine'
+      ? Promise.reject({ response: { status: 500, data: { detail: 'LOP is down' } } })
+      : Promise.resolve({ data: [] }))
+    vi.mocked(changesApi.myTasks).mockResolvedValue([changeTask({ kind: 'kickoff', status: 'captured' })] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    await waitFor(() => expect(screen.getByTestId('my-tasks-total').textContent).toBe('(1)'))
+    expect(screen.getByTestId('task-list-title').textContent).toContain('(1)')
+  })
+
   it('shows no LOP group when I have no open lines', async () => {
     clientMocks.get.mockResolvedValue({ data: [] })
     vi.mocked(changesApi.myTasks).mockResolvedValue([changeTask({ kind: 'kickoff', status: 'captured' })] as never)
