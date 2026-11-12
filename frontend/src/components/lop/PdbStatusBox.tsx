@@ -15,6 +15,7 @@ import { lopApi, lopKeys } from '../../api/lop'
 import Dialog from '../common/Dialog'
 import { PDB_SCHEDULE_URL, escalationLabel, pdbToolUrl, pdbTopicUrl, shortDay } from '../../lib/lop'
 import type { LopLine, PdbResponse, PdbTool } from '../../types/lop'
+import RequestSamplingDialog from './RequestSamplingDialog'
 
 const OPEN_KEY = 'plm2.lop.pdbBoxOpen'
 const HIDE_AA_KEY = 'plm2.lop.pdbHideAA'
@@ -80,7 +81,7 @@ function Step({ n, label, testId, tone = 'plain', onClick, title }: {
 
 /** The "Next sampling" cell: the booked slot, or in red that a tool that is
  *  not A/A has none (with the open wish's week, when there is one). */
-function NextSampling({ tool }: { tool: PdbTool }) {
+function NextSampling({ tool, onRequest }: { tool: PdbTool; onRequest?: () => void }) {
   const s = tool.next_sampling
   if (s) {
     return (
@@ -98,6 +99,13 @@ function NextSampling({ tool }: { tool: PdbTool }) {
       none planned
       {tool.sampling_requested_week && (
         <span className="font-normal">{` · requested for week of ${shortDay(tool.sampling_requested_week)}, no slot yet`}</span>
+      )}
+      {!tool.sampling_requested_week && onRequest && (
+        <button type="button" data-testid="pdb-request-sampling" onClick={onRequest}
+          title="Tell PDB Scheduling that this tool needs a sampling slot"
+          className="ml-2 rounded border border-red-400/70 px-1.5 py-0.5 text-[11px] font-medium text-red-100 hover:bg-red-900/40">
+          Flag for planning
+        </button>
       )}
       <a data-testid="pdb-book" href={PDB_SCHEDULE_URL} target="_blank" rel="noreferrer"
         className={`ml-2 font-normal text-violet-300 hover:text-violet-200 ${linkCls}`}>Book in PDB ↗</a>
@@ -232,8 +240,10 @@ function Note({ children, tone = 'muted' }: { children: ReactNode; tone?: 'muted
   return <p className={`text-xs ${tone === 'warn' ? 'text-amber-300' : 'text-slate-400'}`}>{children}</p>
 }
 
-export default function PdbStatusBox({ pdb, loading = false, error = null, projectId }: {
+export default function PdbStatusBox({ pdb, loading = false, error = null, projectId, canRequest = false }: {
   pdb?: PdbResponse; loading?: boolean; error?: string | null
+  /** The Project Manager may flag a tool without a sampling date (a request in PDB). */
+  canRequest?: boolean
   /** Lets the topics list read every open topic when the box holds only the first ones. */
   projectId?: number
 }) {
@@ -241,6 +251,7 @@ export default function PdbStatusBox({ pdb, loading = false, error = null, proje
   const [hideAA, setHideAA] = useState(() => readFlag(HIDE_AA_KEY))
   /** undefined: closed; null: all tools; else one tool number. */
   const [topicsOf, setTopicsOf] = useState<string | null | undefined>(undefined)
+  const [requestFor, setRequestFor] = useState<PdbTool | null>(null)
   const toggle = () => setOpen((v) => { writeFlag(OPEN_KEY, !v); return !v })
   const toggleAA = () => setHideAA((v) => { writeFlag(HIDE_AA_KEY, !v); return !v })
   let canExpand = false
@@ -328,7 +339,8 @@ export default function PdbStatusBox({ pdb, loading = false, error = null, proje
                 <td className="py-1 pr-3">{tool.tool_name ?? ''}</td>
                 <td className="py-1 pr-3"><Letter value={tool.ps} label="Process status" /></td>
                 <td className="py-1 pr-3"><Letter value={tool.ts} label="Tool status" /></td>
-                <td className="py-1 pr-3"><NextSampling tool={tool} /></td>
+                <td className="py-1 pr-3"><NextSampling tool={tool}
+                  onRequest={canRequest && projectId != null ? () => setRequestFor(tool) : undefined} /></td>
                 <td className="py-1 pr-3 tabular-nums">
                   {(tool.open_topics ?? 0) > 0 ? (
                     <button type="button" data-testid="pdb-tool-topics" title="Show what is open on this tool"
@@ -367,6 +379,9 @@ export default function PdbStatusBox({ pdb, loading = false, error = null, proje
       {content}
       {topicsOf !== undefined && pdb?.available && (
         <TopicsDialog projectId={projectId} pdb={pdb} tool={topicsOf} onClose={() => setTopicsOf(undefined)} />
+      )}
+      {requestFor && projectId != null && (
+        <RequestSamplingDialog projectId={projectId} tool={requestFor} onClose={() => setRequestFor(null)} />
       )}
     </section>
   )

@@ -41,7 +41,8 @@ export function LopHelpContent() {
             topic a name and a date, and from then on it counts like any other line. The topic itself stays in
             PDB (<B>Open in PDB</B>).</li>
           <li><B>PDB status</B> on top: <B>Show tools</B> opens the tool list. A red flag means the tool is not A/A
-            and has no sampling booked. <B>Book in PDB</B> opens the sampling schedule.</li>
+            and has no sampling booked. <B>Flag for planning</B> sends PDB Scheduling a request for a week you name;
+            the tool then stands on their list until a slot is booked. <B>Book in PDB</B> opens the sampling schedule.</li>
         </ol>
       </Section>
 

@@ -22,15 +22,26 @@ class Pdb:
         self.topics = []
         self.fail = None          # status code to answer with
         self.calls = []
+        self.wishes = {}          # tool number -> open sampling request
+        self.next_sampling = None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.calls.append((request.url.path, request.headers.get("authorization")))
         if self.fail:
             return httpx.Response(self.fail)
+        if request.url.path.endswith("/sampling-requests"):
+            import json
+            b = json.loads(request.content)
+            if b["tool_number"] in self.wishes:
+                return httpx.Response(200, json={**self.wishes[b["tool_number"]], "created": False})
+            self.wishes[b["tool_number"]] = {**b, "id": len(self.wishes) + 1, "status": "open"}
+            return httpx.Response(201, json={**self.wishes[b["tool_number"]], "created": True})
         if request.url.path.endswith("/status"):
+            w = self.wishes.get("3001")
             return httpx.Response(200, json={"tool_count": 2, "funnel": {}, "tools": [
                 {"tool_number": "3001", "tool_name": "Cover", "ps": "Green", "ts": "Green",
-                 "open_topics": 2}]})
+                 "open_topics": 2, "next_sampling": self.next_sampling,
+                 "sampling_requested_week": w["preferred_week"] if w else None}]})
         return httpx.Response(200, json=self.topics)
 
 
@@ -367,3 +378,38 @@ async def test_closed_pin_is_in_the_closed_view(client, pm_auth, pdb_project, pd
     assert [ln["id"] for ln in closed["lines"]] == [lid]
     opened = (await client.get(f"{BASE}/projects/{pdb_project.id}?view=open", headers=pm_auth)).json()
     assert opened["lines"] == []
+
+
+def _wish(client, auth, pid, tool="3001", **body):
+    body.setdefault("preferred_week", "2099-01-05")
+    return client.post(f"{BASE}/projects/{pid}/pdb/tools/{tool}/request-sampling", headers=auth, json=body)
+
+
+async def test_pm_flags_a_tool_without_sampling_and_pdb_gets_the_request(client, pm_auth, pdb_project, pdb):
+    assert (await _get(client, pm_auth, pdb_project.id))["status"]["tools"][0]["sampling_requested_week"] is None
+    r = await _wish(client, pm_auth, pdb_project.id, note="  T2 loop  ")
+    assert r.status_code == 201, r.text
+    assert r.json()["created"] is True and r.json()["preferred_week"] == "2099-01-05"
+    sent = pdb.wishes["3001"]
+    assert sent["purpose"] == "validation_mrr" and sent["note"] == "T2 loop" and sent["requested_by"]
+    assert pdb.calls[-1] == ("/service/plm/projects/1748/sampling-requests", "Bearer tok")
+    # the box shows it at once (the cached status was dropped)
+    assert (await _get(client, pm_auth, pdb_project.id))["status"]["tools"][0]["sampling_requested_week"] == "2099-01-05"
+    again = await _wish(client, pm_auth, pdb_project.id, preferred_week="2099-02-02")
+    assert again.status_code == 200 and again.json()["created"] is False
+    assert again.json()["preferred_week"] == "2099-01-05"
+
+
+async def test_sampling_request_rules(client, pm_auth, quality_auth, pdb_project, pdb):
+    assert (await _wish(client, quality_auth, pdb_project.id)).status_code == 403
+    assert (await _wish(client, pm_auth, pdb_project.id, tool="9999")).status_code == 404
+    assert (await _wish(client, pm_auth, pdb_project.id, preferred_week="2020-01-06")).status_code == 400
+    assert (await _wish(client, pm_auth, pdb_project.id, purpose="fun")).status_code == 422
+    pdb.next_sampling = {"id": 5, "start_date": "2099-01-07", "state": "confirmed"}
+    pdb_client.clear_cache()
+    assert (await _wish(client, pm_auth, pdb_project.id)).status_code == 409
+    assert pdb.wishes == {}
+    pdb.next_sampling = None
+    pdb.fail = 503
+    pdb_client.clear_cache()
+    assert (await _wish(client, pm_auth, pdb_project.id)).status_code == 503

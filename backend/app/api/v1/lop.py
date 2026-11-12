@@ -53,6 +53,13 @@ class PinIn(BaseModel):
     next_check_date: Optional[date] = None
 
 
+class SamplingRequestIn(BaseModel):
+    #: Any day of the week the sampling is wanted in.
+    preferred_week: date
+    purpose: Literal["material_test", "validation_mrr", "ecr_validation", "part_demand"] = "validation_mrr"
+    note: Optional[str] = None
+
+
 class MarkIn(BaseModel):
     mark: Literal["updated", "moved", "escalated", "none"]
 
@@ -356,6 +363,42 @@ async def pin_pdb_topic(project_id: int, topic_id: int, body: PinIn, response: R
     ctx = await LopService.context(db, user, [line], can_manage=True)
     ctx.pdb = {str(topic["id"]): topic}
     return LopService.line_dict(line, ctx)
+
+
+@router.post("/projects/{project_id}/pdb/tools/{tool_number}/request-sampling")
+async def request_sampling(project_id: int, tool_number: str, body: SamplingRequestIn, response: Response,
+                           user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The PM flags a tool that has no sampling date: PDB gets an open
+    sampling request, so the tool stands on Scheduling's list as waiting for
+    a slot. One open request per tool; a second flag returns the first."""
+    try:
+        project = await LopService.get_project(db, project_id, user)
+        if not await LopService.can_manage(db, user, project_id):
+            raise HTTPException(403, "Only the Project Manager requests a sampling from the LOP")
+    except LopError as e:
+        raise _http(e)
+    if body.preferred_week < _today():
+        raise HTTPException(400, "The week asked for is in the past")
+    note = (body.note or "").strip()[:1500] or None
+    try:
+        status = await pdb_client.project_status(project.code)
+        tool = next((t for t in status.get("tools") or [] if str(t.get("tool_number")) == tool_number), None)
+        if tool is None:
+            raise HTTPException(404, "PDB does not list this tool under the project")
+        if tool.get("next_sampling"):
+            raise HTTPException(409, "This tool already has a sampling on the PDB schedule")
+        made = await pdb_client.request_sampling(
+            project.code, tool_number=tool_number, preferred_week=body.preferred_week.isoformat(),
+            purpose=body.purpose, note=note,
+            requested_by=(user.full_name or user.username or user.email))   # PDB shows the requester by name
+    except pdb_client.PdbUnavailable as e:
+        raise HTTPException(503, str(e))
+    created = bool(made.get("created"))
+    response.status_code = 201 if created else 200
+    logger.info("LOP sampling request: project %s tool %s by user %s (created=%s)",
+                project_id, tool_number, user.id, created)
+    return {"tool_number": tool_number, "preferred_week": made.get("preferred_week"),
+            "purpose": made.get("purpose"), "requested_by": made.get("requested_by"), "created": created}
 
 
 # ----------------------------------------------------------------- meetings

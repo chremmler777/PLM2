@@ -167,4 +167,30 @@ describe('PdbStatusBox', () => {
     expect(box.textContent).toContain('timeout')
     expect(within(box).getByTestId('pdb-step-topics').textContent).toMatch(/1.*open topic/)
   })
+
+  it('the PM flags a tool without a sampling date: a request goes to PDB', async () => {
+    window.localStorage.setItem('plm2.lop.pdbBoxOpen', '1')
+    const status = { tool_count: 1, funnel: {}, tools: [{ tool_number: '3345', tool_name: 'Cover', ps: 'B', ts: 'B', open_topics: 0 }] }
+    const send = vi.spyOn(lopApi, 'requestSampling').mockResolvedValue({ created: true, preferred_week: '2099-01-05' })
+    // not the PM: no button
+    render(<PdbStatusBox projectId={7} pdb={pdbResponse({ status, topics: [] })} />)
+    expect(screen.queryByTestId('pdb-request-sampling')).toBeNull()
+    cleanup()
+    wrap(<PdbStatusBox projectId={7} canRequest pdb={pdbResponse({ status, topics: [] })} />)
+    fireEvent.click(screen.getByTestId('pdb-request-sampling'))
+    const dialog = await screen.findByTestId('pdb-request-dialog')
+    expect(dialog.textContent).toContain('Tool 3345')
+    fireEvent.change(within(dialog).getByLabelText('Wanted in the week of'), { target: { value: '2099-01-07' } })
+    fireEvent.click(screen.getByTestId('pdb-request-send'))
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(7, '3345', { preferred_week: '2099-01-07', purpose: 'validation_mrr', note: null }))
+    await vi.waitFor(() => expect(screen.queryByTestId('pdb-request-dialog')).toBeNull())
+  })
+
+  it('a tool that already has an open request shows the week, not the flag button', () => {
+    window.localStorage.setItem('plm2.lop.pdbBoxOpen', '1')
+    const status = { tool_count: 1, funnel: {}, tools: [{ tool_number: '3345', ps: 'B', ts: 'B', open_topics: 0, sampling_requested_week: '2099-01-05' }] }
+    render(<PdbStatusBox projectId={7} canRequest pdb={pdbResponse({ status, topics: [] })} />)
+    expect(screen.getByTestId('pdb-next-sampling').textContent).toContain('requested for week of')
+    expect(screen.queryByTestId('pdb-request-sampling')).toBeNull()
+  })
 })

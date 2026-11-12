@@ -112,6 +112,7 @@ export default function LopPanel({ projectId }: { projectId: number }) {
       {pdbOn && (
         <PdbStatusBox
           projectId={projectId}
+          canRequest={pm}
           pdb={pdb.data}
           loading={pdb.isLoading}
           error={pdb.isError ? lopErrorMessage(pdb.error, 'no answer') : null}

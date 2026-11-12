@@ -4,7 +4,7 @@
 import client from './client'
 import type {
   LinePatch, LineCreate, LopHistoryItem, LopLine, LopLineInProject, LopLinesQuery,
-  LopMeetingDetail, LopOverview, LopProjectResponse, LopView, MeetingMark, PdbResponse, PinBody, SepCandidateGate, LopMyEscalation,
+  LopMeetingDetail, LopOverview, LopProjectResponse, LopView, MeetingMark, PdbResponse, PinBody, SepCandidateGate, LopMyEscalation, SamplingRequestBody
 } from '../types/lop'
 
 /** Every LOP query of a project starts with lopKeys.all(projectId): invalidate that after a write. */
@@ -67,6 +67,8 @@ export const lopApi = {
     (await client.post(`/v1/lop/projects/${projectId}/lines/from-sep`, { gate_id: gateId, only_open: true })).data,
   pin: async (projectId: number, topicId: string, body: PinBody): Promise<LopLine> =>
     (await client.post(`/v1/lop/projects/${projectId}/pdb/${topicId}/pin`, body)).data,
+  requestSampling: async (projectId: number, toolNumber: string, body: SamplingRequestBody): Promise<{ created: boolean; preferred_week: string | null }> =>
+    (await client.post(`/v1/lop/projects/${projectId}/pdb/tools/${encodeURIComponent(toolNumber)}/request-sampling`, body)).data,
   startMeeting: async (projectId: number): Promise<LopMeetingDetail> =>
     (await client.post(`/v1/lop/projects/${projectId}/meetings`)).data,
   meeting: async (meetingId: number): Promise<LopMeetingDetail> =>

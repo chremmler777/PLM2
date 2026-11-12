@@ -1,7 +1,9 @@
-"""HTTP client for PDB's read-only PLM service endpoints (project LOP).
+"""HTTP client for PDB's PLM service endpoints (project LOP).
 
-    GET {pdb_api_url}/service/plm/projects/{project_id}/status
-    GET {pdb_api_url}/service/plm/projects/{project_id}/topics
+    GET  {pdb_api_url}/service/plm/projects/{project_id}/status
+    GET  {pdb_api_url}/service/plm/projects/{project_id}/topics
+    POST {pdb_api_url}/service/plm/projects/{project_id}/sampling-requests
+         (the one write: the PM flags a tool that has no sampling date)
 
 PDB has no /api/v1 prefix. Configuration (settings, from the environment):
 PDB_API_URL (default http://pdb-backend:8000) and PDB_SERVICE_TOKEN (empty =
@@ -113,3 +115,51 @@ async def project_topics(project_code: str, *,
     if not isinstance(data, list):
         raise PdbUnavailable("PDB returned an unexpected topic list")
     return [t for t in data if isinstance(t, dict) and t.get("id") is not None]
+
+
+async def request_sampling(project_code: str, *, tool_number: str, preferred_week: str,
+                           purpose: str, note: Optional[str], requested_by: str,
+                           transport: Optional[httpx.AsyncBaseTransport] = None) -> dict:
+    """File an open sampling request in PDB for a tool of the project, so
+    Scheduling sees that the tool needs a slot. PDB keeps one open request per
+    tool: asking again returns the first one (`created` false). The cached
+    status of the project is dropped so the box shows the request at once."""
+    settings = get_settings()
+    token = (settings.pdb_service_token or "").strip()
+    base = (settings.pdb_api_url or "").strip().rstrip("/")
+    if not token or not base:
+        raise PdbUnavailable("PDB is not configured (PDB_SERVICE_TOKEN is not set)")
+    pid = pdb_project_id(project_code)
+    path = f"/service/plm/projects/{pid}/sampling-requests"
+    body = {"tool_number": tool_number, "preferred_week": preferred_week, "purpose": purpose,
+            "note": note, "requested_by": requested_by}
+    explicit = transport if transport is not None else default_transport
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=explicit) as c:
+            resp = await c.post(f"{base}{path}", json=body,
+                                headers={"Authorization": f"Bearer {token}",
+                                         "Accept": "application/json"})
+    except httpx.TimeoutException:
+        logger.warning("PDB timed out on %s", path)
+        raise PdbUnavailable("PDB did not answer in time") from None
+    except httpx.HTTPError as exc:
+        logger.warning("PDB unreachable on %s: %s", path, type(exc).__name__)
+        raise PdbUnavailable("PDB is not reachable from this server") from None
+    if resp.status_code in (401, 403):
+        logger.warning("PDB refused the service token (%s)", resp.status_code)
+        raise PdbUnavailable("PDB refused the service token")
+    if resp.status_code == 404:
+        raise PdbUnavailable("PDB does not list this tool under the project")
+    if resp.status_code == 503:
+        raise PdbUnavailable("PDB cannot reach TWOS right now")
+    if resp.status_code >= 400:
+        logger.warning("PDB returned %s on %s", resp.status_code, path)
+        raise PdbUnavailable(f"PDB returned an error ({resp.status_code})")
+    try:
+        data = resp.json()
+    except ValueError:
+        raise PdbUnavailable("PDB returned no JSON") from None
+    if not isinstance(data, dict):
+        raise PdbUnavailable("PDB returned an unexpected answer")
+    _cache.pop(("status", pid), None)
+    return data

@@ -166,6 +166,16 @@ export interface LineCreate {
   responsible_id?: number | null
 }
 
+export type SamplingPurpose = 'material_test' | 'validation_mrr' | 'ecr_validation' | 'part_demand'
+
+/** The PM flags a tool without a sampling date: an open sampling request in PDB. */
+export interface SamplingRequestBody {
+  /** Any day of the week the sampling is wanted in. */
+  preferred_week: string
+  purpose?: SamplingPurpose
+  note?: string | null
+}
+
 export interface PinBody {
   responsible_id?: number | null
   due_date?: string | null
