@@ -62,6 +62,34 @@ async def test_start_meeting_snapshots_late_and_stale(client, pm_auth, lop_proje
     assert marks[ok]["was_late"] is False and marks[ok]["was_stale"] is True
     again = await client.post(f"{BASE}/projects/{lop_project.id}/meetings", headers=pm_auth)
     assert again.status_code == 200 and again.json()["id"] == m["id"]
+    assert len(again.json()["marks"]) == len(m["marks"]) == 2
+    async with session_factory() as s:
+        assert len((await s.execute(select(LopMeeting))).scalars().all()) == 1
+        assert len((await s.execute(select(LopMeetingMark))).scalars().all()) == 2
+
+
+async def test_pinned_topic_gets_a_row_and_closed_source_does_not(
+        client, pm_auth, lop_project, session_factory, seed_forms):
+    from app.models.sep import SepWorkItem
+    r = await client.post(f"/api/v1/sep/projects/{lop_project.id}/activate", headers=pm_auth)
+    assert r.status_code == 201, r.text
+    async with session_factory() as s:
+        item = (await s.execute(select(SepWorkItem).where(SepWorkItem.status == "open")
+                                .order_by(SepWorkItem.id))).scalars().first().id
+    r = await client.post(f"{BASE}/projects/{lop_project.id}/lines/from-sep", headers=pm_auth,
+                          json={"item_id": item, "due_date": _d(5)})
+    assert r.status_code in (200, 201), r.text
+    sep_line = r.json()["id"]
+    async with session_factory() as s:
+        pin = LopLine(project_id=lop_project.id, kind="pdb_topic", ref_key="77", title="Topic",
+                      status="open", due_date=datetime.utcnow().date() + timedelta(days=5),
+                      last_update_at=datetime.utcnow(), created_at=datetime.utcnow())
+        s.add(pin)
+        (await s.get(SepWorkItem, item)).status = "not_applicable"       # the source closed
+        await s.commit()
+        pin_id = pin.id
+    m = await _start(client, pm_auth, lop_project)
+    assert pin_id in _marks(m) and sep_line not in _marks(m)
 
 
 async def test_editing_during_the_meeting_marks_the_line_updated(client, pm_auth, lop_project):
@@ -148,6 +176,11 @@ async def test_stale_alone_at_one_meeting_does_not_escalate(client, pm_auth, lop
     assert _marks(m)[a]["was_stale"] is True
     await _close(client, pm_auth, m["id"])
     assert a not in await _escalated_ids(client, pm_auth, lop_project)       # fresh at meeting 1
+    # the same line, still stale at a third meeting: stale at two in a row escalates
+    m = await _start(client, pm_auth, lop_project)
+    assert _marks(m)[a]["was_stale"] is True
+    await _close(client, pm_auth, m["id"])
+    assert a in await _escalated_ids(client, pm_auth, lop_project)
 
 
 async def test_hand_escalated_line_is_listed_and_closed_line_is_not(client, pm_auth, lop_project):
@@ -216,6 +249,7 @@ async def test_minutes_go_once_to_the_team_only(client, pm_auth, lop_project, se
                                           lop_project.sales_user_id}
     assert lop_project.outsider_id not in {n.user_id for n in notes}
     assert all(n.title == f"LOP minutes lop1 {m['held_on']}" for n in notes)
+    assert len(notes) == 3
     assert notes[0].link == f"/projects/{lop_project.id}/lop"
     assert (await client.post(f"{BASE}/meetings/{mid}/minutes", headers=pm_auth)).status_code == 409
 
@@ -261,3 +295,51 @@ async def test_only_pm_runs_the_meeting(client, pm_auth, quality_auth, outsider_
     assert (await client.post(f"{BASE}/meetings/{m['id']}/close", headers=quality_auth)).status_code == 403
     assert (await client.post(f"{BASE}/meetings/{m['id']}/minutes", headers=quality_auth)).status_code == 403
     assert (await client.get(f"{BASE}/meetings/{m['id']}", headers=outsider_auth)).status_code == 200
+
+
+async def test_double_send_is_409_with_one_notification_per_member(client, pm_auth, lop_project, session_factory):
+    await _line(client, pm_auth, lop_project)
+    m = await _start(client, pm_auth, lop_project)
+    await _close(client, pm_auth, m["id"])
+    url = f"{BASE}/meetings/{m['id']}/minutes"
+    assert (await client.post(url, headers=pm_auth)).status_code == 200
+    assert (await client.post(url, headers=pm_auth)).status_code == 409
+    notes = await _notes(session_factory)
+    assert sorted(n.user_id for n in notes) == sorted(
+        {lop_project.pm_id, lop_project.quality_user_id, lop_project.sales_user_id})
+    async with session_factory() as s:
+        assert (await s.get(LopMeeting, m["id"])).minutes_sent_at is not None
+
+
+async def test_empty_team_is_400_and_does_not_stamp(client, admin_auth, pm_auth, lop_project, session_factory):
+    await _line(client, pm_auth, lop_project)
+    m = await _start(client, pm_auth, lop_project)
+    await _close(client, pm_auth, m["id"])
+    for dept in (lop_project.pm_dept_id, lop_project.apqp_id, lop_project.sales_dept_id):
+        r = await client.put(f"/api/v1/projects/{lop_project.id}/team", headers=admin_auth,
+                             json={"department_id": dept, "user_id": None})
+        assert r.status_code == 200, r.text
+    r = await client.post(f"{BASE}/meetings/{m['id']}/minutes", headers=admin_auth)
+    assert r.status_code == 400 and "No project team" in r.json()["detail"]
+    async with session_factory() as s:
+        assert (await s.get(LopMeeting, m["id"])).minutes_sent_at is None
+    assert await _notes(session_factory) == []
+
+
+async def test_repeating_the_same_due_date_is_not_a_move(client, pm_auth, lop_project):
+    a = await _line(client, pm_auth, lop_project, due_date=_d(10))
+    m = await _start(client, pm_auth, lop_project)
+    await client.patch(f"{BASE}/lines/{a}", headers=pm_auth, json={"due_date": _d(10), "title": "T2"})
+    assert _marks(await _meeting(client, pm_auth, m["id"]))[a]["mark"] == "updated"
+
+
+async def test_minutes_sections_are_capped(client, pm_auth, lop_project, session_factory):
+    from app.services.lop_meetings import minutes_text
+    for i in range(52):
+        await _line(client, pm_auth, lop_project, f"Line {i}")
+    m = await _start(client, pm_auth, lop_project)
+    await _close(client, pm_auth, m["id"])
+    async with session_factory() as s:
+        _, body = await minutes_text(s, m["id"])
+    assert sum(1 for ln in body.splitlines() if ln.startswith("#")) == 50
+    assert "... and 2 more" in body

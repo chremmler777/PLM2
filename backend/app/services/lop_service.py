@@ -12,7 +12,7 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -547,13 +547,19 @@ class LopService:
                 LopEvent.old_value == "closed", LopEvent.new_value != "closed"))).scalars().all())
         from app.models.lop import LopMeeting, LopMeetingMark
         pids = {ln.project_id for ln in lines}
-        for m in (await session.execute(
-                select(LopMeeting).where(LopMeeting.project_id.in_(pids))
-                .order_by(LopMeeting.held_on, LopMeeting.id))).scalars().all():
+        # only the newest meeting and the newest closed meeting per project
+        def newest(*where):
+            rn = func.row_number().over(
+                partition_by=LopMeeting.project_id,
+                order_by=(LopMeeting.held_on.desc(), LopMeeting.id.desc())).label("rn")
+            sub = select(LopMeeting.id, rn).where(LopMeeting.project_id.in_(pids), *where).subquery()
+            return select(LopMeeting).join(sub, sub.c.id == LopMeeting.id).where(sub.c.rn == 1)
+        for m in (await session.execute(newest())).scalars().all():
             ctx.meetings[m.project_id] = {"id": m.id, "held_on": m.held_on.isoformat(),
-                                          "open": m.closed_at is None}      # last one wins
-            if m.closed_at is not None:
-                ctx.last_meeting[m.project_id] = m.held_on
+                                          "open": m.closed_at is None}
+        for m in (await session.execute(
+                newest(LopMeeting.closed_at.is_not(None)))).scalars().all():
+            ctx.last_meeting[m.project_id] = m.held_on
         open_ids = [d["id"] for d in ctx.meetings.values() if d["open"]]
         if open_ids:
             ctx.marks = dict((await session.execute(

@@ -12,7 +12,8 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -24,6 +25,7 @@ from app.services.lop_service import (
 from app.services.project_team_service import ProjectTeamService
 
 MINUTES_KIND = "lop_minutes"
+SECTION_CAP = 50
 
 
 def lop_link(project_id: int) -> str:
@@ -50,21 +52,37 @@ async def _closed_meetings(session: AsyncSession, project_id: int, limit: Option
     return list((await session.execute(q)).scalars().all())
 
 
+async def _ensure_mark(session: AsyncSession, meeting_id: int, line_id: int, mark: str,
+                       was_late: bool = False, was_stale: bool = False) -> tuple[LopMeetingMark, bool]:
+    """(row, created). Inserts in a savepoint; when the (meeting, line) row
+    exists already (another request was first) that row comes back as
+    (existing, False). Any other integrity error is re-raised."""
+    row = LopMeetingMark(meeting_id=meeting_id, line_id=line_id, mark=mark,
+                         was_late=was_late, was_stale=was_stale)
+    try:
+        async with session.begin_nested():
+            session.add(row)
+            await session.flush()
+    except IntegrityError:
+        existing = (await session.execute(select(LopMeetingMark).where(
+            LopMeetingMark.meeting_id == meeting_id,
+            LopMeetingMark.line_id == line_id))).scalar_one_or_none()
+        if existing is None:
+            raise
+        return existing, False
+    return row, True
+
+
 def _stub_user() -> User:
     return SimpleNamespace(id=0)        # context() only reads .id
 
 
-async def _open_line_states(session: AsyncSession, project_id: int, lines=None):
-    """(line, line_dict) for every line still open in the display logic of
-    the project list (a closed source counts as closed)."""
-    if lines is None:
-        lines = await LopService.lines_for_project(session, project_id, "open")
+async def _open_line_states(session: AsyncSession, project_id: int):
+    """(lines, ctx): every line still open in the display logic of the
+    project list (a closed source counts as closed)."""
+    lines = await LopService.lines_for_project(session, project_id, "open")
     ctx = await LopService.context(session, _stub_user(), lines, can_manage=False)
-    out = []
-    for ln in lines:
-        if LopService._display_status(ln, ctx) != "closed":
-            out.append((ln, ctx))
-    return out, ctx
+    return [ln for ln in lines if LopService._display_status(ln, ctx) != "closed"], ctx
 
 
 class LopMeetings:
@@ -111,6 +129,8 @@ class LopMeetings:
         await LopService.get_project(session, project_id, user)
         if not await LopService.can_manage(session, user, project_id):
             raise LopForbidden("Only the Project Manager runs the meeting")
+        # serialize starts of one project: lock its row (a no-op on sqlite)
+        await session.execute(select(Project.id).where(Project.id == project_id).with_for_update())
         existing = await _open_meeting(session, project_id)
         if existing is not None:
             return existing, False
@@ -119,12 +139,11 @@ class LopMeetings:
         await session.flush()
         states, ctx = await _open_line_states(session, project_id)
         stale_days = get_settings().lop_stale_days
-        for ln, _ in states:
+        for ln in states:
             s = LopService._state(ln, ctx)
-            session.add(LopMeetingMark(
-                meeting_id=m.id, line_id=ln.id, mark="none",
-                was_late=rules.is_late(s, ctx.today),
-                was_stale=rules.is_stale(s, ctx.today, stale_days)))
+            await _ensure_mark(session, m.id, ln.id, "none",
+                               rules.is_late(s, ctx.today),
+                               rules.is_stale(s, ctx.today, stale_days))
         await session.commit()
         return m, True
 
@@ -168,15 +187,10 @@ class LopMeetings:
         m = await _open_meeting(session, line.project_id)
         if m is None:
             return
-        row = (await session.execute(select(LopMeetingMark).where(
-            LopMeetingMark.meeting_id == m.id, LopMeetingMark.line_id == line.id))).scalar_one_or_none()
         new = "moved" if moved else "updated"
-        if row is None:                      # a line created during the meeting
-            session.add(LopMeetingMark(meeting_id=m.id, line_id=line.id, mark=new,
-                                       was_late=False, was_stale=False))
-        elif row.mark == "escalated" or row.mark == "moved":
-            return
-        else:
+        # a line created during the meeting gets its row here
+        row, created = await _ensure_mark(session, m.id, line.id, new)
+        if not created and row.mark not in ("escalated", "moved"):
             row.mark = new
 
     @staticmethod
@@ -203,10 +217,15 @@ class LopMeetings:
         today, gap = _today(), get_settings().lop_meeting_gap_days
         out: list[dict] = []
         for p in projects:
+            closed = await _closed_meetings(session, p.id, 2)
+            if not closed:
+                raw = await LopService.lines_for_project(session, p.id, "open")
+                # nothing to compare yet and not past the gap: no need to build the context
+                if not raw or (today - min(local_date(ln.created_at) for ln in raw)).days <= gap:
+                    continue
             states, ctx = await _open_line_states(session, p.id)
             if not states:
                 continue
-            closed = await _closed_meetings(session, p.id, 2)
             if closed:
                 marks: dict[int, dict[int, LopMeetingMark]] = {}
                 rows = (await session.execute(select(LopMeetingMark).where(
@@ -214,7 +233,7 @@ class LopMeetings:
                 for r in rows:
                     marks.setdefault(r.meeting_id, {})[r.line_id] = r
                 newest = closed[0]
-                for ln, _ in states:
+                for ln in states:
                     hist = [marks.get(m.id, {}).get(ln.id) for m in closed]
                     since = None
                     if hist[0] is not None and hist[0].mark == "escalated":
@@ -227,7 +246,7 @@ class LopMeetings:
                                     "project_code": p.code, "project_id": p.id,
                                     "since": since.isoformat()})
             since = closed[0].held_on if closed else min(
-                local_date(ln.created_at) for ln, _ in states)
+                local_date(ln.created_at) for ln in states)
             if (today - since).days > gap:
                 pm_id = await ProjectTeamService.responsible_user_id(
                     session, p.id, PM_DEPARTMENT, backup=False)
@@ -246,11 +265,19 @@ class LopMeetings:
             raise LopError("Close the meeting before sending the minutes")
         if m.minutes_sent_at is not None:
             raise LopConflict("The minutes were already sent")
-        title, body = await minutes_text(session, m.id)
         team = sorted(await LopService.team_user_ids(session, m.project_id))
+        if not team:
+            raise LopError("No project team to send to")
+        # claim first, atomically: only one of two simultaneous sends wins
+        claimed = await session.execute(
+            update(LopMeeting).where(LopMeeting.id == m.id, LopMeeting.minutes_sent_at.is_(None))
+            .values(minutes_sent_at=datetime.utcnow()))
+        if claimed.rowcount == 0:
+            await session.rollback()
+            raise LopConflict("The minutes were already sent")
+        title, body = await minutes_text(session, m.id)
         n = await NotificationService.notify_users(
             session, team, title, body, lop_link(m.project_id), kind=MINUTES_KIND)
-        m.minutes_sent_at = datetime.utcnow()
         await session.commit()
         return n
 
@@ -310,6 +337,10 @@ async def minutes_text(session: AsyncSession, meeting_id: int) -> tuple[str, str
     parts = [title + (f" (since {since.isoformat()})" if since else "")]
     for name, items in sections.items():
         parts.append(f"\n{name} ({len(items)})")
-        parts.extend(_row(d) for d in items) if items else parts.append("none")
+        if not items:
+            parts.append("none")
+        parts.extend(_row(d) for d in items[:SECTION_CAP])
+        if len(items) > SECTION_CAP:
+            parts.append(f"... and {len(items) - SECTION_CAP} more")
     parts.append("\n" + plm2_url(lop_link(m.project_id)))
     return title, "\n".join(parts)
