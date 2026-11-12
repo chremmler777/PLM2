@@ -132,6 +132,7 @@ async def create_project(
         code=body.code,
         description=body.description,
         status="active",
+        lop_enabled=True,     # every project created from now on has the Project LOP
     )
     db.add(project)
     await db.commit()

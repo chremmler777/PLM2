@@ -65,6 +65,42 @@ What the production stack does differently from dev:
   (admin: "Mark nominated"). No image rebuild needed; a restart applies the
   migration.
 
+### Project LOP
+
+The Project LOP is the open-points list of a project (tasks, SEP items the PM
+picks, risk rows, PDB topics), with a daily digest, a weekly escalation summary
+and meeting minutes. Migration `161_project_lop` adds the tables and the
+`projects.lop_enabled` flag; a restart applies it.
+
+Settings (env, defaults in `backend/app/core/config.py`):
+
+| Env | Default | Meaning |
+|---|---|---|
+| `PDB_API_URL` | `http://pdb-backend:8000` | PDB backend, read only (live status and open topics) |
+| `PDB_SERVICE_TOKEN` | empty | same secret as PDB's `PDB_PLM_READ_TOKEN`; empty = the PDB box says "not configured" |
+| `LOP_MAIL_ENABLED` | `false` | while false, LOP digest, escalation summary and minutes are in-app badges only; PLM2's ECR mail is already live in production and is not affected |
+| `LOP_ESCALATION_RECIPIENTS` | empty | usernames or e-mails, comma separated; intended: Cody and Christoph |
+| `LOP_TIMEZONE` | `America/New_York` | time zone of the digest |
+| `LOP_DIGEST_HOUR` | `7` | digest hour, Monday to Friday |
+| `LOP_STALE_DAYS` | `14` | a line with no update for this long is stale |
+| `LOP_DUE_SOON_DAYS` | `3` | "due soon" looks this many days ahead |
+| `LOP_MEETING_GAP_DAYS` | `10` | open lines and no closed LOP meeting for longer escalate the PM |
+
+- **Rollout:** the migration enables the LOP for project codes 1748, 1864, 1994
+  and 2277; every project created afterwards through the API gets it too.
+  Other existing projects need `projects.lop_enabled` set by hand. Seed scripts
+  and imports that create projects directly do not set it.
+- **PDB first:** deploy PDB first (or at the same time) so the PDB box works
+  (PDB needs `PDB_PLM_READ_TOKEN`). If PDB is not deployed or not reachable,
+  nothing breaks: the box says it is unavailable and the rest of the LOP works.
+- **Recommended first week:** leave `LOP_MAIL_ENABLED` off, let Christoph look
+  at the badges, then turn it on. Optionally set `NOTIFY_TRIAL_RECIPIENT` to
+  him first, but note that this existing switch diverts ALL PLM2 mail (ECR
+  included), not only LOP mail.
+- **Limit:** "one digest per person per day" is guaranteed for a single backend
+  worker. With several workers, add a unique index on notifications
+  (`user_id`, `kind`, `subject_key`) for the LOP kinds first.
+
 ### First-run checklist
 
 1. Log in as `admin@example.com / admin1234` → change the password immediately.
