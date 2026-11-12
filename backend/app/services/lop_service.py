@@ -25,6 +25,7 @@ from app.services.project_team_service import ProjectTeamService, is_live_member
 PM_DEPARTMENT = "Project Manager"
 _UNSET = object()
 FIRST_DATE_REASON = "first date set by the PM"
+CONFIRMED_REASON = "confirmed by the PM"
 
 
 def reserved_reasons() -> tuple[str, ...]:
@@ -440,14 +441,20 @@ class LopService:
     @staticmethod
     async def _set_responsible(session: AsyncSession, line: LopLine, user: User,
                                uid: Optional[int], is_default: bool, reason) -> bool:
-        """True when the responsible person really changed."""
+        """True when the responsible person really changed, or the PM confirmed
+        the default name (the same person sent again)."""
         differs = uid != line.responsible_id
         if differs:
             old = await session.get(User, line.responsible_id) if line.responsible_id else None
             new = await session.get(User, uid) if uid else None
             LopService._event(session, line, user, "responsible", _uname(old), _uname(new), reason)
+        confirmed = (not differs and uid is not None and line.responsible_is_default
+                     and not is_default)
+        if confirmed:
+            name = _uname(await session.get(User, uid))
+            LopService._event(session, line, user, "responsible_id", name, name, CONFIRMED_REASON)
         line.responsible_id, line.responsible_is_default = uid, is_default
-        return differs
+        return differs or confirmed
 
     @staticmethod
     async def _dept_name(session: AsyncSession, department_id: Optional[int]) -> Optional[str]:

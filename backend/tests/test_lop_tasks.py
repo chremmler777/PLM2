@@ -34,6 +34,35 @@ async def test_department_without_team_member_falls_to_the_pm(client, pm_auth, l
     assert b["responsible_is_default"] is True and b["under_control"] is True
 
 
+async def test_confirming_the_default_name_leaves_a_trace(client, pm_auth, lop_project, session_factory):
+    from datetime import datetime
+    b = (await client.post(_lines(lop_project.id), headers=pm_auth,
+                           json={"title": "x y z", "department_id": lop_project.logistics_id,
+                                 "due_date": "2026-11-20"})).json()
+    async with session_factory() as s:
+        (await s.get(LopLine, b["id"])).last_update_at = datetime(2026, 1, 1)
+        await s.commit()
+    m = (await client.post(f"{BASE}/projects/{lop_project.id}/meetings", headers=pm_auth)).json()
+    r = await client.patch(f"{BASE}/lines/{b['id']}", headers=pm_auth,
+                           json={"responsible_id": lop_project.pm_id})
+    assert r.status_code == 200 and r.json()["responsible_is_default"] is False
+    async with session_factory() as s:
+        ev = (await s.execute(select(LopEvent).where(
+            LopEvent.line_id == b["id"], LopEvent.field == "responsible_id"))).scalars().all()
+        line = await s.get(LopLine, b["id"])
+    assert len(ev) == 1 and ev[0].reason == "confirmed by the PM" and ev[0].user_id == lop_project.pm_id
+    assert line.last_update_at > datetime(2026, 1, 1) and line.last_update_by == lop_project.pm_id
+    marks = {x["line_id"]: x["mark"] for x in
+             (await client.get(f"{BASE}/meetings/{m['id']}", headers=pm_auth)).json()["marks"]}
+    assert marks[b["id"]] == "updated"
+    again = await client.patch(f"{BASE}/lines/{b['id']}", headers=pm_auth,
+                               json={"responsible_id": lop_project.pm_id})
+    assert again.status_code == 200
+    async with session_factory() as s:
+        assert len((await s.execute(select(LopEvent).where(
+            LopEvent.line_id == b["id"], LopEvent.field == "responsible_id"))).scalars().all()) == 1
+
+
 async def test_no_pm_and_no_member_has_no_name(client, admin_auth, lop_project):
     r = await client.put(f"/api/v1/projects/{lop_project.id}/team", headers=admin_auth,
                          json={"department_id": lop_project.pm_dept_id, "user_id": None})
