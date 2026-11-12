@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
 from app.models import User, get_db
-from app.services import lop_sources, pdb_client
+from app.services import lop_kpi, lop_sources, pdb_client
 from app.services.lop_meetings import LopMeetings
 from app.services.lop_service import LopError, LopService
 
@@ -95,6 +95,25 @@ async def mine(user: User = Depends(get_current_user), db: AsyncSession = Depend
         d.update(project_code=project.code, project_name=project.name)
         out.append(d)
     return out
+
+
+@router.get("/overview")
+async def overview(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Control KPIs per project and department, for everyone logged in."""
+    return await lop_kpi.overview(db, user)
+
+
+@router.get("/lines")
+async def lines_behind_a_number(
+        project_id: Optional[int] = Query(None), department_id: Optional[int] = Query(None),
+        flag: Optional[Literal["open", "stale", "late", "no_control", "untouched"]] = Query(None),
+        user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The lines behind an overview count (department_id 0 = no department;
+    no flag = every line, closed ones too)."""
+    try:
+        return await lop_kpi.lines(db, user, project_id, department_id, flag)
+    except LopError as e:
+        raise _http(e)
 
 
 @router.get("/projects/{project_id}")
