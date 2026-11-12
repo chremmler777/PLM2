@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { GROUP_LABEL, GROUP_ORDER, dueLabel, groupLines, shortDay, sourceLabel, sourceTone, staleLabel } from './lop'
 import type { LopLine } from '../types/lop'
-import { lopLine } from '../components/lop/lopFixtures'
+import { lopLine } from '../components/lop/lop.fixtures'
 
 const ids = (groups: { group: string; lines: LopLine[] }[]) => groups.map((g) => g.group)
 

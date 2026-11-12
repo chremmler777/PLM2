@@ -7,15 +7,15 @@ import { InlineError, PersonOptions, inputCls, labelCls } from './lopUi'
 import type { TeamPerson } from './lopTeam'
 import { useLopWrite } from './useLopWrite'
 
-export default function NewTaskForm({ projectId, team, people, onDone }: {
-  projectId: number; team: TeamRow[]; people: TeamPerson[]; onDone(): void
+export default function NewTaskForm({ projectId, team, people, teamError = null, onDone }: {
+  projectId: number; team: TeamRow[]; people: TeamPerson[]; teamError?: string | null; onDone(): void
 }) {
   const [title, setTitle] = useState('')
   const [dept, setDept] = useState('')
   const [resp, setResp] = useState('')
   const [due, setDue] = useState('')
   const create = useLopWrite(projectId, (body: LineCreate) => lopApi.createLine(projectId, body),
-    { fallback: 'The task could not be added.', onDone })
+    { fallback: 'The task could not be added.', onDone, refreshPdb: false })
   const submit = () => {
     const body: LineCreate = { title: title.trim() }
     if (dept) body.department_id = Number(dept)
@@ -49,6 +49,7 @@ export default function NewTaskForm({ projectId, team, people, onDone }: {
         <button type="submit" className={btnSm.primary} disabled={!title.trim() || create.pending}>Add task</button>
         <button type="button" className={btnSm.ghost} onClick={onDone}>Cancel</button>
       </div>
+      {teamError && <InlineError>{teamError}</InlineError>}
       <InlineError>{create.error}</InlineError>
     </form>
   )

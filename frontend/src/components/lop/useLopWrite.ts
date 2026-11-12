@@ -1,7 +1,8 @@
 /**
  * One LOP write with its own inline error: the server's `detail` is kept
- * next to the control that sent it (never a toast that disappears), and every
- * LOP query of the project is refreshed after a success.
+ * next to the control that sent it (never a toast that disappears), and the
+ * LOP queries of the project are refreshed after a success. The live PDB call
+ * is refreshed only when the write can change a pinned topic (refreshPdb).
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -19,7 +20,9 @@ export function lopErrorMessage(e: unknown, fallback: string): string {
 export function useLopWrite<V, R = unknown>(
   projectId: number,
   fn: (vars: V) => Promise<R>,
-  { fallback = 'That did not work. Try again.', onDone }: { fallback?: string; onDone?: (data: R, vars: V) => void } = {},
+  { fallback = 'That did not work. Try again.', onDone, refreshPdb = true }: {
+    fallback?: string; onDone?: (data: R, vars: V) => void; refreshPdb?: boolean
+  } = {},
 ) {
   const qc = useQueryClient()
   const [error, setError] = useState<string | null>(null)
@@ -27,7 +30,10 @@ export function useLopWrite<V, R = unknown>(
     mutationFn: fn,
     onMutate: () => setError(null),
     onSuccess: (data, vars) => {
-      void qc.invalidateQueries({ queryKey: lopKeys.all(projectId) })
+      void qc.invalidateQueries({
+        queryKey: lopKeys.all(projectId),
+        predicate: (q) => refreshPdb || q.queryKey[2] !== 'pdb',
+      })
       onDone?.(data, vars)
     },
     onError: (e) => setError(lopErrorMessage(e, fallback)),

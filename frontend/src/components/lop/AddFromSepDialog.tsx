@@ -11,13 +11,13 @@ import type { SepCandidateGate } from '../../types/lop'
 import Dialog from '../common/Dialog'
 import { btnSm } from '../common/buttonStyles'
 import { InlineError } from './lopUi'
-import { useLopWrite } from './useLopWrite'
+import { lopErrorMessage, useLopWrite } from './useLopWrite'
 
 function GateBlock({ gate, projectId }: { gate: SepCandidateGate; projectId: number }) {
   const addItem = useLopWrite(projectId, (itemId: number) => lopApi.addSepItem(projectId, itemId),
-    { fallback: 'The item could not be added.' })
+    { fallback: 'The item could not be added.', refreshPdb: false })
   const addGate = useLopWrite(projectId, () => lopApi.addSepGate(projectId, gate.gate_id),
-    { fallback: 'The gate could not be added.' })
+    { fallback: 'The gate could not be added.', refreshPdb: false })
   return (
     <section className="rounded-md border border-slate-700" aria-label={`Gate ${gate.code}`}>
       <header className="flex flex-wrap items-center gap-2 border-b border-slate-700 bg-slate-800/60 px-2.5 py-1.5">
@@ -58,7 +58,9 @@ export default function AddFromSepDialog({ projectId, open, onClose }: { project
       description="Only what you add here enters the list. Each item gets its department’s team member (else you) and the gate target date as defaults.">
       <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
         {candidates.isLoading && <p className="text-xs text-slate-400">Loading SEP items…</p>}
-        {candidates.isError && <InlineError>The SEP items could not be loaded.</InlineError>}
+        {candidates.isError && (
+          <InlineError>The SEP items could not be loaded: {lopErrorMessage(candidates.error, 'no answer from the server')}</InlineError>
+        )}
         {candidates.isSuccess && gates.length === 0 && (
           <p className="text-xs text-slate-400">Every open SEP item of the open gates is already on the list.</p>
         )}

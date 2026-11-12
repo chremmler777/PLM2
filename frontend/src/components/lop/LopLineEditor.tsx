@@ -1,7 +1,8 @@
 /**
  * The inline editor under a line. The PM sets title (PM tasks), department,
- * responsible, due date and next check, and moves the status; moving an
- * existing due date needs a reason, a next-check date does not. Team members
+ * responsible, due date and next check, and moves the status; changing the
+ * due date of a line that ever had one (set, cleared or moved) needs a
+ * reason, a next-check date does not. Team members
  * comment; everyone reads the history.
  */
 import { useState } from 'react'
@@ -26,8 +27,8 @@ function historyText(h: LopHistoryItem): string {
   return `${field}: ${fmt(h.old_value)} → ${fmt(h.new_value)}${h.reason ? ` (${h.reason})` : ''}`
 }
 
-function PmForm({ line, projectId, team, people }: {
-  line: LopLine; projectId: number; team: TeamRow[]; people: TeamPerson[]
+function PmForm({ line, projectId, team, people, teamError }: {
+  line: LopLine; projectId: number; team: TeamRow[]; people: TeamPerson[]; teamError: string | null
 }) {
   const [title, setTitle] = useState(line.title ?? '')
   const [dept, setDept] = useState(line.department_id != null ? String(line.department_id) : '')
@@ -46,7 +47,8 @@ function PmForm({ line, projectId, team, people }: {
   }
   if (due !== (line.due_date ?? '')) body.due_date = due || null
   if (check !== (line.next_check_date ?? '')) body.next_check_date = check || null
-  const moving = 'due_date' in body && line.due_date != null
+  // the server wants a reason once the line ever had a due date (first_due_date set)
+  const moving = 'due_date' in body && line.first_due_date != null
   if (moving && reason.trim()) body.reason = reason.trim()
   const changed = Object.keys(body).filter((k) => k !== 'reason').length > 0
   const blocked = !changed || (moving && !reason.trim()) || (line.kind === 'task' && !title.trim())
@@ -98,6 +100,7 @@ function PmForm({ line, projectId, team, people }: {
           <button type="button" className={btnSm.secondary} disabled={patch.pending} onClick={() => status('closed')}>Close line</button>
         )}
       </div>
+      {teamError && <InlineError>{teamError}</InlineError>}
       <InlineError>{patch.error}</InlineError>
     </div>
   )
@@ -106,7 +109,7 @@ function PmForm({ line, projectId, team, people }: {
 function Comments({ line, projectId, canComment }: { line: LopLine; projectId: number; canComment: boolean }) {
   const [text, setText] = useState('')
   const history = useQuery({ queryKey: lopKeys.history(projectId, line.id!), queryFn: () => lopApi.history(line.id!) })
-  const add = useLopWrite(projectId, (t: string) => lopApi.comment(line.id!, t), { onDone: () => setText('') })
+  const add = useLopWrite(projectId, (t: string) => lopApi.comment(line.id!, t), { onDone: () => setText(''), refreshPdb: false })
   return (
     <div className="flex flex-col gap-1.5">
       {canComment && (
@@ -134,8 +137,8 @@ function Comments({ line, projectId, canComment }: { line: LopLine; projectId: n
   )
 }
 
-export default function LopLineEditor({ line, projectId, team, people, canComment }: {
-  line: LopLine; projectId: number; team: TeamRow[]; people: TeamPerson[]; canComment: boolean
+export default function LopLineEditor({ line, projectId, team, people, teamError = null, canComment }: {
+  line: LopLine; projectId: number; team: TeamRow[]; people: TeamPerson[]; teamError?: string | null; canComment: boolean
 }) {
   if (line.id == null) return null
   return (
@@ -143,7 +146,7 @@ export default function LopLineEditor({ line, projectId, team, people, canCommen
       {line.can_manage && line.source_closed && (
         <p className="text-[11px] text-slate-400">Its source is closed; the line follows it.</p>
       )}
-      {line.can_manage && <PmForm key={`${line.id}-${line.last_update_at}`} line={line} projectId={projectId} team={team} people={people} />}
+      {line.can_manage && <PmForm key={`${line.id}-${line.last_update_at}`} line={line} projectId={projectId} team={team} people={people} teamError={teamError} />}
       <Comments line={line} projectId={projectId} canComment={canComment} />
     </div>
   )

@@ -15,6 +15,7 @@ import { btnSm } from '../common/buttonStyles'
 import AddFromSepDialog from './AddFromSepDialog'
 import LopTable from './LopTable'
 import { MeetingButtons, MeetingStatus } from './LopMeetingBar'
+import { useMeetingDetail } from './useMeetingDetail'
 import NewTaskForm from './NewTaskForm'
 import PdbStatusBox from './PdbStatusBox'
 import PinTopicDialog from './PinTopicDialog'
@@ -65,6 +66,10 @@ export default function LopPanel({ projectId }: { projectId: number }) {
   const teamRows = useMemo(() => (Array.isArray(team.data) ? team.data : []), [team.data])
   const people = useMemo(() => teamPeople(teamRows), [teamRows])
   const data = lop.data
+  const meetingDetail = useMeetingDetail(projectId, data)
+  const teamError = team.isError
+    ? `The project team could not be loaded: ${lopErrorMessage(team.error, 'no answer from the server')}`
+    : null
 
   const all = useMemo(() => {
     const lines = data?.lines ?? []
@@ -83,9 +88,6 @@ export default function LopPanel({ projectId }: { projectId: number }) {
     && (!source || l.kind === source)
     && (!tool || l.tool_number === tool))
   const openMeeting = data.meeting?.open ? data.meeting : null
-  const untouchedNow = openMeeting
-    ? all.filter((l) => l.id != null && l.status !== 'closed' && (l.meeting_mark ?? 'none') === 'none').length
-    : 0
   const teamIds = new Set(people.map((p) => p.id))
   const canComment = (line: LopLine) =>
     line.can_manage || line.can_report || (me != null && (teamIds.has(me) || line.responsible_id === me))
@@ -139,19 +141,20 @@ export default function LopPanel({ projectId }: { projectId: number }) {
         <span className="flex-1" />
         {pm && <button type="button" className={btnSm.secondary} onClick={() => setAdding((a) => !a)} aria-expanded={adding}>+ Task</button>}
         {pm && <button type="button" className={btnSm.secondary} onClick={() => setSepOpen(true)}>Add from SEP</button>}
-        <MeetingButtons projectId={projectId} data={data} />
+        <MeetingButtons projectId={projectId} data={data} detail={meetingDetail.data} />
         <button type="button" className={btnSm.ghost} disabled={exporting} onClick={() => void exportXlsx()}>Excel</button>
       </div>
       <InlineError>{exportError}</InlineError>
 
-      <MeetingStatus data={data} untouchedNow={untouchedNow} />
-      {pm && adding && <NewTaskForm projectId={projectId} team={teamRows} people={people} onDone={() => setAdding(false)} />}
+      <MeetingStatus data={data} detail={meetingDetail.data} detailError={meetingDetail.isError ? meetingDetail.error : null} />
+      {pm && adding && <NewTaskForm projectId={projectId} team={teamRows} people={people} teamError={teamError} onDone={() => setAdding(false)} />}
 
       <LopTable
         lines={shown}
         ctx={{ projectId, me, meeting: openMeeting, onPin: setPinning }}
         team={teamRows}
         people={people}
+        teamError={teamError}
         canComment={canComment}
         pdb={{
           show: pdbOn && (!source || source === 'pdb_topic') && !tool && !dept,
@@ -163,7 +166,7 @@ export default function LopPanel({ projectId }: { projectId: number }) {
       />
 
       {pm && <AddFromSepDialog projectId={projectId} open={sepOpen} onClose={() => setSepOpen(false)} />}
-      <PinTopicDialog projectId={projectId} topic={pinning} people={people} onClose={() => setPinning(null)} />
+      <PinTopicDialog projectId={projectId} topic={pinning} people={people} teamError={teamError} onClose={() => setPinning(null)} />
     </div>
   )
 }

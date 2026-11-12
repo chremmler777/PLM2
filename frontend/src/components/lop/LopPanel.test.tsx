@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import LopPanel from './LopPanel'
-import { lopLine, lopProject, pdbResponse, pdbTopic } from './lopFixtures'
+import { lopLine, lopProject, pdbResponse, pdbTopic } from './lop.fixtures'
 import type { LopProjectResponse, PdbResponse } from '../../types/lop'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -74,8 +74,8 @@ describe('LopPanel', () => {
     expect(screen.queryByRole('button', { name: 'Add from SEP' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Send minutes' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Start meeting' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Confirm' })).toBeNull()
-    expect(screen.queryByRole('button', { name: /assign to me/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Confirm line/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /to me$/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'Excel' })).toBeTruthy()
   })
 
@@ -85,7 +85,7 @@ describe('LopPanel', () => {
       lines: [lopLine({ status: 'in_work', responsible_id: 5, can_manage: false, can_report: true })],
     })
     mount()
-    fireEvent.click(within(await row(1)).getByRole('button', { name: 'Done, please check' }))
+    fireEvent.click(within(await row(1)).getByRole('button', { name: 'Line 1: done, please check' }))
     await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/lop/lines/1', { status: 'done_check' }))
   })
 
@@ -113,7 +113,7 @@ describe('LopPanel', () => {
 
   it('assign to me fills the PM as responsible in one click', async () => {
     mount()
-    fireEvent.click(within(await row(1)).getByRole('button', { name: 'Assign to me' }))
+    fireEvent.click(within(await row(1)).getByRole('button', { name: 'Assign line 1 to me' }))
     await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/lop/lines/1', { responsible_id: 5 }))
   })
 
@@ -123,7 +123,7 @@ describe('LopPanel', () => {
     const r = await row(1)
     expect(within(r).getByTestId('default-name').textContent).toBe('default')
     expect(within(r).getByTestId('default-due').textContent).toBe('default')
-    fireEvent.click(within(r).getByRole('button', { name: 'Confirm name' }))
+    fireEvent.click(within(r).getByRole('button', { name: 'Confirm the responsible of line 1' }))
     await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/lop/lines/1', { responsible_id: 7 }))
   })
 
@@ -134,7 +134,7 @@ describe('LopPanel', () => {
     expect(topicRow.textContent).toContain('227701')
     expect(topicRow.textContent).toContain('41 d open')
     expect(topicRow.textContent).not.toMatch(/d late/)
-    fireEvent.click(within(topicRow).getByRole('button', { name: 'Pin' }))
+    fireEvent.click(within(topicRow).getByRole('button', { name: 'Pin topic 227701 Warpage on clip towers after T1' }))
     const dialog = await screen.findByRole('dialog')
     const save = within(dialog).getByRole('button', { name: 'Pin topic' }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
@@ -182,11 +182,19 @@ describe('LopPanel', () => {
         lopLine({ id: 2, meeting_mark: 'none', meeting: { id: 3, held_on: '2026-11-11', open: true } }),
       ],
     })
+    const base = clientMocks.get.getMockImplementation()!
+    clientMocks.get.mockImplementation((url: string, cfg?: unknown) => url === '/v1/lop/meetings/3'
+      ? Promise.resolve({ data: { id: 3, held_on: '2026-11-11', open: true, project_id: 2, closed_at: null, minutes_sent_at: null,
+        marks: [{ line_id: 1, mark: 'updated', was_late: false, was_stale: false },
+          { line_id: 2, mark: 'none', was_late: false, was_stale: false },
+          { line_id: 9, mark: 'none', was_late: false, was_stale: false }] } })
+      : base(url, cfg))
     mount()
     expect(within(await row(1)).getByTestId('meeting-mark').textContent).toBe('updated')
     expect(within(await row(2)).getByTestId('meeting-mark').textContent).toBe('not touched')
-    expect(screen.getByTestId('untouched-count').textContent).toContain('1 line not touched yet')
-    fireEvent.click(within(await row(2)).getByRole('button', { name: 'Escalate' }))
+    // the counter is the server's marks (line 9 is not in this view), not a count of the rows shown
+    await waitFor(() => expect(screen.getByTestId('untouched-count').textContent).toContain('2 lines not touched yet'))
+    fireEvent.click(within(await row(2)).getByRole('button', { name: 'Escalate line 2' }))
     await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/lop/meetings/3/marks/2', { mark: 'escalated' }))
     fireEvent.click(screen.getByRole('button', { name: 'Close meeting' }))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/lop/meetings/3/close'))
@@ -238,7 +246,93 @@ describe('LopPanel', () => {
   it('shows the server reason inline when a change is refused', async () => {
     clientMocks.patch.mockRejectedValue({ response: { status: 403, data: { detail: 'Only the Project Manager changes a line' } } })
     mount()
-    fireEvent.click(within(await row(1)).getByRole('button', { name: 'Assign to me' }))
+    fireEvent.click(within(await row(1)).getByRole('button', { name: 'Assign line 1 to me' }))
     expect(await within(await row(1)).findByText('Only the Project Manager changes a line')).toBeTruthy()
+  })
+
+  it('setting a date on a line whose date was cleared asks for a reason', async () => {
+    project = lopProject({ lines: [lopLine({ due_date: null, first_due_date: '2026-11-03', moved: true })] })
+    mount()
+    const editor = await openEditor(1)
+    fireEvent.change(within(editor).getByLabelText('Due date'), { target: { value: '2026-11-25' } })
+    const save = within(editor).getByRole('button', { name: 'Save' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    fireEvent.change(within(editor).getByLabelText('Reason for moving the date'), { target: { value: 'New plan from customer' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/lop/lines/1',
+      { due_date: '2026-11-25', reason: 'New plan from customer' }))
+  })
+
+  it('sets the first due date without a reason', async () => {
+    project = lopProject({ lines: [lopLine({ due_date: null, first_due_date: null })] })
+    mount()
+    const editor = await openEditor(1)
+    fireEvent.change(within(editor).getByLabelText('Due date'), { target: { value: '2026-11-25' } })
+    expect(within(editor).queryByLabelText('Reason for moving the date')).toBeNull()
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/lop/lines/1', { due_date: '2026-11-25' }))
+  })
+
+  it('refetches the project lines after a successful write', async () => {
+    mount()
+    await row(1)
+    const projectCalls = () => clientMocks.get.mock.calls.filter(([u]) => u === '/v1/lop/projects/2').length
+    const before = projectCalls()
+    fireEvent.click(within(await row(1)).getByRole('button', { name: 'Assign line 1 to me' }))
+    await waitFor(() => expect(projectCalls()).toBeGreaterThan(before))
+  })
+
+  it('a comment refreshes the lines but not the live PDB call', async () => {
+    mount()
+    const editor = await openEditor(1)
+    await waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/lop/projects/2/pdb', undefined))
+    const calls = (url: string) => clientMocks.get.mock.calls.filter(([u]) => u === url).length
+    const pdbBefore = calls('/v1/lop/projects/2/pdb')
+    const linesBefore = calls('/v1/lop/projects/2')
+    fireEvent.change(within(editor).getByLabelText('Comment'), { target: { value: 'Drawing requested' } })
+    fireEvent.click(within(editor).getByRole('button', { name: 'Add comment' }))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/lop/lines/1/comments', { text: 'Drawing requested' }))
+    await waitFor(() => expect(calls('/v1/lop/projects/2')).toBeGreaterThan(linesBefore))
+    expect(calls('/v1/lop/projects/2/pdb')).toBe(pdbBefore)
+  })
+
+  it('says the team could not be loaded next to the responsible picker', async () => {
+    const base = clientMocks.get.getMockImplementation()!
+    clientMocks.get.mockImplementation((url: string, cfg?: unknown) => url === '/v1/projects/2/team'
+      ? Promise.reject({ response: { status: 500, data: { detail: 'Team service down' } } })
+      : base(url, cfg))
+    mount()
+    const editor = await openEditor(1)
+    expect(await within(editor).findByText(/The project team could not be loaded: Team service down/)).toBeTruthy()
+  })
+
+  it('says why the SEP items could not be loaded', async () => {
+    const base = clientMocks.get.getMockImplementation()!
+    clientMocks.get.mockImplementation((url: string, cfg?: unknown) => url === '/v1/lop/projects/2/sep-candidates'
+      ? Promise.reject({ response: { status: 409, data: { detail: 'SEP is not active on this project' } } })
+      : base(url, cfg))
+    mount()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add from SEP' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText(/SEP is not active on this project/)).toBeTruthy()
+  })
+
+  it('shows "Minutes sent" with the date once the minutes went out', async () => {
+    project = lopProject({ meeting: { id: 3, held_on: '2026-11-10', open: false } })
+    const base = clientMocks.get.getMockImplementation()!
+    clientMocks.get.mockImplementation((url: string, cfg?: unknown) => url === '/v1/lop/meetings/3'
+      ? Promise.resolve({ data: { id: 3, held_on: '2026-11-10', open: false, project_id: 2, closed_at: '2026-11-10T15:00:00',
+        minutes_sent_at: '2026-11-10T15:05:00', marks: [] } })
+      : base(url, cfg))
+    mount()
+    expect(await screen.findByText('Minutes sent Nov 10')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Send minutes' })).toBeNull()
+  })
+
+  it('says "No unpinned PDB topics" when every open topic is pinned', async () => {
+    pdb = pdbResponse({ topics: [pdbTopic({ id: 44, project_id: 2, pinned: true, group: 'other' })] })
+    mount()
+    await row(44)
+    await waitFor(() => expect(screen.getByTestId('lop-pdb-group').textContent).toContain('No unpinned PDB topics'))
   })
 })

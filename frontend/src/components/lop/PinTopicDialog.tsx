@@ -11,8 +11,8 @@ import { InlineError, PersonOptions, inputCls, labelCls } from './lopUi'
 import type { TeamPerson } from './lopTeam'
 import { useLopWrite } from './useLopWrite'
 
-export default function PinTopicDialog({ projectId, topic, people, onClose }: {
-  projectId: number; topic: LopLine | null; people: TeamPerson[]; onClose(): void
+export default function PinTopicDialog({ projectId, topic, people, teamError = null, onClose }: {
+  projectId: number; topic: LopLine | null; people: TeamPerson[]; teamError?: string | null; onClose(): void
 }) {
   const [resp, setResp] = useState('')
   const [due, setDue] = useState('')
@@ -42,6 +42,7 @@ export default function PinTopicDialog({ projectId, topic, people, onClose }: {
             <PersonOptions people={people} />
           </select>
         </label>
+        {teamError && <InlineError>{teamError}</InlineError>}
         <div className="flex gap-2">
           <label className={labelCls}>Due date
             <input type="date" className={inputCls} value={due} onChange={(e) => setDue(e.target.value)} />

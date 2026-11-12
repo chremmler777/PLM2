@@ -35,11 +35,12 @@ function pdbMessage(p: PdbGroupState): string | null {
   return null
 }
 
-export default function LopTable({ lines, ctx, team, people, canComment, pdb }: {
+export default function LopTable({ lines, ctx, team, people, teamError = null, canComment, pdb }: {
   lines: LopLine[]
   ctx: RowContext
   team: TeamRow[]
   people: TeamPerson[]
+  teamError?: string | null
   canComment(line: LopLine): boolean
   pdb: PdbGroupState
 }) {
@@ -90,7 +91,7 @@ export default function LopTable({ lines, ctx, team, people, canComment, pdb }: 
                 <tr>
                   <td />
                   <td colSpan={columns - 1} className="pb-2 pr-1">
-                    <LopLineEditor line={line} projectId={ctx.projectId} team={team} people={people} canComment={canComment(line)} />
+                    <LopLineEditor line={line} projectId={ctx.projectId} team={team} people={people} teamError={teamError} canComment={canComment(line)} />
                   </td>
                 </tr>
               )}
@@ -119,7 +120,9 @@ export default function LopTable({ lines, ctx, team, people, canComment, pdb }: 
           <tr>
             <td />
             <td colSpan={columns - 1} className={`py-1.5 ${message && !pdb.loading ? 'text-amber-300' : 'text-slate-400'}`}>
-              {message ?? 'No open PDB topics on this project’s tools.'}
+              {message ?? ((pdb.data?.topics?.length ?? 0) > 0
+                ? 'No unpinned PDB topics: every open topic is pinned and listed above.'
+                : 'No open PDB topics on this project’s tools.')}
             </td>
           </tr>
         </tbody>

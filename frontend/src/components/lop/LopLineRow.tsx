@@ -88,29 +88,31 @@ export default function LopLineRow({ line, ctx, expanded, onToggle }: {
   const pm = line.can_manage
   const actions = []
   if (pm && unpinned) {
-    actions.push(<button key="pin" type="button" className={btnSm.secondary} onClick={() => ctx.onPin(line)}>Pin</button>)
+    const what = (line.text ?? '').split('\n')[0]
+    actions.push(<button key="pin" type="button" className={btnSm.secondary} onClick={() => ctx.onPin(line)}
+      aria-label={`Pin topic ${line.tool_number ?? ''} ${what}`.replace(/\s+/g, ' ').trim()}>Pin</button>)
   }
   if (pm && id != null && line.status !== 'closed') {
     if (ctx.me != null && line.responsible_id !== ctx.me) {
       actions.push(<button key="me" type="button" className={btnSm.ghost} disabled={patch.pending}
-        onClick={() => patch.run({ responsible_id: ctx.me! })}>Assign to me</button>)
+        aria-label={`Assign line ${id} to me`} onClick={() => patch.run({ responsible_id: ctx.me! })}>Assign to me</button>)
     }
     if (line.responsible_is_default && line.responsible_id != null) {
       actions.push(<button key="cn" type="button" className={btnSm.ghost} disabled={patch.pending}
-        onClick={() => patch.run({ responsible_id: line.responsible_id! })}>Confirm name</button>)
+        aria-label={`Confirm the responsible of line ${id}`} onClick={() => patch.run({ responsible_id: line.responsible_id! })}>Confirm name</button>)
     }
     if (line.status === 'done_check' && line.kind !== 'pdb_topic') {
       actions.push(<button key="ok" type="button" className={btnSm.secondary} disabled={patch.pending}
-        onClick={() => patch.run({ status: 'closed' })}>Confirm</button>)
+        aria-label={`Confirm line ${id}`} onClick={() => patch.run({ status: 'closed' })}>Confirm</button>)
     }
     if (line.status === 'done_check') {
       actions.push(<button key="re" type="button" className={btnSm.ghost} disabled={patch.pending}
-        onClick={() => patch.run({ status: 'open' })}>Reopen</button>)
+        aria-label={`Reopen line ${id}`} onClick={() => patch.run({ status: 'open' })}>Reopen</button>)
     }
   }
   if (line.can_report && id != null && line.status !== 'done_check' && line.status !== 'closed') {
     actions.push(<button key="done" type="button" className={btnSm.secondary} disabled={patch.pending}
-      onClick={() => patch.run({ status: 'done_check' })}>Done, please check</button>)
+      aria-label={`Line ${id}: done, please check`} onClick={() => patch.run({ status: 'done_check' })}>Done, please check</button>)
   }
   const meetingMark = line.meeting_mark ?? 'none'
   const rowTestId = id != null ? `lop-row-${id}` : `lop-row-pdb-${line.ref_key}`
@@ -152,7 +154,8 @@ export default function LopLineRow({ line, ctx, expanded, onToggle }: {
                 {MARK_LABEL[meetingMark]}
               </span>
               {pm && meetingMark !== 'escalated' && (
-                <button type="button" className={`${btnSm.ghost} ml-1`} disabled={mark.pending} onClick={() => mark.run(undefined)}>Escalate</button>
+                <button type="button" className={`${btnSm.ghost} ml-1`} disabled={mark.pending}
+                  aria-label={`Escalate line ${id}`} onClick={() => mark.run(undefined)}>Escalate</button>
               )}
             </>
           )}

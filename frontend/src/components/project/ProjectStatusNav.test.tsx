@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import ProjectStatusNav from './ProjectStatusNav'
 import { relaySummary } from '../dfm/dfmFixtures'
+import { lopLine, lopProject } from '../lop/lop.fixtures'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -217,10 +218,10 @@ describe('ProjectStatusNav', () => {
   it('shows LOP with the open count before Changes, amber when a line is late, and opens the list', async () => {
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/sep/projects/2') return Promise.resolve({ data: sep })
-      if (url === '/v1/lop/projects/2') return Promise.resolve({ data: {
-        project: { id: 2, code: '2277', name: 'Backpanel', lop_enabled: true }, can_manage: true,
-        lines: [{ id: 1, status: 'open', late: true }, { id: 2, status: 'in_work', late: false }],
-        last_meeting: null, meeting: null, untouched: 0 } })
+      if (url === '/v1/lop/projects/2') return Promise.resolve({ data: lopProject({ lines: [
+        lopLine({ id: 1, status: 'open', late: true, days_late: 3, group: 'overdue' }),
+        lopLine({ id: 2, status: 'in_work' }),
+      ] }) })
       return Promise.resolve({ data: [] })
     })
     mount()

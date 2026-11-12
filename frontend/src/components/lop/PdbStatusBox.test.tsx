@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup, within } from '@testing-library/react'
 import PdbStatusBox from './PdbStatusBox'
-import { pdbResponse, pdbTopic } from './lopFixtures'
+import { pdbResponse, pdbTopic } from './lop.fixtures'
 
 describe('PdbStatusBox', () => {
   afterEach(cleanup)
