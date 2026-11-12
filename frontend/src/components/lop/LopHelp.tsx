@@ -6,7 +6,7 @@
 import { useState, type ReactNode } from 'react'
 import { CircleHelp } from 'lucide-react'
 import Dialog from '../common/Dialog'
-import { btnSm } from '../common/buttonStyles'
+import { btnBase, btnSizes } from '../common/buttonStyles'
 import { DEFAULT_STALE_DAYS } from '../../lib/lop'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -93,7 +93,7 @@ export default function LopHelp() {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <button type="button" data-testid="lop-help-button" className={`${btnSm.ghost} inline-flex items-center gap-1`}
+      <button type="button" data-testid="lop-help-button" className={`${btnBase} ${btnSizes.sm} border border-sky-500 bg-sky-900/40 text-sky-200 hover:bg-sky-800/60 hover:text-white`}
         onClick={() => setOpen(true)}>
         <CircleHelp aria-hidden="true" size={14} />How it works
       </button>
