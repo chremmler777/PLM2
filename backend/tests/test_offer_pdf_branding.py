@@ -356,15 +356,14 @@ async def test_offer_data_strip_keeps_every_value_on_one_line():
                     "timing": {"include": False}})
     ctx["change_number"] = "CR-2026-0024"
     ctx["offer"]["sent_at"] = date(2026, 9, 26)
-    ctx["offer"]["valid_until"] = date(2026, 9, 26)
     lines = _text(render_offer_pdf(ctx)).splitlines()
     head = next(i for i, ln in enumerate(lines)
                 if "OFFER NO." in ln and "ISSUED BY" in ln)
     values = next(ln for ln in lines[head + 1:] if ln.strip())
-    for v in ("CR-2026-0024-Q2", "26 Sep 2026", "CR-2026-0024 ",
+    # valid 30 days from the offer date
+    for v in ("CR-2026-0024-Q2", "26 Sep 2026", "26 Oct 2026", "CR-2026-0024 ",
               "KTX Group US Corp., Plant Wolfsburg"):
         assert v in values, (v, values)
-    assert values.count("26 Sep 2026") == 2
 
 
 async def test_offer_data_strip_shrinks_before_it_wraps():

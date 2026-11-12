@@ -8,7 +8,7 @@ dashes with a plain hyphen: the house style for customer documents.
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
@@ -298,6 +298,18 @@ def _d(v, loc: str = "de") -> str:
         except ValueError:
             return _clean(v)
     return f"{v.day} {_MONTHS[v.month - 1]} {v.year}"
+
+
+def _plus_days(v, days: int):
+    """The date `days` after v (a date, datetime or ISO string), or None."""
+    if not isinstance(v, date):
+        try:
+            v = date.fromisoformat(str(v)[:10])
+        except ValueError:
+            return None
+    elif hasattr(v, "date"):
+        v = v.date()
+    return v + timedelta(days=days)
 
 
 def fit_text(text: str, font: str, size: float, width: float) -> str:
@@ -834,10 +846,12 @@ def render_offer_pdf(ctx: dict) -> bytes:
     story += [letter, Spacer(1, 5 * mm)]
 
     # ---- Offer data strip ---------------------------------------------
+    offer_date = offer.get("sent_at") or business_today()
+    valid_until = _plus_days(offer_date, 30)  # 30 days from the offer date
     meta = [("Offer no.", number),
-            ("Date", _d(offer.get("sent_at") or business_today(), loc))]
-    if offer.get("valid_until"):
-        meta.append(("Valid until", _d(offer["valid_until"], loc)))
+            ("Date", _d(offer_date, loc))]
+    if valid_until:
+        meta.append(("Valid until", _d(valid_until, loc)))
     meta.append(("Change", ctx["change_number"]))
     if offer.get("version", 1) >= 2:
         meta.append(("Version", str(offer["version"])))
@@ -1088,9 +1102,9 @@ def render_offer_pdf(ctx: dict) -> bytes:
                        ("Delivery", "delivery")):
         if terms.get(key):
             rows.append([_p(label, cell_b), _p(terms[key], cell, CELL_TEXT_MAX)])
-    validity = "This offer is valid for 30 days from receipt"
-    if offer.get("valid_until"):
-        validity += f" (until {_d(offer['valid_until'], loc)})"
+    validity = "This offer is valid for 30 days from the offer date"
+    if valid_until:
+        validity += f" (until {_d(valid_until, loc)})"
     rows.append([_p("Validity", cell_b), _p(validity + ".", cell)])
     for ff in data.get("free_fields") or []:
         if (isinstance(ff, dict) and not _f(ff.get("amount"))
