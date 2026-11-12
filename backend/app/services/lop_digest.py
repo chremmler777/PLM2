@@ -37,6 +37,17 @@ def _local(now_utc: datetime) -> datetime:
     return now_utc.replace(tzinfo=timezone.utc).astimezone(_zone())
 
 
+_WINDOW_HOURS = 2
+
+
+def _in_window(local: datetime) -> bool:
+    """Only the morning window [lop_digest_hour, +2 h) sends; the two hours
+    cover a restart. Outside it nothing is sent, so a change during the day
+    never turns into mail."""
+    start = get_settings().lop_digest_hour
+    return start <= local.hour < start + _WINDOW_HOURS
+
+
 def _one_line(text: Optional[str]) -> str:
     t = " ".join((text or "").split())
     return t if len(t) <= _TEXT_CAP else t[:_TEXT_CAP - 1].rstrip() + "…"
@@ -174,11 +185,11 @@ async def _digest_candidates(session: AsyncSession) -> list[User]:
 
 
 async def send_daily_digests(session: AsyncSession, now_utc: datetime) -> int:
-    """Monday to Friday from lop_digest_hour (local time): one digest per
-    person and local date. Returns how many were created."""
+    """Monday to Friday in the morning window from lop_digest_hour (local
+    time): one digest per person and local date. Returns how many were created."""
     from app.services.notification_service import NotificationService
     local = _local(now_utc)
-    if local.weekday() > 4 or local.hour < get_settings().lop_digest_hour:
+    if local.weekday() > 4 or not _in_window(local):
         return 0
     key = f"lop_digest:{local.date()}"
     had = set((await session.execute(select(Notification.user_id).where(
@@ -231,13 +242,13 @@ def _escalation_text(entries: list[dict]) -> str:
 
 
 async def send_escalation_summary(session: AsyncSession, now_utc: datetime) -> int:
-    """Mondays from lop_digest_hour (local time): the escalation list to each
-    configured recipient, once per ISO week. Nothing when the list is empty
-    or nobody is configured. Returns how many were created."""
+    """Mondays in the morning window from lop_digest_hour (local time): the
+    escalation list to each configured recipient, once per ISO week. Nothing
+    when the list is empty or nobody is configured. Returns how many were created."""
     from app.services.lop_meetings import LopMeetings
     from app.services.notification_service import NotificationService
     local = _local(now_utc)
-    if local.weekday() != 0 or local.hour < get_settings().lop_digest_hour:
+    if local.weekday() != 0 or not _in_window(local):
         return 0
     recipients = await escalation_recipients(session)
     if not recipients:

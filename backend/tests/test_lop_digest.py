@@ -199,6 +199,22 @@ async def test_no_digest_before_seven_or_at_the_weekend(lop_project, session_fac
         assert await send_daily_digests(s, datetime(2026, 11, 11, 12, 0)) == 1    # 07:00 sharp
 
 
+async def test_digest_only_inside_the_morning_window(lop_project, session_factory):
+    """No mail when something changes: a line given at 10:00 waits for the next morning."""
+    await _mk(session_factory, lop_project, lop_project.quality_user_id,
+              due_date=WED_DAY + timedelta(days=2))
+    async with session_factory() as s:
+        assert await send_daily_digests(s, datetime(2026, 11, 11, 19, 0)) == 0    # Wed 14:00 local
+        assert await send_daily_digests(s, datetime(2026, 11, 11, 12, 10)) == 1   # Wed 07:10
+        assert await send_daily_digests(s, datetime(2026, 11, 12, 14, 0)) == 0    # Thu 09:00
+        assert await send_daily_digests(s, datetime(2026, 11, 12, 13, 50)) == 1   # Thu 08:50
+    await _mk(session_factory, lop_project, lop_project.sales_user_id, "Given at 10:00",
+              due_date=WED_DAY + timedelta(days=4), created_at=datetime(2026, 11, 13, 15, 0))
+    async with session_factory() as s:
+        assert await send_daily_digests(s, datetime(2026, 11, 13, 15, 15)) == 0   # Fri 10:15
+
+
+
 async def test_digest_lists_new_due_soon_overdue_stale(lop_project, session_factory):
     q = lop_project.quality_user_id
     new = await _mk(session_factory, lop_project, q, "Brand new", created_at=WED - timedelta(hours=3),
@@ -340,6 +356,8 @@ async def test_escalation_summary_on_monday_to_configured_people_only(
     async with session_factory() as s:
         assert await send_escalation_summary(s, WED) == 0                      # not a Monday
         assert await send_escalation_summary(s, datetime(2026, 11, 16, 11, 0)) == 0   # too early
+        assert await send_escalation_summary(s, datetime(2026, 11, 16, 19, 0)) == 0   # 14:00, too late
+        assert await send_escalation_summary(s, datetime(2026, 11, 16, 14, 0)) == 0   # 09:00, too late
         assert await send_escalation_summary(s, MON) == 2
         assert await send_escalation_summary(s, MON + timedelta(hours=1)) == 0
     got = await _badges(session_factory, lop_project.quality_user_id, "lop_escalation")
