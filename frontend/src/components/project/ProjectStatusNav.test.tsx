@@ -12,6 +12,7 @@ vi.mock('../../forms/FormPanel', () => ({ default: () => <div>form-panel</div> }
 vi.mock('../../forms/ProjectFormsTab', () => ({ default: () => <div>forms-tab</div> }))
 vi.mock('../ProjectChangesSection', () => ({ default: () => <div>changes-section</div> }))
 vi.mock('../ProjectLessonsSection', () => ({ default: () => <div>lessons-section</div> }))
+vi.mock('../lop/LopPanel', () => ({ default: (p: { projectId: number }) => <div data-testid="lop-panel-stub">lop {p.projectId}</div> }))
 vi.mock('../dfm/DfmArchive', () => ({
   default: (p: { scope: { kind: string; id: number } }) => <div data-testid="dfm-archive-stub">dfm {p.scope.kind} {p.scope.id}</div>,
 }))
@@ -211,5 +212,36 @@ describe('ProjectStatusNav', () => {
     expect(screen.getByTestId('status-nav-dfm').getAttribute('aria-expanded')).toBe('true')
     fireEvent.click(navButton(/Changes/))
     expect(within(panel()).queryByTestId('dfm-archive-stub')).toBeNull()
+  })
+
+  it('shows LOP with the open count before Changes, amber when a line is late, and opens the list', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/sep/projects/2') return Promise.resolve({ data: sep })
+      if (url === '/v1/lop/projects/2') return Promise.resolve({ data: {
+        project: { id: 2, code: '2277', name: 'Backpanel', lop_enabled: true }, can_manage: true,
+        lines: [{ id: 1, status: 'open', late: true }, { id: 2, status: 'in_work', late: false }],
+        last_meeting: null, meeting: null, untouched: 0 } })
+      return Promise.resolve({ data: [] })
+    })
+    mount()
+    const btn = await screen.findByTestId('status-nav-lop')
+    expect(btn.textContent).toContain('LOP 2')
+    expect(btn.className).toContain('amber')
+    const buttons = within(screen.getByTestId('project-status-nav')).getAllByRole('button').map((b) => b.textContent ?? '')
+    expect(buttons.findIndex((t) => t.startsWith('LOP'))).toBeLessThan(buttons.findIndex((t) => t.startsWith('Changes')))
+    fireEvent.click(btn)
+    expect(within(panel()).getByTestId('lop-panel-stub').textContent).toBe('lop 2')
+  })
+
+  it('hides LOP when the project has not switched it on (404)', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/sep/projects/2') return Promise.resolve({ data: sep })
+      if (url === '/v1/lop/projects/2') return Promise.reject({ response: { status: 404, data: { detail: 'Project not found' } } })
+      return Promise.resolve({ data: [] })
+    })
+    mount()
+    await screen.findByRole('button', { name: /Changes/ })
+    await vi.waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/lop/projects/2', { params: { view: 'open' } }))
+    expect(screen.queryByTestId('status-nav-lop')).toBeNull()
   })
 })

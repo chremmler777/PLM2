@@ -1,5 +1,5 @@
 /**
- * Data behind the Changes, Lessons and Tooling DFM buttons of the project
+ * Data behind the LOP, Changes, Lessons and Tooling DFM buttons of the project
  * status nav bar. Uses the same query keys as the changes and lessons
  * sections and the project DFM archive so the panel opens on a warm cache. The SEP gate strip reads its own SEP query.
  */
@@ -8,6 +8,8 @@ import client from '../../api/client';
 import { changesApi } from '../../api/changes';
 import { dfmKey, listTopics, projectScope, type DfmTopicSummary } from '../../api/dfm';
 import { getProjectMoldflow, moldflowKey, type MfStatus, type ProjectMoldflow } from '../../api/moldflow';
+import { getProjectLop, lopKeys } from '../../api/lop';
+import type { LopProjectResponse } from '../../types/lop';
 
 export type ChipTone = 'neutral' | 'green' | 'amber';
 export interface StatusChip { label: string; tone: ChipTone; title: string }
@@ -74,7 +76,24 @@ export function moldflowChip(data: ProjectMoldflow | undefined): StatusChip {
   };
 }
 
+/** "LOP 12", amber while any line is late; null when the project has no LOP (the button is hidden). */
+export function lopChip(data: LopProjectResponse | null | undefined): StatusChip | null {
+  if (!data?.project?.lop_enabled || !Array.isArray(data.lines)) return null;
+  const open = data.lines.filter((l) => l.status !== 'closed').length;
+  const late = data.lines.filter((l) => l.late).length;
+  return {
+    label: `LOP ${open}`,
+    tone: late > 0 ? 'amber' : 'neutral',
+    title: `List of open points: ${open} open${late > 0 ? `, ${late} late` : ''}`,
+  };
+}
+
 export function useProjectStatus(projectId: number) {
+  const lop = useQuery({
+    queryKey: lopKeys.project(projectId, 'open'),
+    queryFn: () => getProjectLop(projectId, 'open'),
+    enabled: !!projectId,
+  });
   const changes = useQuery({
     queryKey: ['changes', 'project', projectId],
     queryFn: () => changesApi.list({ project_id: projectId }),
@@ -97,6 +116,7 @@ export function useProjectStatus(projectId: number) {
     enabled: !!projectId,
   });
   return {
+    lop: lopChip(lop.data),
     moldflow: moldflowChip(moldflow.data && !Array.isArray(moldflow.data) ? moldflow.data : undefined),
     dfm: dfmChip(Array.isArray(dfm.data) ? dfm.data : undefined),
     changes: changesChip(Array.isArray(changes.data) ? changes.data : undefined),
