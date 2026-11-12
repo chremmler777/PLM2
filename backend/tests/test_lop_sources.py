@@ -492,6 +492,27 @@ async def test_mine_does_not_stamp_keys_or_create_lines(client, pm_auth, lop_pro
     assert not (await _risk_rows(client, pm_auth, lop_project.id))[0].get("lop_key")
 
 
+async def test_project_get_without_sync_stamps_no_keys_and_creates_no_lines(client, pm_auth, lop_project):
+    """The nav chip (sync=false) only reconciles; opening the LOP still does the full sync."""
+    await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    r = await client.get(f"{BASE}/projects/{lop_project.id}?view=open&sync=false", headers=pm_auth)
+    assert r.status_code == 200 and r.json()["lines"] == []
+    assert not (await _risk_rows(client, pm_auth, lop_project.id))[0].get("lop_key")
+    assert len(await _open_lines(client, pm_auth, lop_project.id)) == 1
+    assert (await _risk_rows(client, pm_auth, lop_project.id))[0].get("lop_key")
+
+
+async def test_project_get_without_sync_still_follows_a_closed_source(client, pm_auth, lop_project):
+    inst = await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    await _open_lines(client, pm_auth, lop_project.id)
+    data = (await client.get(f"/api/v1/forms/instances/{inst['id']}", headers=pm_auth)).json()["data"]
+    data["risks"][0]["status"] = "finished"
+    assert (await client.patch(f"/api/v1/forms/instances/{inst['id']}", headers=pm_auth,
+                               json={"data": data})).status_code == 200
+    r = await client.get(f"{BASE}/projects/{lop_project.id}?view=open&sync=false", headers=pm_auth)
+    assert r.json()["lines"] == []
+
+
 async def test_risk_line_follows_the_row_due_date_until_the_pm_moves_it(client, pm_auth, lop_project):
     inst = await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
     line = (await _open_lines(client, pm_auth, lop_project.id))[0]

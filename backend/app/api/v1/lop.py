@@ -124,12 +124,15 @@ async def lines_behind_a_number(
 
 @router.get("/projects/{project_id}")
 async def project_lop(project_id: int, view: Literal["meeting", "open", "closed"] = Query("open"),
+                      sync: bool = Query(True),
                       user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """sync=false (the nav chip, on every project page view): lines only follow
+    their sources, no risk keys or new risk lines are written."""
     try:
         project = await LopService.get_project(db, project_id, user)
     except LopError as e:
         raise _http(e)
-    await lop_sources.sync_project_lines(db, project_id, user.id)   # risk rows only
+    await lop_sources.sync_project_lines(db, project_id, user.id, full=sync)   # risk rows only
     can_manage = await LopService.can_manage(db, user, project_id)
     # pinned PDB topics are lines like any other (snapshot text, no PDB call)
     lines = await LopService.lines_for_project(db, project_id, view)

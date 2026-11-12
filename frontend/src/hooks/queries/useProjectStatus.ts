@@ -90,8 +90,8 @@ export function lopChip(data: LopProjectResponse | null | undefined): StatusChip
 
 export function useProjectStatus(projectId: number) {
   const lop = useQuery({
-    queryKey: lopKeys.project(projectId, 'open'),
-    queryFn: () => getProjectLop(projectId, 'open'),
+    queryKey: lopKeys.chip(projectId),
+    queryFn: () => getProjectLop(projectId, 'open', false),
     enabled: !!projectId,
   });
   const changes = useQuery({

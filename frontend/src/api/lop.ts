@@ -11,6 +11,8 @@ import type {
 export const lopKeys = {
   all: (projectId: number) => ['lop', projectId] as const,
   project: (projectId: number, view: LopView) => ['lop', projectId, 'project', view] as const,
+  /** the nav chip's read without the writing sync (own key: the panel's data comes from the full sync) */
+  chip: (projectId: number) => ['lop', projectId, 'chip'] as const,
   pdb: (projectId: number, all: boolean) => ['lop', projectId, 'pdb', all] as const,
   sep: (projectId: number) => ['lop', projectId, 'sep-candidates'] as const,
   meeting: (projectId: number, meetingId: number) => ['lop', projectId, 'meeting', meetingId] as const,
@@ -19,10 +21,12 @@ export const lopKeys = {
 
 const isNotFound = (e: unknown) => (e as { response?: { status?: number } })?.response?.status === 404
 
-/** The project's LOP, or null when the project has not switched the LOP on (404). */
-export async function getProjectLop(projectId: number, view: LopView): Promise<LopProjectResponse | null> {
+/** The project's LOP, or null when the project has not switched the LOP on (404).
+ * sync false (the nav chip): the server only lets lines follow their sources, no writing sync. */
+export async function getProjectLop(projectId: number, view: LopView, sync = true): Promise<LopProjectResponse | null> {
   try {
-    const data = (await client.get(`/v1/lop/projects/${projectId}`, { params: { view } })).data
+    const params = sync ? { view } : { view, sync: false }
+    const data = (await client.get(`/v1/lop/projects/${projectId}`, { params })).data
     return data && typeof data === 'object' && 'project' in data ? data as LopProjectResponse : null
   } catch (e) {
     if (isNotFound(e)) return null

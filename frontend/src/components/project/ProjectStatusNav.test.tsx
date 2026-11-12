@@ -243,7 +243,7 @@ describe('ProjectStatusNav', () => {
     })
     mount()
     await screen.findByRole('button', { name: /Changes/ })
-    await vi.waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/lop/projects/2', { params: { view: 'open' } }))
+    await vi.waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/lop/projects/2', { params: { view: 'open', sync: false } }))
     expect(screen.queryByTestId('status-nav-lop')).toBeNull()
   })
 })
