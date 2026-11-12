@@ -401,7 +401,8 @@ async def test_duplicate_create_returns_the_existing_line(
         await s.commit()
     async with session_factory() as s:
         again = LopLine(project_id=lop_project.id, kind="risk", ref_key="k1", status="open")
-        assert await lop_sources._insert_line(s, again) is False
+        got, created = await lop_sources._insert_line(s, again)
+        assert created is False and got.ref_key == "k1"
         await s.commit()
         n = (await s.execute(select(LopLine).where(LopLine.ref_key == "k1"))).scalars().all()
         assert len(n) == 1
@@ -471,3 +472,16 @@ async def test_risk_line_follows_the_row_due_date_until_the_pm_moves_it(client, 
     rows[0]["due"] = "2026-12-08"
     assert (await _patch_form(client, pm_auth, inst["id"], rows)).status_code == 200
     assert (await _open_lines(client, pm_auth, lop_project.id))[0]["due_date"] == "2026-12-20"
+
+
+async def test_other_integrity_errors_are_raised_not_swallowed(lop_project, session_factory):
+    from sqlalchemy.exc import IntegrityError
+    from app.services import lop_sources
+    async with session_factory() as s:
+        # NOT NULL violation on a column the model leaves required (no foreign keys needed)
+        bad = LopLine(project_id=lop_project.id, kind=None, ref_key="bad1")
+        with pytest.raises(IntegrityError):
+            await lop_sources._insert_line(s, bad)
+        await s.rollback()
+    async with session_factory() as s:
+        assert (await s.execute(select(LopLine).where(LopLine.ref_key == "bad1"))).first() is None

@@ -185,22 +185,22 @@ async def item_line_status(session: AsyncSession, item: SepWorkItem) -> Optional
     return line.status if line is not None else None
 
 
-async def _insert_line(session: AsyncSession, line: LopLine) -> bool:
-    """Insert in a savepoint. False when the same source is already a line
-    (another request was first): the caller re-reads it instead of failing."""
+async def _insert_line(session: AsyncSession, line: LopLine) -> tuple[LopLine, bool]:
+    """Insert in a savepoint: (line, True). When the same source is already a
+    line (another request was first) that line comes back as (existing, False).
+    Any other integrity error (bad foreign key, NOT NULL) is re-raised."""
     try:
         async with session.begin_nested():
             session.add(line)
             await session.flush()
     except IntegrityError:
-        return False
-    return True
-
-
-async def _existing(session: AsyncSession, project_id: int, kind: str, ref_key: str) -> LopLine:
-    return (await session.execute(select(LopLine).where(
-        LopLine.project_id == project_id, LopLine.kind == kind,
-        LopLine.ref_key == ref_key))).scalar_one()
+        existing = (await session.execute(select(LopLine).where(
+            LopLine.project_id == line.project_id, LopLine.kind == line.kind,
+            LopLine.ref_key == line.ref_key))).scalar_one_or_none()
+        if existing is None:
+            raise
+        return existing, False
+    return line, True
 
 
 # ------------------------------------------------------------ SEP items in
@@ -222,10 +222,10 @@ async def _new_sep_line(session: AsyncSession, user: User, project_id: int,
         due_date=due, first_due_date=due, due_is_default=due_is_default,
         status="open" if dept_id is not None and due is not None else "new",
         created_by=user.id, created_at=now, last_update_at=now, last_update_by=user.id)
-    if not await _insert_line(session, line):
-        return await _existing(session, project_id, "sep_item", str(item.id)), False
-    _event(session, line, user.id, "created", None, f"SEP {gate.code} item {item.item_no}")
-    return line, True
+    line, created = await _insert_line(session, line)
+    if created:
+        _event(session, line, user.id, "created", None, f"SEP {gate.code} item {item.item_no}")
+    return line, created
 
 
 async def _require_manager(session: AsyncSession, user: User, project_id: int) -> None:
@@ -372,7 +372,8 @@ async def sync_project_lines(session: AsyncSession, project_id: int, reader_id: 
                 responsible_is_default=is_default, due_date=due, first_due_date=due,
                 status="open", created_by=actor_id, created_at=now,
                 last_update_at=now, last_update_by=actor_id)
-            if await _insert_line(session, line):
+            line, created = await _insert_line(session, line)
+            if created:
                 _event(session, line, actor_id, "created", None, "SEP risk")
                 lines.append(line)
                 changed = True
