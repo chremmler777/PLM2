@@ -198,12 +198,16 @@ async def send_daily_digests(session: AsyncSession, now_utc: datetime) -> int:
     for user in await _digest_candidates(session):
         if user.id in had:
             continue
-        d = await digest_for(session, user, local.date(), now=now_utc)
-        if d is None:
-            continue
-        sent += await NotificationService.notify_once(
-            session, [user.id], kind=DIGEST_KIND, subject_key=key, include_read=True,
-            title=d[0], body=d[1], link=DIGEST_LINK)
+        try:  # one person's failure must not stop everyone else's digest
+            async with session.begin_nested():
+                d = await digest_for(session, user, local.date(), now=now_utc)
+                if d is None:
+                    continue
+                sent += await NotificationService.notify_once(
+                    session, [user.id], kind=DIGEST_KIND, subject_key=key, include_read=True,
+                    title=d[0], body=d[1], link=DIGEST_LINK)
+        except Exception:
+            logger.exception("LOP digest failed for user %s", user.id)
     if sent:
         await session.commit()
     return sent

@@ -199,6 +199,27 @@ async def test_no_digest_before_seven_or_at_the_weekend(lop_project, session_fac
         assert await send_daily_digests(s, datetime(2026, 11, 11, 12, 0)) == 1    # 07:00 sharp
 
 
+async def test_one_failing_digest_does_not_stop_the_others(monkeypatch, lop_project, session_factory, caplog):
+    from app.services import lop_digest
+    q, sl = lop_project.quality_user_id, lop_project.sales_user_id
+    await _mk(session_factory, lop_project, q, due_date=WED_DAY + timedelta(days=2))
+    await _mk(session_factory, lop_project, sl, due_date=WED_DAY + timedelta(days=2))
+    real = lop_digest.digest_for
+    broken = min(q, sl)
+
+    async def flaky(session, user, today, now=None):
+        if user.id == broken:
+            raise RuntimeError("boom")
+        return await real(session, user, today, now=now)
+
+    monkeypatch.setattr(lop_digest, "digest_for", flaky)
+    async with session_factory() as s:
+        assert await send_daily_digests(s, WED) == 1
+    assert await _digests(session_factory, broken) == []
+    assert len(await _digests(session_factory, max(q, sl))) == 1
+    assert f"user {broken}" in caplog.text
+
+
 async def test_digest_only_inside_the_morning_window(lop_project, session_factory):
     """No mail when something changes: a line given at 10:00 waits for the next morning."""
     await _mk(session_factory, lop_project, lop_project.quality_user_id,
