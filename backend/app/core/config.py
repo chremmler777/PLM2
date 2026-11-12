@@ -122,6 +122,12 @@ class Settings(BaseSettings):
     # a project with open lines and no closed LOP meeting for more than this many
     # days escalates its PM
     lop_meeting_gap_days: int = 10
+    # LOP mail (lop_digest, lop_escalation, lop_minutes) stays a badge until this
+    # is on (env LOP_MAIL_ENABLED); it does not touch the ECR mails.
+    lop_mail_enabled: bool = False
+    # who gets the weekly escalation summary (Monday): usernames or e-mails,
+    # comma separated; empty = nobody
+    lop_escalation_recipients: str = ""
 
     # Password reset settings
     password_reset_expire_hours: int = 24

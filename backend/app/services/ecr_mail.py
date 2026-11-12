@@ -67,8 +67,10 @@ MAIL_KINDS = frozenset({
     # resumes, cancels or sets a new date
     "hold_review",
     # the PM sends a LOP meeting's minutes to the project team
-    "lop_minutes",
+    "lop_minutes", "lop_digest", "lop_escalation",
 })
+#: The LOP's mail kinds: badges only while settings.lop_mail_enabled is off.
+LOP_MAIL_KINDS = frozenset({"lop_digest", "lop_escalation", "lop_minutes"})
 #: graph_send raises "Graph sendMail <status>: ..." for a non-202 answer.
 #: 401/403 (our app), 408/429 (throttling) and 5xx stop the run; any other
 #: 4xx is this mail's recipient or content: stamped and skipped.
@@ -100,8 +102,12 @@ _CHANGE_LINK = re.compile(r"^/changes/(\d+)")
 
 
 def mailable(n: Notification) -> bool:
-    """Immediate class only; a backup's info copy is a badge."""
+    """Immediate class only; a backup's info copy is a badge, and so is a LOP
+    notice while LOP_MAIL_ENABLED is off (stamped like any other skipped
+    notice, so it is never mailed later as backlog)."""
     from app.services.notification_service import BACKUP_NOTE_PREFIX
+    if n.kind in LOP_MAIL_KINDS and not get_settings().lop_mail_enabled:
+        return False
     return n.kind in MAIL_KINDS and BACKUP_NOTE_PREFIX not in (n.body or "")
 
 

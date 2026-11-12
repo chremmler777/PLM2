@@ -197,6 +197,59 @@ class LopService:
         if uid not in await LopService.team_user_ids(session, project_id):
             raise LopError("The responsible person must be in the project team")
 
+    # ---------------------------------------------------------------- badges
+    @staticmethod
+    async def _line_text(session: AsyncSession, line: LopLine) -> str:
+        from app.services import lop_sources
+        src = (await lop_sources.load_sources(session, [line])).get(line.id)
+        text = src["text"] if src is not None else line.title
+        return (text or "").strip()
+
+    @staticmethod
+    async def _badge(session: AsyncSession, recipient_id: Optional[int], actor_id: Optional[int],
+                     project_id: int, title: str, body: str) -> None:
+        """An in-app notice (kind lop_event, never mailed) about a change on a
+        project's LOP; nothing when nobody is named or the actor is the recipient."""
+        if recipient_id is None or recipient_id == actor_id:
+            return
+        from app.services.lop_meetings import lop_link
+        from app.services.notification_service import NotificationService
+        code = (await session.get(Project, project_id)).code
+        await NotificationService.notify_users(
+            session, [recipient_id], f"LOP {code}: {title}", body, lop_link(project_id),
+            kind="lop_event")
+
+    @staticmethod
+    async def notify_assigned(session: AsyncSession, actor: User, lines: list[LopLine]) -> None:
+        """Tell each responsible person that lines were given to them: one
+        badge per person (one line: its text; several: the count and the first
+        few texts). The caller commits."""
+        by_person: dict[int, list[LopLine]] = {}
+        for ln in lines:
+            if ln.responsible_id is not None and ln.responsible_id != actor.id:
+                by_person.setdefault(ln.responsible_id, []).append(ln)
+        for uid, mine in by_person.items():
+            texts = [await LopService._line_text(session, ln) for ln in mine[:5]]
+            if len(mine) == 1:
+                title, body = "new line for you", texts[0]
+            else:
+                title = f"{len(mine)} new lines for you"
+                body = "\n".join(f"- {t}" for t in texts) + (
+                    f"\n... and {len(mine) - 5} more" if len(mine) > 5 else "")
+            await LopService._badge(session, uid, actor.id, mine[0].project_id, title, body)
+
+    @staticmethod
+    async def notify_done_check(session: AsyncSession, actor_id: Optional[int], line: LopLine) -> None:
+        pm = await ProjectTeamService.responsible_user_id(
+            session, line.project_id, PM_DEPARTMENT, backup=True)
+        await LopService._badge(session, pm, actor_id, line.project_id, "reported as done, please check",
+                                await LopService._line_text(session, line))
+
+    @staticmethod
+    async def notify_reopened(session: AsyncSession, actor_id: Optional[int], line: LopLine) -> None:
+        await LopService._badge(session, line.responsible_id, actor_id, line.project_id,
+                                "line open again", await LopService._line_text(session, line))
+
     # ----------------------------------------------------------------- write
     @staticmethod
     def _event(session: AsyncSession, line: LopLine, user: User, field_: str,
@@ -245,6 +298,7 @@ class LopService:
         await session.flush()
         LopService._event(session, line, user, "created", None, title)
         await LopService.mark_in_meeting(session, line)
+        await LopService.notify_assigned(session, user, [line])
         await session.commit()
         return line
 
@@ -276,6 +330,7 @@ class LopService:
         old_status = line.status
         changed = False
         old_dates = (line.due_date, line.next_check_date)
+        old_responsible = line.responsible_id
 
         if "title" in body:
             if line.kind != "task":
@@ -337,11 +392,18 @@ class LopService:
                 await lop_sources.push_status(session, line, user, old_status, new_status)
                 LopService._event(session, line, user, "status", old_status, new_status, reason)
                 changed = True
+                if new_status == "done_check":
+                    await LopService.notify_done_check(session, user.id, line)
+                elif old_status in ("done_check", "closed") and new_status != "closed" and (
+                        old_status == "closed" or new_status in ("open", "in_work")):
+                    await LopService.notify_reopened(session, user.id, line)
         elif (line.status == "new" and line.department_id is not None
               and (line.due_date is not None or line.next_check_date is not None)):
             line.status = "open"                        # now it has a department and a date
             LopService._event(session, line, user, "status", "new", "open", reason)
 
+        if line.responsible_id != old_responsible:
+            await LopService.notify_assigned(session, user, [line])
         if changed or line.status != old_status:
             LopService._touch(line, user)
             await LopService.mark_in_meeting(
@@ -436,6 +498,7 @@ class LopService:
         line, created = await lop_sources._insert_line(session, line)
         if created:
             LopService._event(session, line, user, "created", None, f"PDB topic {topic['id']}")
+            await LopService.notify_assigned(session, user, [line])
         await session.commit()
         return line, created
 

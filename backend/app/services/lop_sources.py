@@ -166,6 +166,7 @@ async def report_done_instead(session: AsyncSession, item: SepWorkItem,
                f"reported done in the SEP view ({new_status})")
         line.status = "done_check"
         line.last_update_at, line.last_update_by = datetime.utcnow(), user.id
+        await LopService.notify_done_check(session, user.id, line)
     return True
 
 
@@ -178,6 +179,7 @@ async def item_status_changed(session: AsyncSession, item: SepWorkItem, user_id:
         _close_line(session, line, user_id, datetime.utcnow(), f"SEP item set to {item.status}")
     elif item.status == "open" and line.status == "closed":
         _reopen_line(session, line, user_id, "SEP item reopened")
+        await LopService.notify_reopened(session, user_id, line)
 
 
 async def item_line_status(session: AsyncSession, item: SepWorkItem) -> Optional[str]:
@@ -250,6 +252,8 @@ async def add_sep_item(session: AsyncSession, user: User, project_id: int, item_
     if gate.status == "closed":
         raise LopConflict("The SEP gate is closed; its items are locked")
     line, created = await _new_sep_line(session, user, project_id, item, gate, due_date, {})
+    if created:
+        await LopService.notify_assigned(session, user, [line])
     await session.commit()
     return line, created
 
@@ -276,6 +280,7 @@ async def add_sep_gate(session: AsyncSession, user: User, project_id: int,
         line, created = await _new_sep_line(session, user, project_id, i, gate, None, resolved)
         if created:
             out.append(line)
+    await LopService.notify_assigned(session, user, out)        # one badge per person
     await session.commit()
     return out
 

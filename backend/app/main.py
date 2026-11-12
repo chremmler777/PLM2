@@ -512,6 +512,24 @@ async def lifespan(app: FastAPI):
 
     mail_task = asyncio.create_task(_mail_loop())
 
+    # Project LOP: the daily digest (Monday to Friday) and Monday's escalation
+    # summary, checked every 15 minutes; each is sent once per person and day
+    # or week (app/services/lop_digest.py). Mailed only while LOP_MAIL_ENABLED.
+    async def _lop_digest_loop():
+        from app.models import AsyncSessionLocal
+        from datetime import datetime
+        from app.services.lop_digest import send_daily_digests, send_escalation_summary
+        while True:
+            for send in (send_daily_digests, send_escalation_summary):
+                try:
+                    async with AsyncSessionLocal() as session:
+                        await send(session, datetime.utcnow())
+                except Exception as e:
+                    logger.warning(f"LOP {send.__name__} run failed: {e}")
+            await asyncio.sleep(15 * 60)
+
+    lop_digest_task = asyncio.create_task(_lop_digest_loop())
+
     # MachineDB presses for the cost sheet: one background sync when
     # MACHINEDB_API_URL and MACHINEDB_SERVICE_TOKEN are set (never blocks
     # startup; the sheet runs on the last synced copy otherwise).
@@ -530,6 +548,7 @@ async def lifespan(app: FastAPI):
     reminder_task.cancel()
     part_data_mail_task.cancel()
     mail_task.cancel()
+    lop_digest_task.cancel()
     logger.info("Shutting down PLM application...")
 
 
