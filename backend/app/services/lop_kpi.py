@@ -27,6 +27,7 @@ from app.services.lop_service import LopNotFound, LopService, _today, local_date
 
 logger = logging.getLogger(__name__)
 
+PDB_CONCURRENCY = 5
 WINDOW_MONTH = 28
 WINDOW_WEEK = 7
 FLAGS = ("open", "stale", "late", "no_control", "untouched")
@@ -159,6 +160,8 @@ def kpi(items: list[Item], today: date) -> dict:
     late_dated = [i.d["days_late"] for i in open_items if i.d["late"] and i.d["due_date"]]
     closed_recent = [i for i in items if not i.open and i.line.closed_at is not None
                      and local_date(i.line.closed_at) >= month and i.line.first_due_date]
+    # closed_on_time is None only without a first due date or a closing time;
+    # both are excluded just above, so every measured line is True or False.
     on_time = sum(1 for i in closed_recent if rules.closed_on_time(i.state) is True)
     return {
         "open": len(open_items),
@@ -243,12 +246,29 @@ def _pdb_block(answer: Optional[tuple[dict, list[dict]]], items: list[Item]) -> 
 # ---------------------------------------------------------------- overview
 async def overview(db: AsyncSession, user: User) -> dict:
     projects = await scoped_projects(db, user)
-    answers = await asyncio.gather(*(_pdb_for(p.code) for p in projects))
+    gate = asyncio.Semaphore(PDB_CONCURRENCY)
+
+    async def ask(code: str):
+        async with gate:
+            return await _pdb_for(code)
+
+    answers = await asyncio.gather(*(ask(p.code) for p in projects))
     pdb_by_project = dict(zip((p.id for p in projects), answers))
-    for p in projects:                      # pins follow PDB's open list (LOP rows only)
-        if pdb_by_project[p.id] is not None:
+    rolled_back = False
+    for pid in [p.id for p in projects]:    # pins follow PDB's open list (LOP rows only)
+        if pdb_by_project[pid] is None:
+            continue
+        try:
             await LopService.follow_pdb(
-                db, p.id, {str(t["id"]) for t in pdb_by_project[p.id][1]})
+                db, pid, {str(t["id"]) for t in pdb_by_project[pid][1]})
+        except Exception:                   # PDB trouble is never a 5xx
+            logger.exception("Following PDB failed for project %s", pid)
+            await db.rollback()             # expires every loaded row: ids only from here on
+            rolled_back = True
+            pdb_by_project[pid] = None
+    if rolled_back:                         # a rollback expires the loaded rows
+        await db.refresh(user)
+        projects = await scoped_projects(db, user)
     scope = await collect(db, user, projects)
     gates = await _gates(db, [p.id for p in projects])
     rows, all_items = [], []
@@ -256,12 +276,14 @@ async def overview(db: AsyncSession, user: User) -> dict:
         items = scope.items[p.id]
         all_items += items
         row = {"project_id": p.id, "code": p.code, "name": p.name, **kpi(items, scope.today)}
-        row["untouched_last_meeting"] = await LopMeetings.untouched_count(db, p.id)
         row["gate"] = gates.get(p.id)
-        row["pdb"] = _pdb_block(pdb_by_project[p.id], items)
+        try:
+            row["pdb"] = _pdb_block(pdb_by_project[p.id], items)
+        except Exception:                   # e.g. a topic row without an id
+            logger.exception("PDB block failed for project %s", p.id)
+            row["pdb"] = _pdb_block(None, items)
         rows.append(row)
     totals = kpi(all_items, scope.today)
-    totals["untouched_last_meeting"] = sum(r["untouched_last_meeting"] for r in rows)
     totals["pdb_without_name_and_date"] = sum(
         r["pdb"]["pdb_without_name_and_date"] or 0 for r in rows)
     return {"totals": totals, "projects": rows,

@@ -372,3 +372,53 @@ async def test_lines_without_flag_include_closed_and_unknown_project_is_404(
     assert r.status_code == 404
     r = await client.get(f"{BASE}/lines", headers=pm_auth, params={"flag": "bogus"})
     assert r.status_code == 422
+
+
+# ------------------------------------------------------- fix round 1
+async def test_pin_gone_from_pdb_is_closed_by_the_overview(client, pm_auth, pdb_project, pdb,
+                                                           session_factory):
+    pdb.topics = [_topic(1)]
+    r = await client.post(f"{BASE}/projects/{pdb_project.id}/pdb/1/pin", headers=pm_auth,
+                          json={"responsible_id": pdb_project.pm_id, "due_date": _d(5)})
+    pin_id = r.json()["id"]
+    assert _row(await _overview(client, pm_auth), pdb_project)["open"] == 1
+    pdb.topics = []
+    pdb_client.clear_cache()
+    row = _row(await _overview(client, pm_auth), pdb_project)
+    assert row["open"] == 0 and row["pdb"]["pinned"] == 0 and row["pdb"]["open_topics"] == 0
+    async with session_factory() as s:
+        assert (await s.get(LopLine, pin_id)).status == "closed"
+
+
+async def test_pdb_down_leaves_the_pin_alone(client, pm_auth, pdb_project, pdb, session_factory):
+    pdb.topics = [_topic(1)]
+    r = await client.post(f"{BASE}/projects/{pdb_project.id}/pdb/1/pin", headers=pm_auth,
+                          json={"responsible_id": pdb_project.pm_id, "due_date": _d(5)})
+    pin_id = r.json()["id"]
+    pdb_client.clear_cache()
+    pdb.fail = 503
+    row = _row(await _overview(client, pm_auth), pdb_project)
+    assert row["open"] == 1 and row["pdb"]["pinned"] == 1
+    async with session_factory() as s:
+        assert (await s.get(LopLine, pin_id)).status == "open"
+
+
+async def test_malformed_topic_hides_pdb_for_that_project_only(
+        client, pm_auth, pdb_project, pdb, session_factory, monkeypatch):
+    other = await _more_project(session_factory, "7")
+
+    async def topics(code, **kw):
+        return [{"issue": "no id"}] if code == "1748" else [_topic(1)]
+    monkeypatch.setattr(pdb_client, "project_topics", topics)
+    ov = await _overview(client, pm_auth)
+    bad = _row(ov, pdb_project)["pdb"]
+    good = next(p for p in ov["projects"] if p["project_id"] == other)["pdb"]
+    assert bad["available"] is False and bad["open_topics"] is None
+    assert good["available"] is True and good["open_topics"] == 1 and good["tools_c"] == 2
+
+
+async def test_closed_line_with_a_date_but_no_closing_time_is_not_measured(
+        client, pm_auth, lop_project, session_factory):
+    await _db_line(session_factory, lop_project.id, status="closed", closed_at=None,
+                   first_due_date=_today() + timedelta(days=3))
+    assert _row(await _overview(client, pm_auth), lop_project)["on_time_pct_4w"] is None
