@@ -1,12 +1,12 @@
 /**
  * One line of the LOP table, with the one-click actions: Assign to me,
  * Confirm name, Confirm / Reopen a done line (PM), Done, please check (the
- * responsible), Escalate during a meeting, Pin an open PDB topic.
+ * responsible), Discussed / Escalate during a meeting, Pin an open PDB topic.
  */
 import { ChevronDown, ChevronRight, Pin } from 'lucide-react'
 import { lopApi } from '../../api/lop'
 import { MARK_LABEL, STATUS_LABEL, dueLabel, escalationLabel, shortDay, sourceLabel, sourceTone } from '../../lib/lop'
-import type { LinePatch, LopLine, LopMeetingRef } from '../../types/lop'
+import type { LinePatch, LopLine, LopMeetingRef, MeetingMark } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
 import { DefaultMarker, InlineError } from './lopUi'
 import { useLopWrite } from './useLopWrite'
@@ -83,7 +83,7 @@ export default function LopLineRow({ line, ctx, expanded, onToggle }: {
 }) {
   const id = line.id
   const patch = useLopWrite(ctx.projectId, (body: LinePatch) => lopApi.patchLine(id!, body))
-  const mark = useLopWrite(ctx.projectId, () => lopApi.setMark(ctx.meeting!.id, id!, 'escalated'))
+  const mark = useLopWrite(ctx.projectId, (m: MeetingMark) => lopApi.setMark(ctx.meeting!.id, id!, m))
   const unpinned = line.kind === 'pdb_topic' && !line.pinned
   const pm = line.can_manage
   const actions = []
@@ -153,9 +153,13 @@ export default function LopLineRow({ line, ctx, expanded, onToggle }: {
                 className={meetingMark === 'none' ? 'text-amber-300' : meetingMark === 'escalated' ? 'text-red-300' : 'text-emerald-300'}>
                 {MARK_LABEL[meetingMark]}
               </span>
+              {pm && meetingMark === 'none' && (
+                <button type="button" className={`${btnSm.ghost} ml-1`} disabled={mark.pending}
+                  aria-label={`Mark line ${id} as discussed`} onClick={() => mark.run('updated')}>Discussed</button>
+              )}
               {pm && meetingMark !== 'escalated' && (
                 <button type="button" className={`${btnSm.ghost} ml-1`} disabled={mark.pending}
-                  aria-label={`Escalate line ${id}`} onClick={() => mark.run(undefined)}>Escalate</button>
+                  aria-label={`Escalate line ${id}`} onClick={() => mark.run('escalated')}>Escalate</button>
               )}
             </>
           )}

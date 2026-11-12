@@ -238,6 +238,25 @@ describe('LopPanel', () => {
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/lop/meetings/3/close'))
   })
 
+  it('marks a line as discussed during the meeting; moved and escalated lines keep their mark', async () => {
+    const meeting = { id: 3, held_on: '2026-11-11', open: true }
+    project = lopProject({
+      meeting,
+      lines: [
+        lopLine({ id: 1, meeting_mark: 'none', meeting }),
+        lopLine({ id: 2, meeting_mark: 'moved', meeting }),
+        lopLine({ id: 4, meeting_mark: 'escalated', meeting }),
+      ],
+    })
+    mount()
+    fireEvent.click(within(await row(1)).getByRole('button', { name: 'Mark line 1 as discussed' }))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/lop/meetings/3/marks/1', { mark: 'updated' }))
+    expect(within(await row(2)).getByTestId('meeting-mark').textContent).toBe('moved')
+    expect(within(await row(2)).queryByRole('button', { name: 'Mark line 2 as discussed' })).toBeNull()
+    expect(within(await row(4)).getByTestId('meeting-mark').textContent).toBe('escalated')
+    expect(within(await row(4)).queryByRole('button', { name: 'Mark line 4 as discussed' })).toBeNull()
+  })
+
   it('sends minutes only for a closed meeting, after confirmation', async () => {
     project = lopProject({ meeting: { id: 3, held_on: '2026-11-10', open: false } })
     clientMocks.get.mockImplementation((url: string) => {
