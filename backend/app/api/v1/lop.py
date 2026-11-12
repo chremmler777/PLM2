@@ -11,9 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
 from app.models import User, get_db
-from app.services import lop_kpi, lop_sources, pdb_client
+from app.services import lop_export, lop_kpi, lop_sources, pdb_client
 from app.services.lop_meetings import LopMeetings
-from app.services.lop_service import LopError, LopService
+from app.services.lop_service import LopError, LopService, _today
+from app.services.worksheet_export import XLSX_MEDIA_TYPE
 
 router = APIRouter(prefix="/lop", tags=["lop"])
 
@@ -138,6 +139,42 @@ async def project_lop(project_id: int, view: Literal["meeting", "open", "closed"
         "meeting": meeting,
         "untouched": await LopMeetings.untouched_count(db, project_id),
     }
+
+
+@router.get("/projects/{project_id}/export.xlsx")
+async def export_xlsx(project_id: int, view: Literal["meeting", "open", "closed"] = Query("open"),
+                      user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The project's list as Excel: its lines for the view, then (open and
+    meeting) every PDB topic nobody pinned. PDB being down only adds a note."""
+    try:
+        project = await LopService.get_project(db, project_id, user)
+    except LopError as e:
+        raise _http(e)
+    await lop_sources.sync_project_lines(db, project_id, user.id)
+    can_manage = await LopService.can_manage(db, user, project_id)
+    lines = await LopService.lines_for_project(db, project_id, view)
+    topics, note, by_id = [], None, {}
+    if view != "closed":
+        try:
+            topics = await pdb_client.project_topics(project.code)
+        except pdb_client.PdbUnavailable as e:
+            note = ("PDB is not configured; PDB topics are missing from this list."
+                    if "not configured" in str(e)
+                    else "PDB could not be reached; PDB topics are missing from this list.")
+        else:
+            await LopService.follow_pdb(db, project_id, {str(t["id"]) for t in topics})
+            by_id = {str(t["id"]): t for t in topics}
+            lines = await LopService.lines_for_project(db, project_id, view)
+    ctx = await LopService.context(db, user, lines, can_manage=can_manage)
+    ctx.pdb = by_id
+    pinned = {ln.ref_key for ln in lines if ln.kind == "pdb_topic"}
+    rows = lop_export.sort_lines([LopService.line_dict(ln, ctx) for ln in lines])
+    extra = lop_export.sort_topics([LopService.pdb_topic_dict(t, ctx) for t in topics
+                                    if str(t["id"]) not in pinned])
+    data = lop_export.build_lop_xlsx(rows, extra, note)
+    name = f"LOP {project.code} {_today().isoformat()}.xlsx"
+    return Response(data, media_type=XLSX_MEDIA_TYPE,
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @router.post("/projects/{project_id}/lines", status_code=201)
