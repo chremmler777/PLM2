@@ -2084,9 +2084,16 @@ class OfferService:
         """The signature block for this person (Sales signs the offer). The
         user model carries no job title: the title is "Sales"."""
         from app.services.company_profile import offer_signer
-        return offer_signer((user.full_name or user.username or "")
-                            if user is not None else "",
-                            getattr(user, "job_title", None))
+        from app.services.ecr_mail import display_address
+        signer = offer_signer((user.full_name or user.username or "")
+                              if user is not None else "",
+                              getattr(user, "job_title", None))
+        # Christoph 2026-11-12: the letterhead shows the signer's own mail
+        # (e.g. Karl's), not the general company inbox.
+        email = display_address(getattr(user, "email", None)) if user is not None else None
+        if email:
+            signer["email"] = email
+        return signer
 
     @staticmethod
     async def _in_sales(session: AsyncSession, user: Optional[User]) -> bool:

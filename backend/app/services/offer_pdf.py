@@ -758,6 +758,11 @@ def render_offer_pdf(ctx: dict) -> bytes:
     profile = {k: ([_clean(x) for x in v if isinstance(x, str)] if isinstance(v, list)
                    else _clean(v) if isinstance(v, str) else "")
                for k, v in raw_profile.items()}
+    # Christoph 2026-11-12: the signer's own mail (e.g. Karl's) replaces the
+    # company inbox everywhere on the offer (letterhead and footer).
+    signer_mail = ctx["signer"].get("email") if isinstance(ctx.get("signer"), dict) else None
+    if isinstance(signer_mail, str) and signer_mail.strip():
+        profile["email"] = _clean(signer_mail).strip()
     legal = profile.get("legal_name") or org
 
     styles = getSampleStyleSheet()

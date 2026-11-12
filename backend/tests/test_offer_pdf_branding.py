@@ -187,6 +187,26 @@ async def test_pdf_prints_the_signer_or_the_role_line_only():
     assert "Jane" not in text and "KTX Group US Corp. | Sales" in text
 
 
+async def test_letterhead_mail_is_the_signers_own():
+    """Christoph 2026-11-12: the sender block shows the signer's mail
+    (e.g. Karl's), the company inbox only when no signer mail is known."""
+    from app.services.offer_pdf import render_offer_pdf
+    ctx = _pdf_ctx({"timing": {"include": False}})
+    ctx["signer"] = {"name": "Karl Sales", "title": "Sales", "email": "karl.sales@us.ktx.group"}
+    text = _text(render_offer_pdf(ctx))
+    assert "karl.sales@us.ktx.group" in text and "ktx_info@" not in text
+    ctx["signer"] = {"name": "Karl Sales", "title": "Sales"}
+    assert "ktx_info@us.ktx.group" in _text(render_offer_pdf(ctx))
+
+
+def test_signer_for_carries_the_persons_mail():
+    from types import SimpleNamespace
+    from app.services.offer_service import OfferService
+    u = SimpleNamespace(full_name="Karl Sales", username="karl", email="karl.sales@us.ktx.group")
+    assert OfferService.signer_for(u)["email"] == "karl.sales@us.ktx.group"
+    assert "email" not in OfferService.signer_for(None)
+
+
 async def _pdf(client, auth, cid, oid):
     res = await client.get(_url(cid, f"/{oid}/pdf"), headers=auth)
     assert res.status_code == 200, res.text
