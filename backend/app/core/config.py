@@ -119,6 +119,9 @@ class Settings(BaseSettings):
     lop_due_soon_days: int = 3
     lop_digest_hour: int = 7
     lop_timezone: str = "America/New_York"
+    # a project with open lines and no closed LOP meeting for more than this many
+    # days escalates its PM
+    lop_meeting_gap_days: int = 10
 
     # Password reset settings
     password_reset_expire_hours: int = 24

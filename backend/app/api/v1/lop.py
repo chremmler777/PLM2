@@ -6,11 +6,13 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
 from app.models import User, get_db
 from app.services import lop_sources, pdb_client
+from app.services.lop_meetings import LopMeetings
 from app.services.lop_service import LopError, LopService
 
 router = APIRouter(prefix="/lop", tags=["lop"])
@@ -48,6 +50,10 @@ class PinIn(BaseModel):
     next_check_date: Optional[date] = None
 
 
+class MarkIn(BaseModel):
+    mark: Literal["updated", "moved", "escalated", "none"]
+
+
 class CommentIn(BaseModel):
     text: str
 
@@ -61,6 +67,13 @@ async def _one(db: AsyncSession, user: User, line, can_manage: Optional[bool] = 
         can_manage = await LopService.can_manage(db, user, line.project_id)
     ctx = await LopService.context(db, user, [line], can_manage=can_manage)
     return LopService.line_dict(line, ctx)
+
+
+async def _in_meeting(db: AsyncSession, lines: list) -> None:
+    """Lines the PM just added join the project's open meeting (mark updated)."""
+    for ln in lines:
+        await LopService.mark_in_meeting(db, ln)
+    await db.commit()
 
 
 @router.get("/mine")
@@ -96,12 +109,15 @@ async def project_lop(project_id: int, view: Literal["meeting", "open", "closed"
     lines = [ln for ln in await LopService.lines_for_project(db, project_id, view)
              if ln.kind != "pdb_topic"]      # PDB topics come from /pdb only
     ctx = await LopService.context(db, user, lines, can_manage=can_manage)
+    meeting, last_meeting = await LopMeetings.summary(db, project_id)
     return {
         "project": {"id": project.id, "code": project.code, "name": project.name,
                     "lop_enabled": project.lop_enabled},
         "can_manage": can_manage,
         "lines": [LopService.line_dict(ln, ctx) for ln in lines],
-        "last_meeting": None,
+        "last_meeting": last_meeting.isoformat() if last_meeting else None,
+        "meeting": meeting,
+        "untouched": await LopMeetings.untouched_count(db, project_id),
     }
 
 
@@ -139,10 +155,13 @@ async def add_from_sep(project_id: int, body: FromSep, response: Response,
                 db, user, project_id, body.item_id, body.due_date)
             if not created:
                 response.status_code = 200
+            else:
+                await _in_meeting(db, [line])
             return await _one(db, user, line)
         if not body.only_open:
             raise HTTPException(400, "Adding a gate needs only_open: true")
         lines = await lop_sources.add_sep_gate(db, user, project_id, body.gate_id)
+        await _in_meeting(db, lines)
     except LopError as e:
         raise _http(e)
     ctx = await LopService.context(db, user, lines, can_manage=True)
@@ -260,6 +279,76 @@ async def pin_pdb_topic(project_id: int, topic_id: int, body: PinIn, response: R
     except LopError as e:
         raise _http(e)
     response.status_code = 201 if created else 200
+    if created:
+        await _in_meeting(db, [line])
     ctx = await LopService.context(db, user, [line], can_manage=True)
     ctx.pdb = {str(topic["id"]): topic}
     return LopService.line_dict(line, ctx)
+
+
+# ----------------------------------------------------------------- meetings
+@router.post("/projects/{project_id}/meetings")
+async def start_meeting(project_id: int, response: Response,
+                        user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Start the weekly meeting (PM only). While one is open, it is returned (200)."""
+    try:
+        m, created = await LopMeetings.start(db, user, project_id)
+        out = await LopMeetings.detail(db, m)
+    except LopError as e:
+        raise _http(e)
+    response.status_code = 201 if created else 200
+    return out
+
+
+@router.get("/meetings/{meeting_id}")
+async def get_meeting(meeting_id: int, user: User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
+    try:
+        return await LopMeetings.detail(db, await LopMeetings.get(db, user, meeting_id))
+    except LopError as e:
+        raise _http(e)
+
+
+@router.put("/meetings/{meeting_id}/marks/{line_id}")
+async def set_mark(meeting_id: int, line_id: int, body: MarkIn,
+                   user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    try:
+        row = await LopMeetings.set_mark(db, user, meeting_id, line_id, body.mark)
+    except LopError as e:
+        raise _http(e)
+    return {"line_id": row.line_id, "mark": row.mark, "was_late": row.was_late,
+            "was_stale": row.was_stale}
+
+
+@router.post("/meetings/{meeting_id}/close")
+async def close_meeting(meeting_id: int, user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    try:
+        m = await LopMeetings.close(db, user, meeting_id)
+        return await LopMeetings.detail(db, m)
+    except LopError as e:
+        raise _http(e)
+
+
+@router.post("/meetings/{meeting_id}/minutes")
+async def send_minutes(meeting_id: int, user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
+    try:
+        n = await LopMeetings.send_minutes(db, user, meeting_id)
+    except LopError as e:
+        raise _http(e)
+    return {"sent_to": n}
+
+
+@router.get("/escalations")
+async def escalations(project_id: Optional[int] = Query(None),
+                      user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Lines late or stale at two meetings in a row (or marked escalated), and
+    projects with no meeting for too long. Projects of the caller's organization."""
+    from app.models.entities import Plant, Project
+    q = (select(Project.id).join(Plant, Plant.id == Project.plant_id)
+         .where(Plant.organization_id == user.organization_id, Project.lop_enabled.is_(True)))
+    if project_id is not None:
+        q = q.where(Project.id == project_id)
+    ids = list((await db.execute(q)).scalars().all())
+    return await LopMeetings.escalations(db, ids)

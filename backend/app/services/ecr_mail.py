@@ -66,6 +66,8 @@ MAIL_KINDS = frozenset({
     # a hold's review date has come (Christoph 2026-11-02): the lead / PM
     # resumes, cancels or sets a new date
     "hold_review",
+    # the PM sends a LOP meeting's minutes to the project team
+    "lop_minutes",
 })
 #: graph_send raises "Graph sendMail <status>: ..." for a non-202 answer.
 #: 401/403 (our app), 408/429 (throttling) and 5xx stop the run; any other

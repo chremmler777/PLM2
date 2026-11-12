@@ -109,6 +109,12 @@ class LineContext:
     sources: dict[int, dict] = field(default_factory=dict)
     # PDB topic id (str) -> the live topic row; only the /pdb route fills it
     pdb: dict[str, dict] = field(default_factory=dict)
+    # project id -> held_on of its newest closed meeting
+    last_meeting: dict[int, date] = field(default_factory=dict)
+    # project id -> its newest meeting {id, held_on, open}
+    meetings: dict[int, dict] = field(default_factory=dict)
+    # line id -> mark in the project's open meeting
+    marks: dict[int, str] = field(default_factory=dict)
 
 
 class LopService:
@@ -238,8 +244,16 @@ class LopService:
         session.add(line)
         await session.flush()
         LopService._event(session, line, user, "created", None, title)
+        await LopService.mark_in_meeting(session, line)
         await session.commit()
         return line
+
+    @staticmethod
+    async def mark_in_meeting(session: AsyncSession, line: LopLine, *, moved: bool = False) -> None:
+        """While the project's LOP meeting is open, record that the line was
+        worked on (lop_meetings.auto_mark). The caller commits."""
+        from app.services import lop_meetings
+        await lop_meetings.LopMeetings.auto_mark(session, line, moved=moved)
 
     @staticmethod
     async def update_line(session: AsyncSession, user: User, line_id: int, body: dict,
@@ -261,6 +275,7 @@ class LopService:
         reason = (reason or "").strip() or None
         old_status = line.status
         changed = False
+        old_dates = (line.due_date, line.next_check_date)
 
         if "title" in body:
             if line.kind != "task":
@@ -329,6 +344,9 @@ class LopService:
 
         if changed or line.status != old_status:
             LopService._touch(line, user)
+            await LopService.mark_in_meeting(
+                session, line,
+                moved=(line.due_date, line.next_check_date) != old_dates or "next_check_date" in body)
         await session.commit()
         return line
 
@@ -371,6 +389,7 @@ class LopService:
         c = LopComment(line_id=line.id, user_id=user.id, text=text)
         session.add(c)
         LopService._touch(line, user)
+        await LopService.mark_in_meeting(session, line)
         await session.commit()
         return c
 
@@ -526,6 +545,20 @@ class LopService:
             select(LopEvent.line_id).where(
                 LopEvent.line_id.in_(ids), LopEvent.field == "status",
                 LopEvent.old_value == "closed", LopEvent.new_value != "closed"))).scalars().all())
+        from app.models.lop import LopMeeting, LopMeetingMark
+        pids = {ln.project_id for ln in lines}
+        for m in (await session.execute(
+                select(LopMeeting).where(LopMeeting.project_id.in_(pids))
+                .order_by(LopMeeting.held_on, LopMeeting.id))).scalars().all():
+            ctx.meetings[m.project_id] = {"id": m.id, "held_on": m.held_on.isoformat(),
+                                          "open": m.closed_at is None}      # last one wins
+            if m.closed_at is not None:
+                ctx.last_meeting[m.project_id] = m.held_on
+        open_ids = [d["id"] for d in ctx.meetings.values() if d["open"]]
+        if open_ids:
+            ctx.marks = dict((await session.execute(
+                select(LopMeetingMark.line_id, LopMeetingMark.mark)
+                .where(LopMeetingMark.meeting_id.in_(open_ids)))).all())
         return ctx
 
     # ----------------------------------------------------------- line_dict
@@ -568,7 +601,6 @@ class LopService:
         text, label = LopService._text_and_label(line, ctx)
         src = ctx.sources.get(line.id) or {}
         status = LopService._display_status(line, ctx)
-        # last_meeting is None until Task 7 adds meetings
         created_on = local_date(line.created_at or datetime.utcnow())
         d = {
             "id": line.id, "project_id": line.project_id, "kind": line.kind,
@@ -588,9 +620,12 @@ class LopService:
             "late": rules.is_late(s, today),
             "stale": rules.is_stale(s, today, stale_days),
             "under_control": rules.under_control(s),
-            "group": rules.group_of(s, today, stale_days, None, created_on),
+            "group": rules.group_of(s, today, stale_days,
+                                   ctx.last_meeting.get(line.project_id), created_on),
             "moved": line.due_date != line.first_due_date,
             "reopened": s.reopened,
+            "meeting": ctx.meetings.get(line.project_id),
+            "meeting_mark": ctx.marks.get(line.id),
             "last_comment": ctx.last_comments.get(line.id),
             "can_manage": ctx.can_manage,
             "can_report": (line.responsible_id == ctx.user_id and status != "closed"
