@@ -2,7 +2,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.models.lop import LopEvent
+from app.models.lop import LopEvent, LopLine
 
 pytestmark = pytest.mark.asyncio
 
@@ -114,6 +114,18 @@ async def test_moving_a_due_date_keeps_the_first_and_needs_a_reason(client, pm_a
     b = (await client.patch(url, headers=pm_auth,
                             json={"due_date": "2026-12-01", "reason": "customer drawing late"})).json()
     assert b["first_due_date"] == "2026-11-20" and b["due_date"] == "2026-12-01" and b["moved"] is True
+
+
+@pytest.mark.parametrize("typed", ["first date set by the PM", "  First Date Set By The PM ",
+                                   "SEP risk row changed", "sep RISK row changed  "])
+async def test_reserved_reasons_cannot_be_typed(client, pm_auth, line, typed, session_factory):
+    url = f"{BASE}/lines/{line}"
+    r = await client.patch(url, headers=pm_auth, json={"due_date": "2026-12-01", "reason": typed})
+    assert r.status_code == 400 and "reserved" in r.json()["detail"]
+    async with session_factory() as s:
+        assert str((await s.get(LopLine, line)).due_date) == "2026-11-20"
+        assert not (await s.execute(select(LopEvent).where(
+            LopEvent.line_id == line, LopEvent.field == "due_date"))).scalars().all()
 
 
 async def test_first_due_date_needs_no_reason(client, pm_auth, lop_project):

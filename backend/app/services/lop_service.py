@@ -27,6 +27,13 @@ _UNSET = object()
 FIRST_DATE_REASON = "first date set by the PM"
 
 
+def reserved_reasons() -> tuple[str, ...]:
+    """Reasons the system writes and the KPIs or the sync treat specially; a
+    person may not type them (compared trimmed and case-insensitive)."""
+    from app.services.lop_sources import RISK_ROW_REASON
+    return (FIRST_DATE_REASON, RISK_ROW_REASON)
+
+
 class LopError(Exception):
     status_code = 400
 
@@ -328,6 +335,8 @@ class LopService:
         from app.services import lop_sources
         await lop_sources.assert_editable(session, line)        # 409 when the SEP gate is closed
         reason = (reason or "").strip() or None
+        if reason and reason.lower() in {r.lower() for r in reserved_reasons()}:
+            raise LopError(f'"{reason}" is a reserved reason; please say in your own words why')
         old_status = line.status
         changed = False
         old_dates = (line.due_date, line.next_check_date)
