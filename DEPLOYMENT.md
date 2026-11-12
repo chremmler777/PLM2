@@ -81,7 +81,7 @@ Settings (env, defaults in `backend/app/core/config.py`):
 | `LOP_MAIL_ENABLED` | `false` | while false, LOP digest, escalation summary and minutes are in-app badges only; PLM2's ECR mail is already live in production and is not affected |
 | `LOP_ESCALATION_RECIPIENTS` | empty | usernames or e-mails, comma separated; intended: Cody and Christoph |
 | `LOP_TIMEZONE` | `America/New_York` | time zone of the digest |
-| `LOP_DIGEST_HOUR` | `7` | digest hour, Monday to Friday |
+| `LOP_DIGEST_HOUR` | `7` | digest hour, Monday to Friday; digests (and Monday's escalation summary) are only created from this hour to two hours later, never during the rest of the day |
 | `LOP_STALE_DAYS` | `14` | a line with no update for this long is stale |
 | `LOP_DUE_SOON_DAYS` | `3` | "due soon" looks this many days ahead |
 | `LOP_MEETING_GAP_DAYS` | `10` | open lines and no closed LOP meeting for longer escalate the PM |
@@ -93,6 +93,11 @@ Settings (env, defaults in `backend/app/core/config.py`):
 - **PDB first:** deploy PDB first (or at the same time) so the PDB box works
   (PDB needs `PDB_PLM_READ_TOKEN`). If PDB is not deployed or not reachable,
   nothing breaks: the box says it is unavailable and the rest of the LOP works.
+- **Mail needs BOTH switches:** LOP mail goes out only when `ECR_MAIL_ENABLED`
+  is true (PLM2's notification mail loop, which sends every mail, ECR and LOP,
+  runs only then and needs Microsoft Graph configured; it is already on in
+  production) AND `LOP_MAIL_ENABLED` is true. With either one off, the LOP
+  digest, escalation summary and minutes stay in-app badges.
 - **Recommended first week:** leave `LOP_MAIL_ENABLED` off, let Christoph look
   at the badges, then turn it on. Optionally set `NOTIFY_TRIAL_RECIPIENT` to
   him first, but note that this existing switch diverts ALL PLM2 mail (ECR
