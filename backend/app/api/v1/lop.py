@@ -61,10 +61,10 @@ async def _one(db: AsyncSession, user: User, line, can_manage: Optional[bool] = 
 async def mine(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """The caller's open lines across all projects with LOP switched on."""
     rows = await LopService.my_open_lines(db, user)
-    # lines whose source closed since the last visit leave the list
+    # lines whose source closed since the last visit leave the list (no form writes here)
     synced = {p.id for ln, p in rows if ln.kind in lop_sources.SOURCE_KINDS}
     for pid in synced:
-        await lop_sources.sync_project_lines(db, pid, user.id)
+        await lop_sources.sync_project_lines(db, pid, user.id, full=False)
     if synced:
         rows = await LopService.my_open_lines(db, user)
     ctx = await LopService.context(db, user, [ln for ln, _ in rows], can_manage=False)

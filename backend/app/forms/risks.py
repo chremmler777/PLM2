@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import logging
 import uuid
 
 from sqlalchemy import select
@@ -12,8 +11,6 @@ from sqlalchemy.orm import selectinload
 from app.forms.compute import recompute
 from app.models.forms import FormInstance, FormDefinition, FormEvent
 from app.models.sep import SepRisk, SepGate
-
-logger = logging.getLogger(__name__)
 
 KEY = "risk_assessment"
 LOP_KEY = "lop_key"
@@ -38,29 +35,51 @@ async def risk_rows_by_gate(db: AsyncSession, project_id: int) -> dict[str, list
     return out
 
 
-async def _save_rows(db: AsyncSession, inst: FormInstance, rows: list[dict], user) -> None:
-    """Save changed risk rows through the forms service like a normal save
-    (validation, recompute, `saved` event with the diff). A submitted form
-    keeps its status. Raises FormError when the stored data does not validate."""
-    from app.forms.service import load_instance, save_instance
-    from app.models import User
-    if user is None:
-        user = await db.get(User, inst.updated_by or inst.created_by)
-    inst = await load_instance(db, inst.id)             # with its events
-    data = copy.deepcopy(inst.data or {})
-    data["risks"] = rows
-    await save_instance(db, inst, data, user, allow_submitted=True)
+def carry_over_lop_keys(stored: dict | None, incoming: dict) -> dict:
+    """A save from a form opened before the keys were stamped carries rows
+    without `lop_key`. Give such a row the key of the stored row at the same
+    position when that row has one, says the same `risk`, and no other
+    incoming row already uses the key. Returns `incoming` (a copy if changed)."""
+    old_rows = (stored or {}).get("risks") or []
+    new_rows = incoming.get("risks")
+    if not isinstance(new_rows, list):
+        return incoming
+    used = {r.get(LOP_KEY) for r in new_rows if isinstance(r, dict) and r.get(LOP_KEY)}
+    out, changed = [], False
+    for i, row in enumerate(new_rows):
+        if (isinstance(row, dict) and not row.get(LOP_KEY) and i < len(old_rows)
+                and isinstance(old_rows[i], dict)):
+            key = old_rows[i].get(LOP_KEY)
+            if key and key not in used and (old_rows[i].get("risk") or "") == (row.get("risk") or ""):
+                row = {**row, LOP_KEY: key}
+                used.add(key)
+                changed = True
+        out.append(row)
+    return {**incoming, "risks": out} if changed else incoming
 
 
-async def ensure_risk_keys(db: AsyncSession, project_id: int, user=None) -> int:
-    """Give every risk row without a `lop_key` one (uuid4 hex) and save the
-    newest instance; other row data is untouched. Returns how many were added.
-    The key is how a LOP line finds its row again, whatever its position."""
-    from app.forms.service import FormError
-    inst = await _newest_instance(db, project_id)
-    if not inst:
+async def _lock_newest(db: AsyncSession, project_id: int) -> FormInstance | None:
+    """The newest instance, row-locked and freshly read, so two requests that
+    change its rows run one after the other (no-op on sqlite)."""
+    return (await db.execute(
+        select(FormInstance).join(FormDefinition).options(selectinload(FormInstance.definition))
+        .where(FormInstance.project_id == project_id, FormDefinition.key == KEY)
+        .order_by(FormInstance.id.desc()).limit(1)
+        .with_for_update(of=FormInstance)
+        .execution_options(populate_existing=True))).scalar_one_or_none()
+
+
+async def ensure_risk_keys(db: AsyncSession, project_id: int, user_id: int) -> int:
+    """Give every risk row without a `lop_key` one (uuid4 hex); other row data
+    is untouched. Recorded as its own `lop_keys` form event by `user_id` (not as
+    a save). A submitted form is never changed: its keyless rows wait until it
+    is reopened. Returns how many keys were added."""
+    from app.forms.service import load_instance
+    inst = await _lock_newest(db, project_id)
+    if not inst or inst.status == "submitted":
         return 0
-    rows = copy.deepcopy((inst.data or {}).get("risks") or [])
+    data = copy.deepcopy(inst.data or {})
+    rows = data.get("risks") or []
     added = 0
     for row in rows:
         if not row.get(LOP_KEY):
@@ -68,11 +87,10 @@ async def ensure_risk_keys(db: AsyncSession, project_id: int, user=None) -> int:
             added += 1
     if not added:
         return 0
-    try:
-        await _save_rows(db, inst, rows, user)
-    except FormError as e:
-        logger.warning("risk keys not saved for project %s: %s", project_id, e.detail)
-        return 0
+    inst = await load_instance(db, inst.id)             # with its events
+    inst.data = recompute(inst.definition.body, data)
+    inst.events.append(FormEvent(user_id=user_id, event="lop_keys", diff={"added": added}))
+    await db.flush()
     return added
 
 
@@ -87,16 +105,24 @@ async def risk_rows_by_key(db: AsyncSession, project_id: int) -> dict[str, dict]
 async def set_risk_row_status(db: AsyncSession, project_id: int, lop_key: str,
                               status: str, user) -> bool:
     """Set one row's status (finished / started) in the newest instance.
-    False when the row is gone or already has that status. FormError passes up."""
-    inst = await _newest_instance(db, project_id)
+    False when the row is gone or already has that status. FormError(409) when
+    the form is submitted (the LOP never changes a submitted form); other
+    FormErrors pass up."""
+    from app.forms.service import FormError, load_instance, save_instance
+    inst = await _lock_newest(db, project_id)
     if not inst:
         return False
     rows = copy.deepcopy((inst.data or {}).get("risks") or [])
     row = next((r for r in rows if r.get(LOP_KEY) == lop_key), None)
     if row is None or row.get("status") == status:
         return False
+    if inst.status == "submitted":
+        raise FormError(409, "The risk form is submitted. Reopen it to change this line.")
     row["status"] = status
-    await _save_rows(db, inst, rows, user)
+    inst = await load_instance(db, inst.id)
+    data = copy.deepcopy(inst.data or {})
+    data["risks"] = rows
+    await save_instance(db, inst, data, user)
     return True
 
 

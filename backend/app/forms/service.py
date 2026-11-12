@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.forms.compute import recompute
 from app.forms.loader import latest_definition
 from app.forms.prefill import build_prefill
+from app.forms.risks import KEY as RISK_FORM_KEY, carry_over_lop_keys
 from app.forms.validate import missing_for_submit, validate_data
 from app.models import User, Project
 from app.models.forms import FormInstance, FormEvent, FormDefinition
@@ -79,14 +80,14 @@ def _diff(old: dict, new: dict, prefix: str = "") -> dict:
 
 
 async def save_instance(db: AsyncSession, inst: FormInstance, data: dict, user: User,
-                        owner_id: int | None = None, *, allow_submitted: bool = False) -> FormInstance:
-    """allow_submitted: only for system writes that keep a submitted form's
-    content (the LOP stamping a row key, or finishing a row it closed)."""
-    if inst.status == "submitted" and not allow_submitted:
+                        owner_id: int | None = None) -> FormInstance:
+    if inst.status == "submitted":
         raise FormError(409, "Form is submitted; reopen it to edit")
     problems = validate_data(inst.definition.body, data)
     if problems:
         raise FormError(422, "Invalid form data", {"problems": problems})
+    if inst.definition.key == RISK_FORM_KEY:
+        data = carry_over_lop_keys(inst.data, data)
     new = recompute(inst.definition.body, data)
     diff = _diff(inst.data or {}, new)
     if owner_id is not None and owner_id != inst.owner_id:

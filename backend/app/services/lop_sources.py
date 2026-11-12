@@ -14,6 +14,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.forms.risks import (
@@ -105,16 +106,6 @@ async def load_sources(session: AsyncSession, lines: list[LopLine]) -> dict[int,
     return out
 
 
-def source_text(line: LopLine, ctx) -> Optional[str]:
-    src = ctx.sources.get(line.id)
-    return src["text"] if src else line.title
-
-
-def source_closed(line: LopLine, ctx) -> bool:
-    src = ctx.sources.get(line.id)
-    return bool(src and src["closed"])
-
-
 # --------------------------------------------- LOP write -> source
 async def _item_and_gate(session: AsyncSession, line: LopLine):
     if line.kind != "sep_item" or not line.ref_key:
@@ -147,7 +138,8 @@ async def push_status(session: AsyncSession, line: LopLine, user: User,
             await set_risk_row_status(session, line.project_id, line.ref_key,
                                       "finished" if closing else "started", user)
         except FormError as e:
-            raise LopConflict(f"The risk form cannot be saved: {e.detail}")
+            raise LopConflict(e.detail if e.status == 409
+                              else f"The risk form cannot be saved: {e.detail}")
 
 
 # --------------------------------------------- SEP view write -> LOP
@@ -193,10 +185,29 @@ async def item_line_status(session: AsyncSession, item: SepWorkItem) -> Optional
     return line.status if line is not None else None
 
 
+async def _insert_line(session: AsyncSession, line: LopLine) -> bool:
+    """Insert in a savepoint. False when the same source is already a line
+    (another request was first): the caller re-reads it instead of failing."""
+    try:
+        async with session.begin_nested():
+            session.add(line)
+            await session.flush()
+    except IntegrityError:
+        return False
+    return True
+
+
+async def _existing(session: AsyncSession, project_id: int, kind: str, ref_key: str) -> LopLine:
+    return (await session.execute(select(LopLine).where(
+        LopLine.project_id == project_id, LopLine.kind == kind,
+        LopLine.ref_key == ref_key))).scalar_one()
+
+
 # ------------------------------------------------------------ SEP items in
 async def _new_sep_line(session: AsyncSession, user: User, project_id: int,
                         item: SepWorkItem, gate: SepGate, due: Optional[date],
-                        resolved: dict[int, tuple]) -> LopLine:
+                        resolved: dict[int, tuple]) -> tuple[LopLine, bool]:
+    """(line, created); an item that is already a line returns that line."""
     dept_id = await department_id_for(session, SEP_DEPARTMENT_MAP, item.department)
     if dept_id not in resolved:
         resolved[dept_id] = await LopService.resolve_responsible(session, project_id, dept_id)
@@ -211,10 +222,10 @@ async def _new_sep_line(session: AsyncSession, user: User, project_id: int,
         due_date=due, first_due_date=due, due_is_default=due_is_default,
         status="open" if dept_id is not None and due is not None else "new",
         created_by=user.id, created_at=now, last_update_at=now, last_update_by=user.id)
-    session.add(line)
-    await session.flush()
+    if not await _insert_line(session, line):
+        return await _existing(session, project_id, "sep_item", str(item.id)), False
     _event(session, line, user.id, "created", None, f"SEP {gate.code} item {item.item_no}")
-    return line
+    return line, True
 
 
 async def _require_manager(session: AsyncSession, user: User, project_id: int) -> None:
@@ -238,9 +249,9 @@ async def add_sep_item(session: AsyncSession, user: User, project_id: int, item_
     gate = await session.get(SepGate, item.gate_id)
     if gate.status == "closed":
         raise LopConflict("The SEP gate is closed; its items are locked")
-    line = await _new_sep_line(session, user, project_id, item, gate, due_date, {})
+    line, created = await _new_sep_line(session, user, project_id, item, gate, due_date, {})
     await session.commit()
-    return line, True
+    return line, created
 
 
 async def add_sep_gate(session: AsyncSession, user: User, project_id: int,
@@ -258,8 +269,13 @@ async def add_sep_gate(session: AsyncSession, user: User, project_id: int,
     have = set((await session.execute(select(LopLine.ref_key).where(
         LopLine.project_id == project_id, LopLine.kind == "sep_item"))).scalars().all())
     resolved: dict[int, tuple] = {}
-    out = [await _new_sep_line(session, user, project_id, i, gate, None, resolved)
-           for i in items if str(i.id) not in have]
+    out = []
+    for i in items:
+        if str(i.id) in have:
+            continue
+        line, created = await _new_sep_line(session, user, project_id, i, gate, None, resolved)
+        if created:
+            out.append(line)
     await session.commit()
     return out
 
@@ -302,44 +318,64 @@ def _uid(v) -> Optional[int]:
         return None
 
 
-async def sync_project_lines(session: AsyncSession, project_id: int, actor_id: int) -> None:
+RISK_ROW_REASON = "SEP risk row changed"
+
+
+async def sync_project_lines(session: AsyncSession, project_id: int, reader_id: int,
+                             *, full: bool = True) -> None:
     """Idempotent; writes only when something changed, never deletes.
-    1. every risk row gets a `lop_key`; 2. a row with a countermeasure and a
-    due date becomes a line; 3. lines follow their source: closed when it
-    closed (SEP item done / gate closed / row finished or removed), open
-    again when it reopened. SEP items are never added here."""
-    actor = await session.get(User, actor_id)
-    changed = bool(await ensure_risk_keys(session, project_id, actor))
+    full: 1. every risk row gets a `lop_key` (own form event); 2. a row with a
+    countermeasure and a due date becomes a line; 3. a line the PM never gave
+    another date follows its row's due date. Always: lines follow their source,
+    closed when it closed (SEP item done / gate closed / row finished or
+    removed), open again when it reopened. SEP items are never added here.
+    System writes are attributed to the project's PM, else to the reader."""
+    pm = await ProjectTeamService.responsible_user_id(
+        session, project_id, PM_DEPARTMENT, backup=True)
+    actor_id = pm or reader_id
+    changed = False
+    if full:
+        changed = bool(await ensure_risk_keys(session, project_id, actor_id))
     rows = await risk_rows_by_key(session, project_id) or {}
     lines = list((await session.execute(select(LopLine).where(
         LopLine.project_id == project_id, LopLine.kind.in_(SOURCE_KINDS)))).scalars().all())
 
-    have = {ln.ref_key for ln in lines if ln.kind == "risk"}
-    team = await LopService.team_user_ids(session, project_id) if any(
-        k not in have for k in rows) else set()
-    pm = None
-    for key, row in rows.items():
-        if key in have or row.get("status") == "finished":
-            continue
-        due = _date(row.get("due"))
-        if not (row.get("countermeasure") or "").strip() or due is None:
-            continue
-        uid, is_default = _uid(row.get("responsible")), False
-        if uid is None or uid not in team:
-            if pm is None:
-                pm = await ProjectTeamService.responsible_user_id(
-                    session, project_id, PM_DEPARTMENT, backup=True) or 0
-            uid, is_default = pm or None, True if pm else False
-        now = datetime.utcnow()
-        line = LopLine(
-            project_id=project_id, kind="risk", ref_key=key, responsible_id=uid,
-            responsible_is_default=is_default, due_date=due, first_due_date=due,
-            status="open", created_by=actor_id, created_at=now,
-            last_update_at=now, last_update_by=actor_id)
-        session.add(line)
-        await session.flush()
-        _event(session, line, actor_id, "created", None, "SEP risk")
-        changed = True
+    if full:
+        by_key = {ln.ref_key: ln for ln in lines if ln.kind == "risk"}
+        team = await LopService.team_user_ids(session, project_id) if any(
+            k not in by_key for k in rows) else set()
+        pm_moved = set((await session.execute(select(LopEvent.line_id).where(
+            LopEvent.line_id.in_([ln.id for ln in by_key.values()] or [0]),
+            LopEvent.field == "due_date",
+            (LopEvent.reason.is_(None)) | (LopEvent.reason != RISK_ROW_REASON)))).scalars().all())
+        for key, row in rows.items():
+            due = _date(row.get("due"))
+            ln = by_key.get(key)
+            if ln is not None:
+                if (due is not None and ln.status != "closed" and due != ln.due_date
+                        and ln.id not in pm_moved):
+                    _event(session, ln, None, "due_date", ln.due_date, due, RISK_ROW_REASON)
+                    ln.due_date = ln.first_due_date = due
+                    ln.due_is_default = False
+                    changed = True
+                continue
+            if row.get("status") == "finished":
+                continue
+            if not (row.get("countermeasure") or "").strip() or due is None:
+                continue
+            uid, is_default = _uid(row.get("responsible")), False
+            if uid is None or uid not in team:
+                uid, is_default = pm, bool(pm)
+            now = datetime.utcnow()
+            line = LopLine(
+                project_id=project_id, kind="risk", ref_key=key, responsible_id=uid,
+                responsible_is_default=is_default, due_date=due, first_due_date=due,
+                status="open", created_by=actor_id, created_at=now,
+                last_update_at=now, last_update_by=actor_id)
+            if await _insert_line(session, line):
+                _event(session, line, actor_id, "created", None, "SEP risk")
+                lines.append(line)
+                changed = True
 
     sources = await load_sources(session, lines)
     for ln in lines:

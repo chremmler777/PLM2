@@ -350,3 +350,124 @@ async def test_sync_is_idempotent(client, pm_auth, lop_project, session_factory)
     await _open_lines(client, pm_auth, lop_project.id)
     async with session_factory() as s:
         assert len((await s.execute(select(FormEvent))).scalars().all()) == n     # no write
+
+
+# ------------------------------------------------------------- fix round 1
+async def _patch_form(client, auth, inst_id, risks):
+    data = (await client.get(f"/api/v1/forms/instances/{inst_id}", headers=auth)).json()["data"]
+    data["risks"] = risks
+    return await client.patch(f"/api/v1/forms/instances/{inst_id}", headers=auth, json={"data": data})
+
+
+async def test_submitted_risk_form_is_never_changed_by_the_lop(
+        client, pm_auth, lop_project, session_factory):
+    from app.models.forms import FormInstance
+    inst = await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    line = (await _open_lines(client, pm_auth, lop_project.id))[0]["id"]      # row has its key
+    async with session_factory() as s:
+        i = await s.get(FormInstance, inst["id"])
+        i.data = {**i.data, "risks": i.data["risks"] + [
+            {"gate": "K0/RG1", "risk": "Second", "countermeasure": "Later", "due": "2026-12-01",
+             "status": "open"}]}
+        i.status = "submitted"
+        await s.commit()
+    lines = await _open_lines(client, pm_auth, lop_project.id)
+    assert [l["id"] for l in lines] == [line]                 # keyless row waits for a reopen
+    async with session_factory() as s:
+        rows = (await s.get(FormInstance, inst["id"])).data["risks"]
+    assert rows[0].get("lop_key") and not rows[1].get("lop_key")
+    r = await client.patch(f"{BASE}/lines/{line}", headers=pm_auth, json={"status": "closed"})
+    assert r.status_code == 409
+    assert r.json()["detail"] == "The risk form is submitted. Reopen it to change this line."
+    assert [l["status"] for l in await _open_lines(client, pm_auth, lop_project.id)] == ["open"]
+
+
+async def test_duplicate_create_returns_the_existing_line(
+        client, pm_auth, lop_project, lop_sep, session_factory):
+    from app.models.entities import User
+    from app.services import lop_sources
+    await lop_sep()
+    gate = await _gate(session_factory, lop_project.id)
+    item = await _item(session_factory, gate)
+    first = (await _from_sep(client, pm_auth, lop_project.id, item_id=item)).json()["id"]
+    async with session_factory() as s:                       # the second request lost the race
+        user = await s.get(User, lop_project.pm_id)
+        it = await s.get(SepWorkItem, item)
+        g = await s.get(SepGate, gate)
+        line, created = await lop_sources._new_sep_line(s, user, lop_project.id, it, g, None, {})
+        assert created is False and line.id == first
+        dup = LopLine(project_id=lop_project.id, kind="risk", ref_key="k1", status="open")
+        s.add(dup)
+        await s.commit()
+    async with session_factory() as s:
+        again = LopLine(project_id=lop_project.id, kind="risk", ref_key="k1", status="open")
+        assert await lop_sources._insert_line(s, again) is False
+        await s.commit()
+        n = (await s.execute(select(LopLine).where(LopLine.ref_key == "k1"))).scalars().all()
+        assert len(n) == 1
+
+
+async def test_stale_form_save_keeps_the_keys_and_lines(client, pm_auth, lop_project):
+    inst = await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    stale = inst["data"]["risks"]                              # opened before the keys existed
+    line = (await _open_lines(client, pm_auth, lop_project.id))[0]
+    key = line["ref_key"]
+    assert (await _patch_form(client, pm_auth, inst["id"], stale)).status_code == 200
+    assert (await _risk_rows(client, pm_auth, lop_project.id))[0]["lop_key"] == key
+    assert [l["id"] for l in await _open_lines(client, pm_auth, lop_project.id)] == [line["id"]]
+
+
+async def test_genuinely_deleted_row_still_drops_its_line(client, pm_auth, lop_project):
+    inst = await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    await _open_lines(client, pm_auth, lop_project.id)
+    assert (await _patch_form(client, pm_auth, inst["id"], [])).status_code == 200
+    assert await _open_lines(client, pm_auth, lop_project.id) == []
+
+
+def test_reordered_or_edited_row_does_not_steal_a_key():
+    from app.forms.risks import carry_over_lop_keys
+    stored = {"risks": [{"risk": "A", "lop_key": "ka"}, {"risk": "B", "lop_key": "kb"}]}
+    swapped = carry_over_lop_keys(stored, {"risks": [{"risk": "B"}, {"risk": "A"}]})
+    assert [r.get("lop_key") for r in swapped["risks"]] == [None, None]
+    edited = carry_over_lop_keys(stored, {"risks": [{"risk": "A edited"}, {"risk": "B"}]})
+    assert [r.get("lop_key") for r in edited["risks"]] == [None, "kb"]
+    used = carry_over_lop_keys(stored, {"risks": [{"risk": "A"}, {"risk": "B", "lop_key": "ka"}]})
+    assert used["risks"][0].get("lop_key") is None
+
+
+async def test_reader_opening_the_lop_writes_nothing_in_their_name(
+        client, pm_auth, quality_auth, lop_project, session_factory):
+    from app.models.forms import FormEvent
+    await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    await _open_lines(client, quality_auth, lop_project.id)
+    async with session_factory() as s:
+        events = (await s.execute(select(FormEvent))).scalars().all()
+        line = (await s.execute(select(LopLine).where(LopLine.kind == "risk"))).scalars().one()
+    assert not [e for e in events if e.event == "saved" and e.user_id == lop_project.quality_user_id]
+    keys = [e for e in events if e.event == "lop_keys"]
+    assert len(keys) == 1 and keys[0].user_id == lop_project.pm_id
+    assert line.created_by == lop_project.pm_id
+
+
+async def test_mine_does_not_stamp_keys_or_create_lines(client, pm_auth, lop_project):
+    await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    assert (await client.get(f"{BASE}/mine", headers=pm_auth)).status_code == 200
+    assert not (await _risk_rows(client, pm_auth, lop_project.id))[0].get("lop_key")
+
+
+async def test_risk_line_follows_the_row_due_date_until_the_pm_moves_it(client, pm_auth, lop_project):
+    inst = await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    line = (await _open_lines(client, pm_auth, lop_project.id))[0]
+    rows = (await _risk_rows(client, pm_auth, lop_project.id))
+    rows[0]["due"] = "2026-12-05"
+    assert (await _patch_form(client, pm_auth, inst["id"], rows)).status_code == 200
+    b = (await _open_lines(client, pm_auth, lop_project.id))[0]
+    assert b["due_date"] == b["first_due_date"] == "2026-12-05"
+    h = (await client.get(f"{BASE}/lines/{line['id']}/history", headers=pm_auth)).json()
+    assert any(e["type"] == "event" and e["field"] == "due_date" for e in h)
+    r = await client.patch(f"{BASE}/lines/{line['id']}", headers=pm_auth,
+                           json={"due_date": "2026-12-20", "reason": "supplier slipped"})
+    assert r.status_code == 200
+    rows[0]["due"] = "2026-12-08"
+    assert (await _patch_form(client, pm_auth, inst["id"], rows)).status_code == 200
+    assert (await _open_lines(client, pm_auth, lop_project.id))[0]["due_date"] == "2026-12-20"
