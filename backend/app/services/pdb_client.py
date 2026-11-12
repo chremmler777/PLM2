@@ -6,7 +6,8 @@
 PDB has no /api/v1 prefix. Configuration (settings, from the environment):
 PDB_API_URL (default http://pdb-backend:8000) and PDB_SERVICE_TOKEN (empty =
 PDB is not configured). The token is sent as a bearer header and never logged
-or put into an error text. Answers are cached for a minute, like twos_client.
+or put into an error text. Answers are cached for a minute per project and kind (also with a transport,
+so tests can exercise the cache; tests call clear_cache()).
 
 A project's PDB id is its project number (`projects.code`) when that is all
 digits; any other code has no PDB project and makes no request.
@@ -64,7 +65,7 @@ async def _get(kind: str, project_code: str,
     pid = pdb_project_id(project_code)
     explicit = transport if transport is not None else default_transport
     hit = _cache.get((kind, pid))
-    if explicit is None and hit and time.monotonic() - hit[0] < CACHE_TTL_S:
+    if hit and time.monotonic() - hit[0] < CACHE_TTL_S:
         return hit[1]
     path = f"/service/plm/projects/{pid}/{kind}"
     try:
@@ -92,8 +93,7 @@ async def _get(kind: str, project_code: str,
         data = resp.json()
     except ValueError:
         raise PdbUnavailable("PDB returned no JSON") from None
-    if explicit is None:
-        _cache[(kind, pid)] = (time.monotonic(), data)
+    _cache[(kind, pid)] = (time.monotonic(), data)
     return data
 
 

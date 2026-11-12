@@ -138,10 +138,68 @@ async def test_pin_needs_a_date(client, pm_auth, pdb_project, pdb):
     assert (await _pin(client, pm_auth, pdb_project.id, 7)).status_code == 400
 
 
-async def test_pin_without_any_responsible_is_refused(client, pm_auth, pdb_project, pdb):
+async def test_unmapped_department_without_responsible_falls_to_the_pm(
+        client, pm_auth, pdb_project, pdb):
     pdb.topics = [topic(7, department="Something Else")]       # not in the department map
     r = await _pin(client, pm_auth, pdb_project.id, 7, due_date="2026-12-01")
+    assert r.status_code == 201, r.text
+    assert r.json()["responsible_id"] == pdb_project.pm_id
+    assert r.json()["responsible_is_default"] is True and r.json()["department_id"] is None
+
+
+async def test_pin_without_any_responsible_and_no_pm_is_refused(
+        client, admin_auth, pdb_project, pdb, session_factory):
+    from app.models.workflow import ProjectResponsible
+    async with session_factory() as s:
+        row = (await s.execute(select(ProjectResponsible).where(
+            ProjectResponsible.project_id == pdb_project.id,
+            ProjectResponsible.department_id == pdb_project.pm_dept_id))).scalar_one()
+        await s.delete(row)
+        await s.commit()
+    pdb.topics = [topic(7, department="Something Else")]
+    r = await _pin(client, admin_auth, pdb_project.id, 7, due_date="2026-12-01")
     assert r.status_code == 400 and "responsible" in r.json()["detail"]
+
+
+async def test_status_failing_alone_keeps_the_topics(client, pm_auth, pdb_project, pdb):
+    pdb.topics = [topic(7)]
+    inner = pdb.handler
+    pdb.handler = lambda req: (httpx.Response(503) if req.url.path.endswith("/status")
+                               else inner(req))
+    import app.services.pdb_client as pc
+    pc.default_transport = httpx.MockTransport(pdb.handler)
+    b = await _get(client, pm_auth, pdb_project.id)
+    assert b["available"] is True and b["status"] is None and b["status_reason"]
+    assert [t["ref_key"] for t in b["topics"]] == ["7"]
+
+
+async def test_non_numeric_topic_id_does_not_break_the_sort(client, pm_auth, pdb_project, pdb):
+    pdb.topics = [topic("abc", age=3), topic("def", age=3)]
+    b = await _get(client, pm_auth, pdb_project.id)
+    assert {t["ref_key"] for t in b["topics"]} == {"abc", "def"}
+
+
+async def test_cache_holds_for_60_seconds_per_project(monkeypatch):
+    monkeypatch.setattr(get_settings(), "pdb_service_token", "tok")
+    pdb_client.clear_cache()
+    now = [1000.0]
+    monkeypatch.setattr(pdb_client.time, "monotonic", lambda: now[0])
+    calls = []
+
+    def handler(req):
+        calls.append(req.url.path)
+        return httpx.Response(200, json=[])
+    tr = httpx.MockTransport(handler)
+    await pdb_client.project_topics("1748", transport=tr)
+    now[0] += 30
+    await pdb_client.project_topics("1748", transport=tr)
+    assert len(calls) == 1
+    await pdb_client.project_topics("1749", transport=tr)          # other project: own entry
+    assert len(calls) == 2
+    now[0] += 31
+    await pdb_client.project_topics("1748", transport=tr)
+    assert len(calls) == 3
+    pdb_client.clear_cache()
 
 
 async def test_mapped_department_without_team_member_falls_to_the_pm(

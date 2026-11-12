@@ -388,7 +388,7 @@ class LopService:
                             next_check_date: Optional[date] = None) -> tuple[LopLine, bool]:
         """(line, created). The Project Manager gives an open PDB topic a
         responsible person (given, else the team member of its PDB department,
-        else the PM) and a due or next-check date. The line keeps the issue
+        else the project's PM as default) and a due or next-check date. The line keeps the issue
         text as a snapshot; PDB stays the source of the topic."""
         from app.services import lop_sources
         from app.services.lop_departments import PDB_DEPARTMENT_MAP, department_id_for
@@ -400,7 +400,12 @@ class LopService:
             responsible_id, is_default = await LopService.resolve_responsible(
                 session, project_id, dept_id)
         if responsible_id is None:
-            raise LopError("The topic needs a responsible person: name one")
+            pm = await ProjectTeamService.responsible_user_id(
+                session, project_id, PM_DEPARTMENT, backup=True)
+            if pm is None:
+                raise LopError("The topic needs a responsible person: name one "
+                               "(the project has no Project Manager to fall back on)")
+            responsible_id, is_default = pm, True
         now = datetime.utcnow()
         line = LopLine(
             project_id=project_id, kind="pdb_topic", ref_key=str(topic["id"]),

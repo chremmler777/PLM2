@@ -200,10 +200,14 @@ async def project_pdb(project_id: int, all: bool = Query(False),
         raise _http(e)
     can_manage = await LopService.can_manage(db, user, project_id)
     try:
-        status = await pdb_client.project_status(project.code)
         topics = await pdb_client.project_topics(project.code)
     except pdb_client.PdbUnavailable as e:
         return {"available": False, "reason": str(e), "status": None, "topics": [], "hidden": 0}
+    status, status_reason = None, None
+    try:
+        status = await pdb_client.project_status(project.code)
+    except pdb_client.PdbUnavailable as e:
+        status_reason = str(e)          # topics still work; only the status block is missing
     # PDB answered with the full open list: pins follow it
     pins = await LopService.follow_pdb(db, project_id, {str(t["id"]) for t in topics})
     pinned = {ln.ref_key: ln for ln in pins if ln.status != "closed"}
@@ -213,7 +217,12 @@ async def project_pdb(project_id: int, all: bool = Query(False),
 
     def age(t: dict) -> int:
         return t.get("age_days") or 0
-    ordered = sorted(topics, key=lambda t: (not t.get("escalated"), -age(t), -int(t["id"])))
+    def tie(t: dict) -> int:
+        try:
+            return -int(t["id"])
+        except (TypeError, ValueError):
+            return 0
+    ordered = sorted(topics, key=lambda t: (not t.get("escalated"), -age(t), tie(t)))
     rest = [t for t in ordered if not t.get("escalated") and str(t["id"]) not in pinned]
     left_out = {str(t["id"]) for t in rest[PDB_UNPINNED_SHOWN:]} if not all else set()
     out = []
@@ -223,7 +232,8 @@ async def project_pdb(project_id: int, all: bool = Query(False),
             continue
         out.append(LopService.line_dict(pinned[key], ctx) if key in pinned
                    else LopService.pdb_topic_dict(t, ctx))
-    return {"available": True, "reason": None, "status": status, "topics": out,
+    return {"available": True, "reason": None, "status": status,
+            "status_reason": status_reason, "topics": out,
             "hidden": len(left_out)}
 
 
