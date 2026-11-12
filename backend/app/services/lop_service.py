@@ -72,6 +72,29 @@ def _uname(u: Optional[User]) -> Optional[str]:
     return (u.full_name or u.username) if u is not None else None
 
 
+def pdb_topic_text(topic: dict) -> str:
+    """What a PDB topic says: the issue, and the to-do when there is one."""
+    issue = (topic.get("issue") or "").strip()
+    todo = (topic.get("todo") or "").strip()
+    return f"{issue}\nTo do: {todo}" if issue and todo else (issue or todo)
+
+
+def _pdb_fields(topic: Optional[dict]) -> dict:
+    """The live PDB columns of a topic line; empty values when PDB data is not at hand."""
+    t = topic or {}
+    return {
+        "tool_number": t.get("tool_number"),
+        "age_days": (t.get("age_days") or 0) if topic else None,
+        "escalation_level": t.get("escalation_level"),
+        "escalated": bool(t.get("escalated")),
+        "committed_until": t.get("committed_until"),
+        "last_log_at": t.get("last_log_at"),
+        "handover_impact": bool(t.get("handover_impact")),
+        "pdb_department": t.get("department"),
+        "pdb_live": topic is not None,
+    }
+
+
 @dataclass
 class LineContext:
     """Everything line_dict needs besides the line itself, loaded in bulk."""
@@ -84,6 +107,8 @@ class LineContext:
     reopened: set[int] = field(default_factory=set)
     # line id -> what its source says (SEP item, risk row); see lop_sources
     sources: dict[int, dict] = field(default_factory=dict)
+    # PDB topic id (str) -> the live topic row; only the /pdb route fills it
+    pdb: dict[str, dict] = field(default_factory=dict)
 
 
 class LopService:
@@ -290,6 +315,8 @@ class LopService:
             new_status = body["status"]
             if new_status not in LOP_STATUSES:
                 raise LopError("Unknown status")
+            if new_status == "closed" and line.kind == "pdb_topic":
+                raise LopError("A pinned PDB topic cannot be closed here: it is closed in PDB and closes here by itself")
             if new_status != line.status:
                 LopService._apply_status(line, user, new_status)
                 await lop_sources.push_status(session, line, user, old_status, new_status)
@@ -346,6 +373,74 @@ class LopService:
         LopService._touch(line, user)
         await session.commit()
         return c
+
+    # ------------------------------------------------------------ PDB topics
+    @staticmethod
+    async def pinned_topic_lines(session: AsyncSession, project_id: int) -> list[LopLine]:
+        return list((await session.execute(select(LopLine).where(
+            LopLine.project_id == project_id, LopLine.kind == "pdb_topic")
+            .order_by(LopLine.id))).scalars().all())
+
+    @staticmethod
+    async def pin_pdb_topic(session: AsyncSession, user: User, project_id: int, topic: dict, *,
+                            responsible_id: Optional[int] = None,
+                            due_date: Optional[date] = None,
+                            next_check_date: Optional[date] = None) -> tuple[LopLine, bool]:
+        """(line, created). The Project Manager gives an open PDB topic a
+        responsible person (given, else the team member of its PDB department,
+        else the PM) and a due or next-check date. The line keeps the issue
+        text as a snapshot; PDB stays the source of the topic."""
+        from app.services import lop_sources
+        from app.services.lop_departments import PDB_DEPARTMENT_MAP, department_id_for
+        dept_id = await department_id_for(session, PDB_DEPARTMENT_MAP, topic.get("department"))
+        if responsible_id is not None:
+            await LopService._check_responsible(session, project_id, responsible_id)
+            is_default = False
+        else:
+            responsible_id, is_default = await LopService.resolve_responsible(
+                session, project_id, dept_id)
+        if responsible_id is None:
+            raise LopError("The topic needs a responsible person: name one")
+        now = datetime.utcnow()
+        line = LopLine(
+            project_id=project_id, kind="pdb_topic", ref_key=str(topic["id"]),
+            title=(str(topic.get("issue") or topic.get("todo") or "").strip() or "PDB topic")[:500],
+            department_id=dept_id, responsible_id=responsible_id,
+            responsible_is_default=is_default, due_date=due_date, first_due_date=due_date,
+            next_check_date=next_check_date, status="open",
+            created_by=user.id, created_at=now, last_update_at=now, last_update_by=user.id)
+        line, created = await lop_sources._insert_line(session, line)
+        if created:
+            LopService._event(session, line, user, "created", None, f"PDB topic {topic['id']}")
+        await session.commit()
+        return line, created
+
+    @staticmethod
+    async def follow_pdb(session: AsyncSession, project_id: int, open_ids: set[str]) -> list[LopLine]:
+        """Pins follow PDB's full open list (only call it after PDB answered):
+        a pin whose topic left the list closes ("closed in PDB"), one whose
+        topic is back reopens. Returns all pinned lines."""
+        lines = await LopService.pinned_topic_lines(session, project_id)
+        now = datetime.utcnow()
+        changed = False
+        for ln in lines:
+            gone = ln.ref_key not in open_ids
+            if gone and ln.status != "closed":
+                session.add(LopEvent(line_id=ln.id, user_id=None, field="status",
+                                     old_value=ln.status, new_value="closed in PDB"))
+                ln.status, ln.closed_at, ln.closed_by = "closed", now, None
+            elif not gone and ln.status == "closed":
+                session.add(LopEvent(line_id=ln.id, user_id=None, field="status",
+                                     old_value="closed", new_value="open",
+                                     reason="topic is open in PDB again"))
+                ln.status, ln.closed_at, ln.closed_by = "open", None, None
+            else:
+                continue
+            ln.last_update_at, ln.last_update_by = now, None
+            changed = True
+        if changed:
+            await session.commit()
+        return lines
 
     # ------------------------------------------------------------------ read
     @staticmethod
@@ -432,10 +527,14 @@ class LopService:
     @staticmethod
     def _text_and_label(line: LopLine, ctx: Optional[LineContext] = None) -> tuple[Optional[str], str]:
         """What the line says and where it comes from. SEP items and risks
-        read their source (lop_sources); Task 6 adds PDB topics."""
+        read their source (lop_sources). A pinned PDB topic says what PDB says
+        now, or the text kept at pin time when PDB data is not at hand."""
         src = ctx.sources.get(line.id) if ctx is not None else None
         if src is not None:
             return src["text"], src["label"]
+        if line.kind == "pdb_topic":
+            live = ctx.pdb.get(line.ref_key) if ctx is not None else None
+            return (pdb_topic_text(live) if live else line.title), "PDB topic"
         return line.title, "PM"
 
     @staticmethod
@@ -454,7 +553,7 @@ class LopService:
             responsible_active=bool(resp and resp.is_active), due_date=line.due_date,
             first_due_date=line.first_due_date, next_check_date=line.next_check_date,
             last_update_at=to_local(line.last_update_at), closed_at=to_local(line.closed_at),
-            pinned=False,
+            pinned=line.kind == "pdb_topic",
             reopened=line.id in ctx.reopened)
 
     @staticmethod
@@ -466,7 +565,7 @@ class LopService:
         status = LopService._display_status(line, ctx)
         # last_meeting is None until Task 7 adds meetings
         created_on = local_date(line.created_at or datetime.utcnow())
-        return {
+        d = {
             "id": line.id, "project_id": line.project_id, "kind": line.kind,
             "ref_key": line.ref_key, "title": line.title,
             "department_id": line.department_id, "responsible_id": line.responsible_id,
@@ -491,4 +590,34 @@ class LopService:
             "can_manage": ctx.can_manage,
             "can_report": (line.responsible_id == ctx.user_id and status != "closed"
                            and not ctx.can_manage),
+        }
+        if line.kind == "pdb_topic":
+            d.update(pinned=True, **_pdb_fields(ctx.pdb.get(line.ref_key)))
+        return d
+
+    @staticmethod
+    def pdb_topic_dict(topic: dict, ctx: LineContext) -> dict:
+        """An open PDB topic nobody pinned: a reference with no name and no
+        date. Never late, never stale, group "pdb"."""
+        s = rules.LineState(
+            kind="pdb_topic", status="open", responsible_id=None, responsible_active=False,
+            due_date=None, first_due_date=None, next_check_date=None,
+            last_update_at=None, closed_at=None, pinned=False)
+        stale_days = get_settings().lop_stale_days
+        return {
+            "id": None, "project_id": None, "kind": "pdb_topic", "ref_key": str(topic["id"]),
+            "title": None, "department_id": None, "responsible_id": None,
+            "responsible_is_default": False, "due_date": None, "first_due_date": None,
+            "due_is_default": False, "next_check_date": None, "status": "open",
+            "closed_at": None, "closed_by": None, "last_update_at": None, "last_update_by": None,
+            "created_at": None, "created_by": None, "source_label": "PDB topic",
+            "text": pdb_topic_text(topic), "source_context": None, "source_closed": False,
+            "department_name": topic.get("department"), "responsible_name": None,
+            "days_late": 0, "late": rules.is_late(s, ctx.today),
+            "stale": rules.is_stale(s, ctx.today, stale_days),
+            "under_control": rules.under_control(s),
+            "group": rules.group_of(s, ctx.today, stale_days, None, ctx.today),
+            "moved": False, "reopened": False, "last_comment": None,
+            "can_manage": ctx.can_manage, "can_report": False, "pinned": False,
+            **_pdb_fields(topic),
         }

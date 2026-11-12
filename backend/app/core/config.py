@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     materialdb_base_url: str = ""
     materialdb_service_token: str = ""
 
+    # PDB service API (read only, LOP: live project status and open topics).
+    # PDB has no /api/v1 prefix: http://pdb-backend:8000 inside the docker
+    # network (through nginx: https://<hub>/pdb/api). The token is PDB's
+    # service token. Empty token = PDB is not configured.
+    pdb_api_url: str = "http://pdb-backend:8000"
+    pdb_service_token: str = ""
+
     # Admin setup
     admin_registration_code: str = "CHANGE-THIS-ADMIN-CODE-IN-PRODUCTION"
 
