@@ -235,6 +235,82 @@ async def test_sep_item_outside_lop_keeps_todays_behaviour(
     assert r.status_code == 200 and r.json()["status"] == "done" and "lop_status" not in r.json()
 
 
+async def _age_line(session_factory, line_id):
+    from datetime import datetime
+    async with session_factory() as s:
+        ln = await s.get(LopLine, line_id)
+        ln.last_update_at, ln.last_update_by = datetime(2026, 1, 1), None
+        await s.commit()
+
+
+async def _line_row(session_factory, line_id):
+    async with session_factory() as s:
+        return await s.get(LopLine, line_id)
+
+
+async def test_remark_and_responsible_in_sep_view_refresh_the_line(
+        client, pm_auth, quality_auth, lop_project, lop_sep, session_factory):
+    from datetime import datetime
+    await lop_sep()
+    line, item, _ = await _one_line(client, pm_auth, lop_project, session_factory)
+    m = (await client.post(f"{BASE}/projects/{lop_project.id}/meetings", headers=pm_auth)).json()
+    await _age_line(session_factory, line)
+    r = await client.patch(f"/api/v1/sep/items/{item}", headers=quality_auth, json={"remark": "drawing sent"})
+    assert r.status_code == 200
+    ln = await _line_row(session_factory, line)
+    assert ln.last_update_at > datetime(2026, 1, 1) and ln.last_update_by == lop_project.quality_user_id
+    marks = {x["line_id"]: x["mark"] for x in
+             (await client.get(f"{BASE}/meetings/{m['id']}", headers=pm_auth)).json()["marks"]}
+    assert marks[line] == "updated"
+    await _age_line(session_factory, line)
+    r = await client.patch(f"/api/v1/sep/items/{item}", headers=pm_auth,
+                           json={"responsible_id": lop_project.sales_user_id})
+    assert r.status_code == 200
+    assert (await _line_row(session_factory, line)).last_update_by == lop_project.pm_id
+    await _age_line(session_factory, line)       # the same remark again is no work
+    await client.patch(f"/api/v1/sep/items/{item}", headers=quality_auth, json={"remark": "drawing sent"})
+    assert (await _line_row(session_factory, line)).last_update_at == datetime(2026, 1, 1)
+
+
+async def test_file_upload_and_delete_in_sep_view_refresh_the_line(
+        client, pm_auth, quality_auth, lop_project, lop_sep, session_factory, monkeypatch, tmp_path):
+    from datetime import datetime
+    monkeypatch.chdir(tmp_path)
+    await lop_sep()
+    line, item, _ = await _one_line(client, pm_auth, lop_project, session_factory)
+    await _age_line(session_factory, line)
+    r = await client.post(f"/api/v1/sep/items/{item}/files", headers=quality_auth,
+                          files=[("files", ("plan.pdf", b"%PDF-1.4 x", "application/pdf"))])
+    assert r.status_code == 201, r.text
+    ln = await _line_row(session_factory, line)
+    assert ln.last_update_at > datetime(2026, 1, 1) and ln.last_update_by == lop_project.quality_user_id
+    await _age_line(session_factory, line)
+    d = await client.delete(f"/api/v1/sep/items/{item}/files/{r.json()[0]['id']}", headers=pm_auth)
+    assert d.status_code == 204
+    assert (await _line_row(session_factory, line)).last_update_by == lop_project.pm_id
+
+
+async def test_sep_view_work_on_an_item_without_a_line_writes_no_lop_data(
+        client, pm_auth, quality_auth, lop_project, lop_sep, session_factory, monkeypatch, tmp_path):
+    from app.models.lop import LopEvent, LopMeetingMark
+    monkeypatch.chdir(tmp_path)
+    await lop_sep()
+    item = await _item(session_factory, await _gate(session_factory, lop_project.id, "K/RG2"))
+    await client.post(f"{BASE}/projects/{lop_project.id}/meetings", headers=pm_auth)
+    r = await client.patch(f"/api/v1/sep/items/{item}", headers=quality_auth,
+                           json={"remark": "x", "responsible_id": lop_project.sales_user_id})
+    assert r.status_code == 200 and r.json()["remark"] == "x" and "lop_status" not in r.json()
+    up = await client.post(f"/api/v1/sep/items/{item}/files", headers=quality_auth,
+                           files=[("files", ("a.txt", b"a", "text/plain"))])
+    assert up.status_code == 201
+    assert (await client.delete(f"/api/v1/sep/items/{item}/files/{up.json()[0]['id']}",
+                                headers=pm_auth)).status_code == 204
+    async with session_factory() as s:
+        assert (await s.execute(select(LopLine))).first() is None
+        assert (await s.execute(select(LopEvent))).first() is None
+        assert (await s.execute(select(LopMeetingMark))).first() is None
+
+
 async def test_item_done_in_sep_by_pm_closes_the_line(
         client, pm_auth, lop_project, lop_sep, session_factory):
     await lop_sep()

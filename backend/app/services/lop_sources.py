@@ -186,6 +186,17 @@ async def item_status_changed(session: AsyncSession, item: SepWorkItem, user_id:
         await LopService.notify_reopened(session, user_id, line)
 
 
+async def item_worked_on(session: AsyncSession, item: SepWorkItem, user_id: int) -> None:
+    """Remark, responsible or file work on the item in the SEP view counts as
+    an update of its open line (and marks it in an open meeting). Nothing
+    happens for an item without a line. The caller commits."""
+    line = await _line_for_item(session, item)
+    if line is None or line.status == "closed":
+        return
+    line.last_update_at, line.last_update_by = datetime.utcnow(), user_id
+    await LopService.mark_in_meeting(session, line)
+
+
 async def item_line_status(session: AsyncSession, item: SepWorkItem) -> Optional[str]:
     line = await _line_for_item(session, item)
     return line.status if line is not None else None

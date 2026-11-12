@@ -415,20 +415,26 @@ async def update_item(
             apply_item_status(db, item, body.status, current_user.id)
             await lop_sources.item_status_changed(db, item, current_user.id)
 
+    worked = False          # remark or responsible changed: the item's LOP line was updated
     if body.remark is not None and body.remark != item.remark:
         db.add(_audit(item, current_user.id, "remark", item.remark, body.remark))
         item.remark = body.remark
+        worked = True
 
     if body.clear_responsible and item.responsible_id is not None:
         db.add(_audit(item, current_user.id, "responsible_id", item.responsible_id, None))
         item.responsible_id = None
+        worked = True
     elif body.responsible_id is not None and body.responsible_id != item.responsible_id:
         user = (await db.execute(select(User).where(User.id == body.responsible_id))).scalar_one_or_none()
         if not user:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Responsible user not found")
         db.add(_audit(item, current_user.id, "responsible_id", item.responsible_id, body.responsible_id))
         item.responsible_id = body.responsible_id
+        worked = True
 
+    if worked:
+        await lop_sources.item_worked_on(db, item, current_user.id)
     await db.commit()
     await db.refresh(item)
     names = await _user_names(db, {item.responsible_id})

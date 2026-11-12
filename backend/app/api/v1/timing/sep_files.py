@@ -24,6 +24,7 @@ from app.models import get_db, User
 from app.models.entities import Plant, Project
 from app.models.sep import SepWorkItem
 from app.schemas.sep import SepItemFileOut, SepProjectFileGateOut
+from app.services import lop_sources
 from app.services.sep_file_service import (
     EmptyFilename, FileTooLarge, SepFileService, TooManyFiles,
 )
@@ -90,6 +91,7 @@ async def upload_item_files(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     for row in rows:
         db.add(_audit(item, current_user.id, "file", None, row.filename))
+    await lop_sources.item_worked_on(db, item, current_user.id)
     await db.commit()
     for row in rows:
         await db.refresh(row)
@@ -139,6 +141,7 @@ async def delete_item_file(
     filename = f.filename
     await SepFileService.soft_delete(db, file=f, user_id=current_user.id)
     db.add(_audit(item, current_user.id, "file", filename, None))
+    await lop_sources.item_worked_on(db, item, current_user.id)
     await db.commit()
 
 
