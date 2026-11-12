@@ -311,6 +311,19 @@ async def test_row_finished_in_the_form_closes_the_line(client, pm_auth, lop_pro
     assert await _open_lines(client, pm_auth, lop_project.id) == []
 
 
+async def test_row_open_again_reopens_the_line_but_not_as_reopened(client, pm_auth, lop_project):
+    inst = await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    await _open_lines(client, pm_auth, lop_project.id)
+    for st in ("finished", "started"):
+        data = (await client.get(f"/api/v1/forms/instances/{inst['id']}", headers=pm_auth)).json()["data"]
+        data["risks"][0]["status"] = st
+        assert (await client.patch(f"/api/v1/forms/instances/{inst['id']}", headers=pm_auth,
+                                   json={"data": data})).status_code == 200
+        await _open_lines(client, pm_auth, lop_project.id)
+    lines = await _open_lines(client, pm_auth, lop_project.id)
+    assert len(lines) == 1 and lines[0]["reopened"] is False
+
+
 async def test_deleted_risk_row_drops_out_of_open_lines(client, pm_auth, lop_project, session_factory):
     inst = await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
     assert len(await _open_lines(client, pm_auth, lop_project.id)) == 1

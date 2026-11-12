@@ -26,7 +26,8 @@ from app.models.lop import LopEvent, LopLine
 from app.models.sep import SepGate, SepWorkItem
 from app.services.lop_departments import SEP_DEPARTMENT_MAP, department_id_for
 from app.services.lop_service import (
-    PM_DEPARTMENT, LopConflict, LopError, LopForbidden, LopNotFound, LopService,
+    PM_DEPARTMENT, SYSTEM_REOPEN_REASON, LopConflict, LopError, LopForbidden, LopNotFound,
+    LopService,
 )
 from app.services.project_team_service import ProjectTeamService
 from app.services.sep_status import apply_item_status
@@ -392,7 +393,7 @@ async def sync_project_lines(session: AsyncSession, project_id: int, reader_id: 
             _close_line(session, ln, None, src["closed_at"], "source closed")
             changed = True
         elif not src["closed"] and ln.status == "closed":
-            _reopen_line(session, ln, None, "source reopened")
+            _reopen_line(session, ln, None, SYSTEM_REOPEN_REASON)
             changed = True
     if changed:
         await session.commit()

@@ -12,7 +12,7 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -26,13 +26,15 @@ PM_DEPARTMENT = "Project Manager"
 _UNSET = object()
 FIRST_DATE_REASON = "first date set by the PM"
 CONFIRMED_REASON = "confirmed by the PM"
+# a reopen made by the sync or follow_pdb, not by a person: not "reopened"
+SYSTEM_REOPEN_REASON = "open again at the source"
 
 
 def reserved_reasons() -> tuple[str, ...]:
     """Reasons the system writes and the KPIs or the sync treat specially; a
     person may not type them (compared trimmed and case-insensitive)."""
     from app.services.lop_sources import RISK_ROW_REASON
-    return (FIRST_DATE_REASON, RISK_ROW_REASON)
+    return (FIRST_DATE_REASON, RISK_ROW_REASON, SYSTEM_REOPEN_REASON)
 
 
 class LopError(Exception):
@@ -543,7 +545,7 @@ class LopService:
             elif not gone and ln.status == "closed":
                 session.add(LopEvent(line_id=ln.id, user_id=None, field="status",
                                      old_value="closed", new_value="open",
-                                     reason="topic is open in PDB again"))
+                                     reason=SYSTEM_REOPEN_REASON))
                 ln.status, ln.closed_at, ln.closed_by = "open", None, None
             else:
                 continue
@@ -631,7 +633,9 @@ class LopService:
         ctx.reopened = set((await session.execute(
             select(LopEvent.line_id).where(
                 LopEvent.line_id.in_(ids), LopEvent.field == "status",
-                LopEvent.old_value == "closed", LopEvent.new_value != "closed"))).scalars().all())
+                LopEvent.old_value == "closed", LopEvent.new_value != "closed",
+                or_(LopEvent.reason.is_(None),
+                    LopEvent.reason != SYSTEM_REOPEN_REASON)))).scalars().all())
         from app.models.lop import LopMeeting, LopMeetingMark
         pids = {ln.project_id for ln in lines}
         # only the newest meeting and the newest closed meeting per project

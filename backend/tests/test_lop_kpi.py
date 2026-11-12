@@ -225,6 +225,25 @@ async def test_reopened_line_is_never_on_time(client, pm_auth, lop_project):
     assert row["on_time_pct_4w"] == 0 and row["closed_week"] == 1
 
 
+async def test_reopen_by_the_system_does_not_count_as_reopened(
+        client, pm_auth, lop_project, session_factory):
+    """A transient empty PDB answer closes every pin and the next one reopens
+    it: those lines are not "never on time"."""
+    from app.services.lop_service import LopService
+    pid = lop_project.id
+    lid = await _db_line(session_factory, pid, kind="pdb_topic", ref_key="77", title="Pin",
+                         first_due_date=_today() + timedelta(days=5),
+                         due_date=_today() + timedelta(days=5))
+    for open_ids in (set(), {"77"}):                       # gone, back
+        async with session_factory() as s:
+            await LopService.follow_pdb(s, pid, open_ids)
+    lines = (await client.get(f"{BASE}/projects/{pid}", headers=pm_auth)).json()["lines"]
+    assert next(x for x in lines if x["id"] == lid)["reopened"] is False
+    async with session_factory() as s:
+        await LopService.follow_pdb(s, pid, set())        # really closed in PDB, before its date
+    assert _row(await _overview(client, pm_auth), lop_project)["on_time_pct_4w"] == 100
+
+
 # ------------------------------------------------------------- dates moved
 async def test_dates_moved_counts_events_in_4_weeks(client, pm_auth, lop_project, session_factory):
     a = await _task(client, pm_auth, lop_project)

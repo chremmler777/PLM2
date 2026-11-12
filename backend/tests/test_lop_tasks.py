@@ -146,7 +146,8 @@ async def test_moving_a_due_date_keeps_the_first_and_needs_a_reason(client, pm_a
 
 
 @pytest.mark.parametrize("typed", ["first date set by the PM", "  First Date Set By The PM ",
-                                   "SEP risk row changed", "sep RISK row changed  "])
+                                   "SEP risk row changed", "sep RISK row changed  ",
+                                   "Open again at the source"])
 async def test_reserved_reasons_cannot_be_typed(client, pm_auth, line, typed, session_factory):
     url = f"{BASE}/lines/{line}"
     r = await client.patch(url, headers=pm_auth, json={"due_date": "2026-12-01", "reason": typed})
