@@ -8,26 +8,28 @@
  * what is open. PDB being down, a missing status or a project without tools
  * is said in words, never shown as an empty table.
  */
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, Flag } from 'lucide-react'
 import { lopApi, lopKeys } from '../../api/lop'
 import Dialog from '../common/Dialog'
-import { escalationLabel, shortDay } from '../../lib/lop'
+import { PDB_SCHEDULE_URL, escalationLabel, pdbToolUrl, pdbTopicUrl, shortDay } from '../../lib/lop'
 import type { LopLine, PdbResponse, PdbTool } from '../../types/lop'
 
 const OPEN_KEY = 'plm2.lop.pdbBoxOpen'
-function readOpen(): boolean {
-  try { return window.localStorage.getItem(OPEN_KEY) === '1' } catch { return false }
+const HIDE_AA_KEY = 'plm2.lop.pdbHideAA'
+function readFlag(key: string): boolean {
+  try { return window.localStorage.getItem(key) === '1' } catch { return false }
 }
-function writeOpen(v: boolean) {
-  try { window.localStorage.setItem(OPEN_KEY, v ? '1' : '0') } catch { /* private window: not kept */ }
+function writeFlag(key: string, v: boolean) {
+  try { window.localStorage.setItem(key, v ? '1' : '0') } catch { /* private window: not kept */ }
 }
+const linkCls = 'underline decoration-dotted underline-offset-2'
 
 /** Process and tool status both A: the tool needs no further sampling. */
 const isAA = (t: PdbTool) => (t.ps ?? '').toUpperCase() === 'A' && (t.ts ?? '').toUpperCase() === 'A'
 /** A tool that is not A/A and has no sampling on the calendar. */
-export const needsSampling = (t: PdbTool) => !isAA(t) && !t.next_sampling
+const needsSampling = (t: PdbTool) => !isAA(t) && !t.next_sampling
 
 const STEPS: { key: 'sampling' | 'qualifying' | 'technical_handover' | 'ready' | 'series'; label: string }[] = [
   { key: 'sampling', label: 'Sampling' },
@@ -92,13 +94,18 @@ function NextSampling({ tool }: { tool: PdbTool }) {
   if (isAA(tool)) return <span className="text-slate-500">-</span>
   return (
     <span data-testid="pdb-next-sampling" className="font-medium text-red-300">
+      <Flag aria-hidden="true" size={12} className="mr-1 inline-block fill-red-400 align-[-1px]" />
       none planned
       {tool.sampling_requested_week && (
         <span className="font-normal">{` · requested for week of ${shortDay(tool.sampling_requested_week)}, no slot yet`}</span>
       )}
+      <a data-testid="pdb-book" href={PDB_SCHEDULE_URL} target="_blank" rel="noreferrer"
+        className={`ml-2 font-normal text-violet-300 hover:text-violet-200 ${linkCls}`}>Book in PDB ↗</a>
     </span>
   )
 }
+
+type TopicSort = 'urgency' | 'age' | 'department' | 'tool'
 
 /** What is open in PDB, for a quick look: escalated first, then oldest. For
  *  one tool or for the whole project. Reads every open topic when the box
@@ -113,11 +120,46 @@ function TopicsDialog({ projectId, pdb, tool, onClose }: {
     enabled: needAll,
   })
   const source = needAll ? all.data?.topics : pdb.topics
-  const rows = (source ?? []).filter((t) => tool == null || t.tool_number === tool)
+  const [dept, setDept] = useState('')
+  const [sort, setSort] = useState<TopicSort>('urgency')
+  const ofTool = useMemo(() => (source ?? []).filter((t) => tool == null || t.tool_number === tool), [source, tool])
+  const deptOf = (t: LopLine) => t.pdb_department ?? t.department_name ?? ''
+  const departments = [...new Set(ofTool.map(deptOf).filter(Boolean))].sort()
+  const rows = useMemo(() => {
+    const kept = ofTool.filter((t) => !dept || deptOf(t) === dept)
+    if (sort === 'urgency') return kept                      // as PDB sends: escalated first, then oldest
+    const by: Record<Exclude<TopicSort, 'urgency'>, (a: LopLine, b: LopLine) => number> = {
+      age: (a, b) => (b.age_days ?? -1) - (a.age_days ?? -1),
+      department: (a, b) => deptOf(a).localeCompare(deptOf(b)) || (b.age_days ?? -1) - (a.age_days ?? -1),
+      tool: (a, b) => (a.tool_number ?? '').localeCompare(b.tool_number ?? '') || (b.age_days ?? -1) - (a.age_days ?? -1),
+    }
+    return [...kept].sort(by[sort])
+  }, [ofTool, dept, sort])
   return (
     <Dialog open onClose={onClose} size="xl" data-testid="pdb-topics-dialog"
       title={tool ? `Open PDB topics · tool ${tool}` : 'Open PDB topics'}
-      description="Live from PDB, escalated first, then oldest. Topics are worked on in PDB.">
+      description="Live from PDB. Topics are worked on in PDB: the link on each row opens it there.">
+      {ofTool.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-slate-300">
+          <label className="flex items-center gap-1.5">Department
+            <select data-testid="pdb-topics-dept" value={dept} onChange={(e) => setDept(e.target.value)}
+              className="rounded border border-slate-600 bg-slate-900 px-1.5 py-1 text-xs text-slate-100">
+              <option value="">all</option>
+              {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5">Sort by
+            <select data-testid="pdb-topics-sort" value={sort} onChange={(e) => setSort(e.target.value as TopicSort)}
+              className="rounded border border-slate-600 bg-slate-900 px-1.5 py-1 text-xs text-slate-100">
+              <option value="urgency">escalated first, then oldest</option>
+              <option value="age">oldest first</option>
+              <option value="department">department</option>
+              {tool == null && <option value="tool">tool</option>}
+            </select>
+          </label>
+          <span className="text-slate-400">{rows.length} of {ofTool.length}</span>
+        </div>
+      )}
       {needAll && all.isLoading ? (
         <p className="py-2 text-sm text-slate-400">Reading PDB…</p>
       ) : needAll && all.isError ? (
@@ -132,7 +174,8 @@ function TopicsDialog({ projectId, pdb, tool, onClose }: {
               <th className="py-1.5 pr-3 font-medium">Topic</th>
               <th className="py-1.5 pr-3 font-medium">Department</th>
               <th className="py-1.5 pr-3 font-medium text-right">Open</th>
-              <th className="py-1.5 font-medium">Name and date</th>
+              <th className="py-1.5 pr-3 font-medium">Name and date</th>
+              <th className="py-1.5 font-medium"><span className="sr-only">Open in PDB</span></th>
             </tr>
           </thead>
           <tbody>
@@ -156,6 +199,12 @@ function TopicsDialog({ projectId, pdb, tool, onClose }: {
                     {t.pinned
                       ? <span className="text-slate-200">{t.responsible_name ?? 'no name'}{t.due_date ? ` · ${shortDay(t.due_date)}` : ''}</span>
                       : <span className="text-slate-500">not pinned</span>}
+                  </td>
+                  <td className="py-1.5 pl-3 text-right text-xs whitespace-nowrap">
+                    {pdbTopicUrl(t) && (
+                      <a data-testid="pdb-jump" href={pdbTopicUrl(t) as string} target="_blank" rel="noreferrer"
+                        className={`text-violet-300 hover:text-violet-200 ${linkCls}`}>Open in PDB ↗</a>
+                    )}
                   </td>
                 </tr>
               )
@@ -188,10 +237,12 @@ export default function PdbStatusBox({ pdb, loading = false, error = null, proje
   /** Lets the topics list read every open topic when the box holds only the first ones. */
   projectId?: number
 }) {
-  const [open, setOpen] = useState(readOpen)
+  const [open, setOpen] = useState(() => readFlag(OPEN_KEY))
+  const [hideAA, setHideAA] = useState(() => readFlag(HIDE_AA_KEY))
   /** undefined: closed; null: all tools; else one tool number. */
   const [topicsOf, setTopicsOf] = useState<string | null | undefined>(undefined)
-  const toggle = () => setOpen((v) => { writeOpen(!v); return !v })
+  const toggle = () => setOpen((v) => { writeFlag(OPEN_KEY, !v); return !v })
+  const toggleAA = () => setHideAA((v) => { writeFlag(HIDE_AA_KEY, !v); return !v })
   let canExpand = false
 
   const body = () => {
@@ -225,6 +276,8 @@ export default function PdbStatusBox({ pdb, loading = false, error = null, proje
     canExpand = true
     const notAA = status.tools.filter((t) => !isAA(t)).length
     const unplanned = status.tools.filter(needsSampling).length
+    const shown = hideAA ? status.tools.filter((t) => !isAA(t)) : status.tools
+    const hiddenAA = status.tools.length - shown.length
     return (
       <>
         <div className="flex flex-wrap gap-1.5">
@@ -238,7 +291,16 @@ export default function PdbStatusBox({ pdb, loading = false, error = null, proje
             onClick={open ? undefined : toggle} title="Show the tools" />
         </div>
         {open && (
-        <table className="mt-2 w-full text-xs">
+        <>
+        <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-300">
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" data-testid="pdb-hide-aa" checked={hideAA} onChange={toggleAA} />
+            Hide tools that are A/A
+          </label>
+          {hiddenAA > 0 && <span className="text-slate-400">{hiddenAA} hidden</span>}
+        </div>
+        {shown.length === 0 ? <Note>Every tool is A/A.</Note> : (
+        <table className="mt-1 w-full text-xs">
           <thead>
             <tr className="text-left text-[11px] text-slate-400">
               <th className="py-1 pr-3 font-medium">Tool</th>
@@ -251,9 +313,18 @@ export default function PdbStatusBox({ pdb, loading = false, error = null, proje
             </tr>
           </thead>
           <tbody>
-            {toolRows(status.tools, pdb.topics).map(({ tool, escalated: esc, oldest }) => (
+            {toolRows(shown, pdb.topics).map(({ tool, escalated: esc, oldest }) => (
               <tr key={tool.tool_number} data-testid="pdb-tool-row" className="border-t border-slate-700/60 text-slate-200">
-                <td className="py-1 pr-3 font-medium tabular-nums">{tool.tool_number}</td>
+                <td className="py-1 pr-3 font-medium tabular-nums whitespace-nowrap">
+                  {needsSampling(tool) && (
+                    <span title="Not A/A and no sampling planned" data-testid="pdb-tool-flag">
+                      <Flag aria-hidden="true" size={12} className="mr-1 inline-block fill-red-400 text-red-400 align-[-1px]" />
+                      <span className="sr-only">No sampling planned. </span>
+                    </span>
+                  )}
+                  <a href={pdbToolUrl(tool.tool_number)} target="_blank" rel="noreferrer" title="Open the tool in PDB"
+                    className={`hover:text-violet-200 ${linkCls}`}>{tool.tool_number}</a>
+                </td>
                 <td className="py-1 pr-3">{tool.tool_name ?? ''}</td>
                 <td className="py-1 pr-3"><Letter value={tool.ps} label="Process status" /></td>
                 <td className="py-1 pr-3"><Letter value={tool.ts} label="Tool status" /></td>
@@ -273,6 +344,8 @@ export default function PdbStatusBox({ pdb, loading = false, error = null, proje
             ))}
           </tbody>
         </table>
+        )}
+        </>
         )}
       </>
     )

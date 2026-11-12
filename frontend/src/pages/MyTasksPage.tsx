@@ -20,7 +20,7 @@ import { STATUS_LABELS } from '../lib/changeStatus';
 import { humanize, taskKindLabel } from '../lib/humanLabels';
 import { dueNote, foldChangeTasks, lateHint, foldWorkflowTasks, isBackup, lopByUrgency, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
 import { lopApi, lopOverviewKeys } from '../api/lop';
-import { dueLabel, escalationReason, shortDay, STATUS_LABEL } from '../lib/lop';
+import { dueLabel, escalationReason, pdbTopicUrl, shortDay, STATUS_LABEL } from '../lib/lop';
 import { lopErrorMessage } from '../components/lop/useLopWrite';
 import BackupChip, { CoveringChip } from '../components/common/BackupChip';
 import client from '../api/client';
@@ -344,6 +344,13 @@ function LopLinesSection() {
                   </td>
                   <td className="px-4 py-3 align-top text-slate-100">
                     <span data-testid="lop-task-text">{l.text ?? l.title}</span>
+                    {pdbTopicUrl(l) && (
+                      <a data-testid="lop-task-pdb" href={pdbTopicUrl(l) as string} target="_blank" rel="noreferrer"
+                        title="Open this topic in PDB to work on it"
+                        className="ml-2 text-xs text-violet-300 underline decoration-dotted underline-offset-2 hover:text-violet-200">
+                        Open in PDB ↗
+                      </a>
+                    )}
                     {isEsc(l) && (
                       <span data-testid="lop-task-escalated"
                         className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-bold text-white">Escalated</span>

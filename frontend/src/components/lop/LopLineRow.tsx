@@ -5,7 +5,7 @@
  */
 import { ChevronDown, ChevronRight, Pin } from 'lucide-react'
 import { lopApi } from '../../api/lop'
-import { MARK_LABEL, STATUS_LABEL, dueLabel, escalationLabel, shortDay, sourceLabel, sourceTone } from '../../lib/lop'
+import { MARK_LABEL, STATUS_LABEL, dueLabel, escalationLabel, pdbTopicUrl, shortDay, sourceLabel, sourceTone } from '../../lib/lop'
 import type { LinePatch, LopLine, LopMeetingRef, MeetingMark } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
 import { DefaultMarker, InlineError } from './lopUi'
@@ -131,6 +131,13 @@ export default function LopLineRow({ line, ctx, expanded, onToggle }: {
       <td className="max-w-[28rem] py-1.5 pr-3"><TaskCell line={line} /></td>
       <td className="py-1.5 pr-3">
         <span className={`inline-block whitespace-nowrap rounded border px-1.5 text-[11px] ${sourceTone(line.kind)}`}>{sourceLabel(line)}</span>
+        {pdbTopicUrl(line) && (
+          <a data-testid="pdb-jump" href={pdbTopicUrl(line) as string} target="_blank" rel="noreferrer"
+            title="Open this topic in PDB to work on it" onClick={(e) => e.stopPropagation()}
+            className="ml-1.5 whitespace-nowrap text-[11px] text-violet-300 underline decoration-dotted underline-offset-2 hover:text-violet-200">
+            Open in PDB ↗
+          </a>
+        )}
       </td>
       <td className="py-1.5 pr-3 text-slate-300">{line.department_name ?? line.pdb_department ?? ''}</td>
       <td className="py-1.5 pr-3 text-slate-200"><ResponsibleCell line={line} /></td>

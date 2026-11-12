@@ -49,13 +49,46 @@ describe('PdbStatusBox', () => {
     expect(step.innerHTML).toContain('text-red-300')
     fireEvent.click(step)                       // the number opens the tools
     const rows = screen.getAllByTestId('pdb-tool-row')
-    expect(within(rows[0]).getByTestId('pdb-next-sampling').textContent).toBe('none planned')
+    expect(within(rows[0]).getByTestId('pdb-next-sampling').textContent).toContain('none planned')
+    expect(within(rows[0]).getByTestId('pdb-tool-flag')).toBeDefined()
+    expect(within(rows[0]).getByTestId('pdb-book').getAttribute('href')).toBe('/pdb/schedule')
+    expect(within(rows[2]).queryByTestId('pdb-tool-flag')).toBeNull()
+    expect(within(rows[0]).getByRole('link', { name: '1' }).getAttribute('href')).toBe('/pdb/tools/1')
     expect(within(rows[0]).getByTestId('pdb-next-sampling').className).toContain('text-red-300')
     expect(rows[1].textContent).toContain('none planned · requested for week of Nov 16, no slot yet')
     expect(within(rows[2]).getByTestId('pdb-next-sampling').textContent).toContain('Nov 17 · KM 900')
     expect(rows[2].textContent).toContain('not confirmed')
     expect(within(rows[2]).getByTestId('pdb-next-sampling').className).not.toContain('text-red-300')
     expect(within(rows[3]).queryByTestId('pdb-next-sampling')).toBeNull()   // A/A needs none
+    // hide A/A: the fourth tool goes, and the choice is kept
+    fireEvent.click(screen.getByTestId('pdb-hide-aa'))
+    expect(screen.getAllByTestId('pdb-tool-row')).toHaveLength(3)
+    expect(screen.getByTestId('pdb-status-box').textContent).toContain('1 hidden')
+    expect(window.localStorage.getItem('plm2.lop.pdbHideAA')).toBe('1')
+  })
+
+  it('the topics list filters by department, sorts, and jumps into PDB', () => {
+    const topics = [
+      pdbTopic({ ref_key: '1', tool_number: '227702', pdb_department: 'Toolshop', age_days: 5, escalated: true, text: 'T-young' }),
+      pdbTopic({ ref_key: '2', tool_number: '227701', pdb_department: 'Process ENG', age_days: 40, escalated: false, text: 'P-old' }),
+      pdbTopic({ ref_key: '3', tool_number: '227701', pdb_department: 'Toolshop', age_days: 20, escalated: false, text: 'T-mid' }),
+    ]
+    wrap(<PdbStatusBox pdb={pdbResponse({ topics })} />)
+    fireEvent.click(screen.getByTestId('pdb-step-topics'))
+    const dialog = screen.getByTestId('pdb-topics-dialog')
+    const texts = () => within(dialog).getAllByTestId('pdb-topic-row').map((r) => r.textContent ?? '')
+    const order = () => texts().map((t) => ['T-young', 'P-old', 'T-mid'].find((n) => t.includes(n)))
+    expect(order()).toEqual(['T-young', 'P-old', 'T-mid'])                  // as PDB sends
+    fireEvent.change(within(dialog).getByTestId('pdb-topics-sort'), { target: { value: 'age' } })
+    expect(order()).toEqual(['P-old', 'T-mid', 'T-young'])
+    fireEvent.change(within(dialog).getByTestId('pdb-topics-sort'), { target: { value: 'department' } })
+    expect(order()).toEqual(['P-old', 'T-mid', 'T-young'])
+    fireEvent.change(within(dialog).getByTestId('pdb-topics-dept'), { target: { value: 'Toolshop' } })
+    expect(order()).toEqual(['T-mid', 'T-young'])
+    expect(dialog.textContent).toContain('2 of 3')
+    const jump = within(within(dialog).getAllByTestId('pdb-topic-row')[0]).getByTestId('pdb-jump')
+    expect(jump.getAttribute('href')).toBe('/pdb/tools/227701?topic=3')
+    expect(jump.getAttribute('target')).toBe('_blank')
   })
 
   it('the topics number opens what is open; a tool number opens that tool only', () => {

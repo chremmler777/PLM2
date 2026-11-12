@@ -150,3 +150,20 @@ export function escalationReason(e: Extract<LopEscalation, { kind: 'line' }>): s
   if (e.reason === 'hand') return `${REASON_TEXT.hand} (${day})`
   return `${REASON_TEXT[e.reason] ?? 'escalated'} since ${day}`
 }
+
+// ---- jumps into PDB (same host, its own app under /pdb) ----
+/** Where sampling slots are booked. */
+export const PDB_SCHEDULE_URL = '/pdb/schedule'
+
+/** The tool's page in PDB. */
+export function pdbToolUrl(toolNumber: string): string {
+  return `/pdb/tools/${encodeURIComponent(toolNumber)}`
+}
+
+/** The topic, opened on its tool's page in PDB (ToolView reads ?topic=);
+ *  PDB's task list when the tool is not known. Null for anything else. */
+export function pdbTopicUrl(line: Pick<LopLine, 'kind' | 'ref_key' | 'tool_number'>): string | null {
+  if (line.kind !== 'pdb_topic' || !line.ref_key) return null
+  if (!line.tool_number) return '/pdb/tasks'
+  return `${pdbToolUrl(line.tool_number)}?topic=${encodeURIComponent(line.ref_key)}`
+}
