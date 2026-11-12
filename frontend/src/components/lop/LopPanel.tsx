@@ -15,6 +15,7 @@ import { withLiveTopics } from '../../lib/lop'
 import type { LopKind, LopLine, LopView } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
 import AddFromSepDialog from './AddFromSepDialog'
+import LopHelp from './LopHelp'
 import LopTable from './LopTable'
 import { MeetingButtons, MeetingStatus } from './LopMeetingBar'
 import { useMeetingDetail } from './useMeetingDetail'
@@ -145,6 +146,7 @@ export default function LopPanel({ projectId }: { projectId: number }) {
         {pm && <button type="button" className={btnSm.secondary} onClick={() => setSepOpen(true)}>Add from SEP</button>}
         <MeetingButtons projectId={projectId} data={data} detail={meetingDetail.data} />
         <button type="button" className={btnSm.ghost} disabled={exporting} onClick={() => void exportXlsx()}>Excel</button>
+        <LopHelp />
       </div>
       <InlineError>{exportError}</InlineError>
 
