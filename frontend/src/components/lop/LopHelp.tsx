@@ -8,6 +8,10 @@ import { CircleHelp } from 'lucide-react'
 import Dialog from '../common/Dialog'
 import { btnBase, btnSizes } from '../common/buttonStyles'
 import { DEFAULT_STALE_DAYS } from '../../lib/lop'
+import toolbarPng from './help/toolbar.png'
+import pdbPng from './help/pdb.png'
+import flagPng from './help/flag.png'
+import meetingPng from './help/meeting.png'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -15,6 +19,17 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h3 className="mb-1.5 text-sm font-semibold text-slate-100">{title}</h3>
       {children}
     </section>
+  )
+}
+
+/** A screenshot with example data, as wide as the text (never wider than its own pixels). */
+function Shot({ src, alt, caption, width }: { src: string; alt: string; caption: string; width: number }) {
+  return (
+    <figure className="my-2">
+      <img src={src} alt={alt} width={width} loading="lazy"
+        className="h-auto max-w-full rounded border border-slate-600" />
+      <figcaption className="mt-1 text-[11px] text-slate-400">{caption}</figcaption>
+    </figure>
   )
 }
 
@@ -40,10 +55,24 @@ export function LopHelpContent() {
           <li><B>PDB topics</B> are listed live at the bottom. <B>Pin</B> the ones you want to track: you give the
             topic a name and a date, and from then on it counts like any other line. The topic itself stays in
             PDB (<B>Open in PDB</B>).</li>
-          <li><B>PDB status</B> on top: <B>Show tools</B> opens the tool list. A red flag means the tool is not A/A
-            and has no sampling booked. <B>Flag for planning</B> sends PDB Scheduling a request for a week you name;
-            the tool then stands on their list until a slot is booked. <B>Book in PDB</B> opens the sampling schedule.</li>
         </ol>
+        <Shot src={toolbarPng} width={1148} alt="The buttons above the list"
+          caption="The buttons above the list. + Task, Add from SEP and the meeting buttons are for the Project Manager." />
+      </Section>
+
+      <Section title="Project Manager: tools without a sampling date">
+        <ol className={list}>
+          <li><B>PDB status</B> on top of the page: press <B>Show tools</B>. A red flag means the tool is not A/A
+            and has no sampling booked. The red number counts these tools.</li>
+          <li>Press <B>Flag for planning</B> on the tool, name the week and the reason, then <B>Send to PDB</B>.
+            PDB Scheduling gets a request with your name and places the tool on the schedule.</li>
+          <li>The tool then shows <B>requested for week of …, no slot yet</B> until a slot is booked.
+            One request per tool. <B>Book in PDB</B> opens the sampling schedule.</li>
+        </ol>
+        <Shot src={pdbPng} width={1148} alt="PDB status box with the tool list open"
+          caption="Example: two tools are not A/A and have no sampling. One is already requested, one can be flagged." />
+        <Shot src={flagPng} width={448} alt="Flag for planning: week, reason and note"
+          caption="Flag for planning: the week you want, why, and a note for Scheduling." />
       </Section>
 
       <Section title="Project Manager: every week">
@@ -56,8 +85,10 @@ export function LopHelpContent() {
           <li>Lines reported <B>Done, please check</B>: <B>Confirm</B> closes the line, <B>Reopen</B> sends it back.
             Only you close lines.</li>
           <li><B>Close meeting</B>, then <B>Send minutes</B>. The project team gets what was closed, new, moved,
-            overdue and without update.</li>
+            overdue and without update, by mail.</li>
         </ol>
+        <Shot src={meetingPng} width={1148} alt="The list while a meeting runs"
+          caption="Example of a running meeting: every line says not touched until you change it or press Discussed or Escalate." />
       </Section>
 
       <Section title="What escalates">
@@ -72,6 +103,7 @@ export function LopHelpContent() {
       <Section title="If you are responsible for a line">
         <ul className={bullets}>
           <li>Your lines are on <B>My Tasks</B>, group LOP. Late ones first.</li>
+          <li>On working days you get <B>one mail in the morning</B> when something needs you, not a mail per change.</li>
           <li>Open the line and write a short comment when something moves. No update
             for {DEFAULT_STALE_DAYS} days counts against the line.</li>
           <li>When it is finished press <B>Done, please check</B>. The Project Manager confirms.</li>
