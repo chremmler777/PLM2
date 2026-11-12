@@ -349,6 +349,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Meine Aufgaben: {n} offen, für die du verantwortlich bist (oder deine Abteilung, wenn niemand benannt ist)',
     en: 'My tasks: {n} open that you are responsible for (or your department, where nobody is named)',
   },
+  'tasks.escalatedBadge': {
+    de: 'Eskaliert: {n} LOP-Punkte, die bei dir liegen (als Verantwortlicher oder als Projektleiter)',
+    en: 'Escalated: {n} LOP points that sit with you (as responsible or as Project Manager)',
+  },
   'tasks.backupBadge': {
     de: 'Unterstützungsaufgaben: {n}, bei denen du als Vertretung (Backup) benannt bist. Zählt nicht mit; wird auch deine, wenn sie überfällig ist oder der Verantwortliche abwesend ist',
     en: 'Support tasks: {n} where you are the named backup. Not counted as yours; it becomes yours too when it is late or the responsible is out',

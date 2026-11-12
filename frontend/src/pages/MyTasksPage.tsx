@@ -15,12 +15,12 @@ import { DeadlineChip } from '../components/changes/DeadlineChip';
 import { btnSm } from '../components/common/buttonStyles';
 import EmptyState from '../components/common/EmptyState';
 import { toastError } from '../lib/apiError';
-import { BookOpen, ClipboardList, FileText, ListTodo } from 'lucide-react';
+import { AlertTriangle, BookOpen, ClipboardList, FileText, ListTodo } from 'lucide-react';
 import { STATUS_LABELS } from '../lib/changeStatus';
 import { humanize, taskKindLabel } from '../lib/humanLabels';
 import { dueNote, foldChangeTasks, lateHint, foldWorkflowTasks, isBackup, lopByUrgency, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
 import { lopApi, lopOverviewKeys } from '../api/lop';
-import { dueLabel, STATUS_LABEL } from '../lib/lop';
+import { dueLabel, escalationReason, shortDay, STATUS_LABEL } from '../lib/lop';
 import { lopErrorMessage } from '../components/lop/useLopWrite';
 import BackupChip, { CoveringChip } from '../components/common/BackupChip';
 import client from '../api/client';
@@ -215,6 +215,81 @@ interface MyForm {
   updated_at: string;
 }
 
+/** Project LOP escalations that sit with me, on top of the page: my own
+ *  escalated lines, and where I run the LOP (PM) every escalated line of the
+ *  project and a missing weekly meeting. A row opens the project's LOP. A
+ *  failed load shows nothing here (the LOP group below reports it). */
+function LopEscalatedSection() {
+  const { data } = useQuery({
+    queryKey: lopOverviewKeys.myEscalations,
+    queryFn: lopApi.myEscalations,
+    refetchInterval: 60_000,
+  });
+  const rows = Array.isArray(data) ? data : [];
+  if (rows.length === 0) return null;
+
+  return (
+    <section aria-labelledby="my-lop-escalated-heading" data-testid="lop-escalated-group">
+      <h2 id="my-lop-escalated-heading" className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-red-300">
+        <AlertTriangle aria-hidden="true" size={14} />Escalated ({rows.length})
+      </h2>
+      <div className="bg-slate-800 border border-red-900/60 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-700 bg-slate-900">
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Project</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Line</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Responsible</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Why</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((e) => {
+              const project = (
+                <td className="px-4 py-3 align-top whitespace-nowrap">
+                  <Link to={`/projects/${e.project_id}/lop`}
+                    className="text-sky-400 hover:text-sky-300 underline underline-offset-2 tabular-nums">
+                    {e.project_code}
+                  </Link>
+                </td>
+              );
+              if (e.kind === 'no_meeting') {
+                return (
+                  <tr key={`m-${e.project_id}`} data-testid="lop-escalated-row"
+                    className="border-b border-slate-700 last:border-0 hover:bg-slate-700/30">
+                    {project}
+                    <td className="px-4 py-3 align-top text-slate-100">Hold the weekly LOP meeting</td>
+                    <td className="px-4 py-3 align-top text-xs text-slate-300">{e.pm_name ?? 'no Project Manager named'}</td>
+                    <td className="px-4 py-3 align-top text-xs text-red-300">no LOP meeting since {shortDay(e.since)}</td>
+                    <td className="px-4 py-3 align-top text-xs text-slate-400">-</td>
+                  </tr>
+                );
+              }
+              const l = e.line;
+              return (
+                <tr key={`l-${l.id}`} data-testid="lop-escalated-row"
+                  className="border-b border-slate-700 last:border-0 hover:bg-slate-700/30">
+                  {project}
+                  <td className="px-4 py-3 align-top text-slate-100">
+                    {l.text ?? l.title}
+                    {l.department_name && <span className="text-xs text-slate-500 ml-2">{l.department_name}</span>}
+                  </td>
+                  <td className="px-4 py-3 align-top text-xs text-slate-300">{e.own ? 'you' : (l.responsible_name ?? 'no name')}</td>
+                  <td className="px-4 py-3 align-top text-xs text-red-300">{escalationReason(e)}</td>
+                  <td className={`px-4 py-3 align-top text-xs tabular-nums whitespace-nowrap ${l.late ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
+                    {dueLabel(l)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 /** My open lines of every project LOP: late first, then by due date. A row
  *  opens the project's LOP page, where the line is updated; a failed load
  *  stays inside this group. */
@@ -224,7 +299,16 @@ function LopLinesSection() {
     queryFn: lopApi.mine,
     refetchInterval: 60_000,
   });
-  const lines = Array.isArray(data) ? [...data].sort(lopByUrgency) : [];
+  // my escalated lines come first in the group and carry a red tag
+  const { data: esc } = useQuery({
+    queryKey: lopOverviewKeys.myEscalations,
+    queryFn: lopApi.myEscalations,
+    refetchInterval: 60_000,
+  });
+  const escalated = new Set((Array.isArray(esc) ? esc : []).flatMap((e) => (e.kind === 'line' ? [e.line.id] : [])));
+  const isEsc = (l: { id?: number | null }) => l.id != null && escalated.has(l.id);
+  const lines = Array.isArray(data)
+    ? [...data].sort((a, b) => Number(isEsc(b)) - Number(isEsc(a)) || lopByUrgency(a, b)) : [];
   if (!isError && lines.length === 0) return null;
 
   return (
@@ -260,6 +344,10 @@ function LopLinesSection() {
                   </td>
                   <td className="px-4 py-3 align-top text-slate-100">
                     <span data-testid="lop-task-text">{l.text ?? l.title}</span>
+                    {isEsc(l) && (
+                      <span data-testid="lop-task-escalated"
+                        className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-bold text-white">Escalated</span>
+                    )}
                     {l.department_name && <span className="text-xs text-slate-500 ml-2">{l.department_name}</span>}
                   </td>
                   <td className={`px-4 py-3 align-top text-xs tabular-nums whitespace-nowrap ${l.late ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
@@ -939,6 +1027,8 @@ export default function MyTasksPage() {
         </h1>
         <p className="text-slate-400 text-sm mt-1">{t('tasks.subtitle')}</p>
       </div>
+
+      <LopEscalatedSection />
 
       <EscalationsCard />
 

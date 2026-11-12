@@ -55,7 +55,7 @@ export default function Sidebar() {
   // Workflow tasks + change tasks: whatever My Tasks would show.
   // Yellow: tasks you are responsible for; grey: tasks you hold as the
   // named backup (Christoph 2026-10-28).
-  const { total: openTasks, backup: backupTasks } = useMyTaskCounts();
+  const { total: openTasks, backup: backupTasks, escalated: escalatedTasks } = useMyTaskCounts();
 
   const dailyItems: NavItem[] = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -97,7 +97,8 @@ export default function Sidebar() {
     const Icon = item.icon;
     const count = item.path === '/my-tasks' ? openTasks : 0;
     const backupCount = item.path === '/my-tasks' ? backupTasks : 0;
-    const openWords = [count > 0 ? `${count} open` : '', backupCount > 0 ? `${backupCount} as backup` : '']
+    const escalatedCount = item.path === '/my-tasks' ? escalatedTasks : 0;
+    const openWords = [escalatedCount > 0 ? `${escalatedCount} escalated` : '', count > 0 ? `${count} open` : '', backupCount > 0 ? `${backupCount} as backup` : '']
       .filter(Boolean).join(', ');
     return (
       <Link
@@ -120,7 +121,16 @@ export default function Sidebar() {
         <Icon aria-hidden="true" size={18} strokeWidth={1.75}
           className={`flex-shrink-0 ${active ? 'text-sky-300' : 'text-slate-500 group-hover:text-slate-300'}`} />
         {!isCollapsed && <span className="flex-1 truncate">{item.label}</span>}
-        {count > 0 && (
+        {escalatedCount > 0 && (
+          <span data-testid="sidebar-escalated-count" title={t('tasks.escalatedBadge').replace('{n}', String(escalatedCount))}
+            className={isCollapsed
+            ? 'absolute top-0 right-0 min-w-[1rem] px-1 rounded bg-red-600 text-white text-[11px] leading-4 font-bold text-center tabular-nums'
+            : 'px-1.5 py-0.5 rounded-md bg-red-600 text-white text-xs font-bold flex-shrink-0 tabular-nums'}>
+            {escalatedCount}
+            {!isCollapsed && <span className="sr-only"> escalated</span>}
+          </span>
+        )}
+        {count > 0 && !(isCollapsed && escalatedCount > 0) && (
           <span data-testid="sidebar-task-count" title={t('tasks.mainBadge').replace('{n}', String(count))}
             className={isCollapsed
             ? 'absolute top-0 right-0 min-w-[1rem] px-1 rounded bg-amber-500 text-slate-900 text-[11px] leading-4 font-bold text-center tabular-nums'
@@ -136,7 +146,7 @@ export default function Sidebar() {
             <span className="sr-only"> as backup</span>
           </span>
         )}
-        {backupCount > 0 && isCollapsed && count === 0 && (
+        {backupCount > 0 && isCollapsed && count === 0 && escalatedCount === 0 && (
           <span data-testid="sidebar-backup-count" title={t('tasks.backupBadge').replace('{n}', String(backupCount))}
             className="absolute top-0 right-0 min-w-[1rem] px-1 rounded bg-slate-600 text-slate-100 text-[11px] leading-4 font-bold text-center tabular-nums">
             {backupCount}

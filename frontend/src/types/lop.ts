@@ -221,6 +221,10 @@ export type LopEscalation =
   | { kind: 'line'; line: LopLine; project_code: string; project_id: number; since: string; reason: LopEscalationReason }
   | { kind: 'no_meeting'; project_code: string; project_id: number; pm_name: string | null; since: string }
 
+/** GET /v1/lop/escalations/mine: an escalation the caller has to act on.
+ *  `own`: the caller is the line's responsible (else they run that LOP). */
+export type LopMyEscalation = LopEscalation & { own: boolean }
+
 export interface LopOverview {
   totals: LopKpi & { pdb_without_name_and_date: number }
   projects: LopProjectKpi[]

@@ -4,7 +4,8 @@
  * change tasks), folded the same way the page folds them, so an R and an A
  * on the same step count once; plus the new-index triage and engineering
  * review rows, the Finance cost sheet review and the caller's open project
- * LOP lines (GET /v1/lop/mine; a failure there counts 0). Rows where the caller is
+ * LOP lines (GET /v1/lop/mine; a failure there counts 0). LOP escalations are
+ * counted apart (`escalated`). Rows where the caller is
  * only backup (spec §18) are listed, not counted. The sidebar badge, the My
  * Tasks header and GET /workflow-instances/open-task-count all count this.
  *
@@ -32,6 +33,10 @@ export interface MyTaskCounts {
   /** The caller's open lines in the project LOPs (always their own, never backup). */
   lop: number;
   total: number;
+  /** Project LOP escalations the caller has to act on (GET /v1/lop/escalations/mine):
+   *  their own escalated lines and, for the PM, those of the project. Shown as a
+   *  third, red counter; not added to total (an own line is in `lop` already). */
+  escalated: number;
   /** Rows where the caller is only the named backup (listed, not in total);
    *  the sidebar shows them as a second, grey counter (Christoph 2026-10-28). */
   backup: number;
@@ -70,6 +75,12 @@ export function useMyTaskCounts(): MyTaskCounts {
     refetchInterval: REFETCH_MS,
     staleTime: 30_000,
   });
+  const { data: lopEscalations } = useQuery({
+    queryKey: lopOverviewKeys.myEscalations,
+    queryFn: lopApi.myEscalations,
+    refetchInterval: REFETCH_MS,
+    staleTime: 30_000,
+  });
   // Project team (spec §18): backup rows are listed on My Tasks but do not
   // count; where no responsible is set every row is main (today's behaviour).
   const main = (rows: { role?: string | null }[]) => rows.filter((r) => !isBackup(r)).length;
@@ -81,7 +92,8 @@ export function useMyTaskCounts(): MyTaskCounts {
   const intakeRows = main(intakeAll);
   const finance = review?.due ? 1 : 0;
   const lop = Array.isArray(lopLines) ? lopLines.length : 0;
-  return { list, intakes: intakeRows, finance, lop, total: list + intakeRows + finance + lop,
+  const escalated = Array.isArray(lopEscalations) ? lopEscalations.length : 0;
+  return { list, intakes: intakeRows, finance, lop, escalated, total: list + intakeRows + finance + lop,
            backup: backups(wf) + backups(ch) + backups(intakeAll) };
 }
 

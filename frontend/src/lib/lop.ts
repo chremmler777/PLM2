@@ -3,7 +3,7 @@
  * through in the weekly meeting. The server decides each line's group
  * (lop_rules.group_of); here they are ordered and labelled.
  */
-import type { LopGroup, LopKind, LopLine, LopStatus, MeetingMark } from '../types/lop'
+import type { LopEscalation, LopEscalationReason, LopGroup, LopKind, LopLine, LopStatus, MeetingMark } from '../types/lop'
 import { MONTHS } from './format'
 
 export const GROUP_ORDER: LopGroup[] = [
@@ -134,4 +134,19 @@ export function withLiveTopics(lines: LopLine[], topics: LopLine[] | null | unde
     return out as unknown as LopLine
   })
   return [...merged, ...topics.filter((t) => t.id == null)]
+}
+
+const REASON_TEXT: Record<LopEscalationReason, string> = {
+  hand: 'escalated by the PM in the last meeting',
+  late: 'late at two meetings in a row',
+  stale: 'no update at two meetings in a row',
+  late_or_stale: 'late or without update at two meetings in a row',
+}
+
+/** Why a line is escalated. The server says why (LopMeetings.escalations);
+ *  `since` is that meeting's day. */
+export function escalationReason(e: Extract<LopEscalation, { kind: 'line' }>): string {
+  const day = shortDay(e.since)
+  if (e.reason === 'hand') return `${REASON_TEXT.hand} (${day})`
+  return `${REASON_TEXT[e.reason] ?? 'escalated'} since ${day}`
 }

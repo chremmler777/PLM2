@@ -4,7 +4,7 @@
 import client from './client'
 import type {
   LinePatch, LineCreate, LopHistoryItem, LopLine, LopLineInProject, LopLinesQuery,
-  LopMeetingDetail, LopOverview, LopProjectResponse, LopView, MeetingMark, PdbResponse, PinBody, SepCandidateGate,
+  LopMeetingDetail, LopOverview, LopProjectResponse, LopView, MeetingMark, PdbResponse, PinBody, SepCandidateGate, LopMyEscalation,
 } from '../types/lop'
 
 /** Every LOP query of a project starts with lopKeys.all(projectId): invalidate that after a write. */
@@ -39,6 +39,7 @@ export const lopOverviewKeys = {
   overview: ['lop-overview'] as const,
   lines: (q: LopLinesQuery) => ['lop-overview', 'lines', q] as const,
   mine: ['lop-mine'] as const,
+  myEscalations: ['lop-mine', 'escalations'] as const,
 }
 
 export const lopApi = {
@@ -46,6 +47,7 @@ export const lopApi = {
   lines: async (q: LopLinesQuery): Promise<LopLineInProject[]> =>
     (await client.get('/v1/lop/lines', { params: q })).data,
   mine: async (): Promise<LopLineInProject[]> => (await client.get('/v1/lop/mine')).data,
+  myEscalations: async (): Promise<LopMyEscalation[]> => (await client.get('/v1/lop/escalations/mine')).data,
   pdb: async (projectId: number, all: boolean): Promise<PdbResponse> =>
     (await client.get(`/v1/lop/projects/${projectId}/pdb`, all ? { params: { all: true } } : undefined)).data,
   createLine: async (projectId: number, body: LineCreate): Promise<LopLine> =>

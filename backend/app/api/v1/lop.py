@@ -412,6 +412,29 @@ async def send_minutes(meeting_id: int, user: User = Depends(get_current_user),
     return {"sent_to": n}
 
 
+@router.get("/escalations/mine")
+async def my_escalations(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The escalations the caller has to act on: escalated lines they are
+    responsible for, and, where they run the LOP (Project Manager or admin),
+    every escalated line of that project and its missing meeting. This is the
+    red number on My Tasks and the group on top of that page."""
+    from app.models.entities import Plant, Project
+    ids = list((await db.execute(
+        select(Project.id).join(Plant, Plant.id == Project.plant_id)
+        .where(Plant.organization_id == user.organization_id,
+               Project.lop_enabled.is_(True)))).scalars().all())
+    manages: dict[int, bool] = {}
+    out = []
+    for e in await LopMeetings.escalations(db, ids):
+        pid = e["project_id"]
+        if pid not in manages:
+            manages[pid] = await LopService.can_manage(db, user, pid)
+        own = e["kind"] == "line" and e["line"].get("responsible_id") == user.id
+        if own or manages[pid]:
+            out.append({**e, "own": own})
+    return out
+
+
 @router.get("/escalations")
 async def escalations(project_id: Optional[int] = Query(None),
                       user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):

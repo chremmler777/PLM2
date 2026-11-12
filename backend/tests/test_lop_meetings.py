@@ -378,3 +378,30 @@ async def test_minutes_sections_are_capped(client, pm_auth, lop_project, session
         _, body = await minutes_text(s, m["id"])
     assert sum(1 for ln in body.splitlines() if ln.startswith("#")) == 50
     assert "... and 2 more" in body
+
+
+async def test_my_escalations_go_to_the_responsible_and_the_pm_only(
+        client, pm_auth, quality_auth, sales_auth, outsider_auth, lop_project):
+    mine = await _line(client, pm_auth, lop_project, "Gauge", department_id=lop_project.apqp_id)
+    m = await _start(client, pm_auth, lop_project)
+    await client.put(f"{BASE}/meetings/{m['id']}/marks/{mine}", headers=pm_auth, json={"mark": "escalated"})
+    await _close(client, pm_auth, m["id"])
+
+    async def got(auth):
+        r = await client.get(f"{BASE}/escalations/mine", headers=auth)
+        assert r.status_code == 200, r.text
+        return [(e["line"]["id"], e["own"]) for e in r.json() if e["kind"] == "line"]
+
+    assert await got(quality_auth) == [(mine, True)]       # the responsible
+    assert await got(pm_auth) == [(mine, False)]           # the PM runs the list
+    assert await got(sales_auth) == []                     # team member, not their line
+    assert await got(outsider_auth) == []
+
+
+async def test_my_escalations_tell_only_the_pm_about_a_missing_meeting(
+        client, pm_auth, quality_auth, lop_project, session_factory):
+    await _line(client, pm_auth, lop_project, department_id=lop_project.apqp_id)
+    await _old_meeting(session_factory, lop_project, 11)
+    pm = (await client.get(f"{BASE}/escalations/mine", headers=pm_auth)).json()
+    assert [e["kind"] for e in pm] == ["no_meeting"] and pm[0]["own"] is False
+    assert (await client.get(f"{BASE}/escalations/mine", headers=quality_auth)).json() == []

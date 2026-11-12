@@ -821,6 +821,56 @@ describe('MyTasksPage LOP group', () => {
     expect(within(group).getByRole('heading').textContent).toContain('(4)')
   })
 
+  it('puts the LOP escalations on top: my escalated line, the PM\'s lines and a missing meeting', async () => {
+    const esc = [
+      { kind: 'line', own: true, project_id: 2, project_code: '2277', since: '2026-11-05', reason: 'late',
+        line: mine({ id: 4, project_id: 2, text: 'Clip drawing', due_date: '2026-11-03', late: true, days_late: 9 }) },
+      { kind: 'line', own: false, project_id: 2, project_code: '2277', since: '2026-11-10', reason: 'hand',
+        line: mine({ id: 9, project_id: 2, text: 'Packaging', responsible_name: 'Alexa Earls' }) },
+      { kind: 'no_meeting', own: false, project_id: 5, project_code: '1748', pm_name: 'Steven Stocks', since: '2026-10-30' },
+    ]
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/lop/escalations/mine') return Promise.resolve({ data: esc })
+      if (url === '/v1/lop/mine') return Promise.resolve({ data: [
+        mine({ id: 1, project_id: 2, text: 'Late but not escalated', due_date: '2026-11-01', late: true, days_late: 11 }),
+        mine({ id: 4, project_id: 2, text: 'Clip drawing', due_date: '2026-11-03', late: true, days_late: 9 }),
+      ] })
+      return Promise.resolve({ data: [] })
+    })
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    wrap(<MyTasksPage />)
+    const group = await screen.findByTestId('lop-escalated-group')
+    const rows = within(group).getAllByTestId('lop-escalated-row')
+    expect(within(group).getByRole('heading').textContent).toContain('Escalated (3)')
+    expect(rows[0].textContent).toContain('Clip drawing')
+    expect(rows[0].textContent).toContain('you')
+    expect(rows[0].textContent).toContain('late at two meetings in a row since Nov 5')
+    expect(rows[1].textContent).toContain('Alexa Earls')
+    expect(rows[2].textContent).toContain('no LOP meeting since Oct 30')
+    expect(within(rows[2]).getByRole('link', { name: '1748' }).getAttribute('href')).toBe('/projects/5/lop')
+    // the group is the first one on the page
+    const first = document.querySelector('section')
+    expect(first?.getAttribute('data-testid')).toBe('lop-escalated-group')
+    // and in the LOP group the escalated line leads, with a tag
+    const lop = await screen.findByRole('region', { name: /^LOP/ })
+    const lines = within(lop).getAllByTestId('lop-task-row')
+    expect(within(lines[0]).getByTestId('lop-task-text').textContent).toBe('Clip drawing')
+    expect(within(lines[0]).getByTestId('lop-task-escalated')).toBeDefined()
+    expect(within(lines[1]).queryByTestId('lop-task-escalated')).toBeNull()
+  })
+
+  it('shows no escalated group when nothing is escalated or the list cannot be loaded', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/lop/escalations/mine') return Promise.reject({ response: { status: 500 } })
+      if (url === '/v1/lop/mine') return Promise.resolve({ data: [mine({ id: 1, project_id: 2, text: 'A line' })] })
+      return Promise.resolve({ data: [] })
+    })
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    wrap(<MyTasksPage />)
+    expect(await screen.findByText('A line')).toBeDefined()
+    expect(screen.queryByTestId('lop-escalated-group')).toBeNull()
+  })
+
   it('the LOP group failing to load leaves the other My Tasks groups intact', async () => {
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/lop/mine') return Promise.reject({ response: { status: 500, data: { detail: 'LOP is down' } } })

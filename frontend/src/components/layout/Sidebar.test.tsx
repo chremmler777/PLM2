@@ -191,6 +191,32 @@ describe('Sidebar My Tasks counter', () => {
     expect(await screen.findByText('5')).toBeDefined()
   })
 
+  it('shows my LOP escalations as a red number of their own', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/workflow-instances/my-tasks') return Promise.resolve({ data: wfTasks(3) })
+      if (url === '/v1/lop/escalations/mine') return Promise.resolve({ data: [{ kind: 'no_meeting' }, { kind: 'line' }] })
+      return Promise.resolve({ data: [] })
+    })
+    wrap(<Sidebar />)
+    const red = await screen.findByTestId('sidebar-escalated-count')
+    expect(red.textContent).toMatch(/^2/)
+    expect(red.className).toContain('bg-red-600')
+    expect(screen.getByTestId('sidebar-task-count').textContent).toMatch(/^3/)   // not added to the yellow one
+  })
+
+  it('shows no red number without escalations', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/workflow-instances/my-tasks') return Promise.resolve({ data: wfTasks(3) })
+      if (url === '/v1/lop/escalations/mine') return Promise.reject({ response: { status: 500 } })
+      return Promise.resolve({ data: [] })
+    })
+    wrap(<Sidebar />)
+    await screen.findByTestId('sidebar-task-count')
+    expect(screen.queryByTestId('sidebar-escalated-count')).toBeNull()
+  })
+
   it('keeps the badge when my LOP lines cannot be loaded', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
     clientMocks.get.mockImplementation((url: string) => {

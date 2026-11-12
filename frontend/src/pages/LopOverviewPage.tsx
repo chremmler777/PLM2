@@ -15,9 +15,9 @@ import { useQuery } from '@tanstack/react-query'
 import { lopApi, lopOverviewKeys } from '../api/lop'
 import Dialog from '../components/common/Dialog'
 import { lopErrorMessage } from '../components/lop/useLopWrite'
-import { dueLabel, shortDay, staleLabel } from '../lib/lop'
+import { dueLabel, escalationReason, shortDay, staleLabel } from '../lib/lop'
 import type {
-  LopDepartmentKpi, LopEscalation, LopEscalationReason, LopFlag, LopKpi, LopLinesQuery, LopProjectKpi,
+  LopDepartmentKpi, LopEscalation, LopFlag, LopKpi, LopLinesQuery, LopProjectKpi,
 } from '../types/lop'
 
 /** "82 %", or "n/a" when there is nothing to measure against. */
@@ -153,20 +153,6 @@ function Tiles({ totals, projects, onOpen }: {
 }
 
 // ------------------------------------------------------------- escalations
-const REASON_TEXT: Record<LopEscalationReason, string> = {
-  hand: 'escalated by the PM in the last meeting',
-  late: 'late at two meetings in a row',
-  stale: 'no update at two meetings in a row',
-  late_or_stale: 'late or without update at two meetings in a row',
-}
-
-/** The server says why (LopMeetings.escalations); `since` is that meeting's day. */
-function lineReason(e: Extract<LopEscalation, { kind: 'line' }>): string {
-  const day = shortDay(e.since)
-  if (e.reason === 'hand') return `${REASON_TEXT.hand} (${day})`
-  return `${REASON_TEXT[e.reason] ?? 'escalated'} since ${day}`
-}
-
 function Escalations({ rows }: { rows: LopEscalation[] }) {
   const headingId = useId()
   return (
@@ -199,7 +185,7 @@ function Escalations({ rows }: { rows: LopEscalation[] }) {
                 <span className="text-slate-100">{` · #${l.id} ${l.text ?? l.title ?? ''}`}</span>
                 {l.department_name && ` · ${l.department_name}`}
                 {` · ${l.responsible_name ?? 'no name'} · `}
-                <span className="text-red-300">{lineReason(e)}</span>
+                <span className="text-red-300">{escalationReason(e)}</span>
                 {l.days_late > 0 && <span className="tabular-nums">{` · ${l.days_late} d late`}</span>}
               </li>
             )
