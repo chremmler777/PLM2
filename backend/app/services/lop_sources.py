@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 SOURCE_KINDS = ("sep_item", "risk")
 SEP_CLOSED_ITEM = ("done", "not_applicable")
+# the line closed only because its gate closed over the open item: not on time
+GATE_CLOSED_REASON = "gate closed"
 
 
 # ------------------------------------------------------------ line changes
@@ -69,7 +71,8 @@ def _item_source(line: LopLine, item: SepWorkItem, gate: SepGate) -> dict:
     closed_at = item.completed_at if item.status in SEP_CLOSED_ITEM else (
         gate.closed_at if gate_closed else None)
     return {"text": item.title_en or item.title_de, "label": f"SEP {gate.code} item {item.item_no}",
-            "closed": closed, "closed_at": closed_at, "context": None}
+            "closed": closed, "closed_at": closed_at, "context": None,
+            "by_gate": gate_closed and item.status not in SEP_CLOSED_ITEM}
 
 
 def _risk_source(line: LopLine, row: Optional[dict]) -> dict:
@@ -390,7 +393,8 @@ async def sync_project_lines(session: AsyncSession, project_id: int, reader_id: 
     for ln in lines:
         src = sources[ln.id]
         if src["closed"] and ln.status != "closed":
-            _close_line(session, ln, None, src["closed_at"], "source closed")
+            _close_line(session, ln, None, src["closed_at"],
+                        GATE_CLOSED_REASON if src.get("by_gate") else "source closed")
             changed = True
         elif not src["closed"] and ln.status == "closed":
             _reopen_line(session, ln, None, SYSTEM_REOPEN_REASON)

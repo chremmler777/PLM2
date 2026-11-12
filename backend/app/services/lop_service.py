@@ -33,8 +33,8 @@ SYSTEM_REOPEN_REASON = "open again at the source"
 def reserved_reasons() -> tuple[str, ...]:
     """Reasons the system writes and the KPIs or the sync treat specially; a
     person may not type them (compared trimmed and case-insensitive)."""
-    from app.services.lop_sources import RISK_ROW_REASON
-    return (FIRST_DATE_REASON, RISK_ROW_REASON, SYSTEM_REOPEN_REASON)
+    from app.services.lop_sources import GATE_CLOSED_REASON, RISK_ROW_REASON
+    return (FIRST_DATE_REASON, RISK_ROW_REASON, SYSTEM_REOPEN_REASON, GATE_CLOSED_REASON)
 
 
 class LopError(Exception):

@@ -267,6 +267,29 @@ async def test_gate_closed_shows_line_closed_and_edit_is_409_not_500(
     assert (await _item_state(session_factory, item))[0] == "open"      # the item is untouched
 
 
+async def test_line_closed_by_its_gate_is_not_measured_on_time(
+        client, pm_auth, lop_project, lop_sep, session_factory):
+    from datetime import datetime, timedelta
+    from app.models.lop import LopEvent
+    await lop_sep()
+    gate = await _gate(session_factory, lop_project.id)
+    await _set_target(client, pm_auth, gate, (datetime.utcnow() + timedelta(days=30)).date().isoformat())
+    line, item, _ = await _one_line(client, pm_auth, lop_project, session_factory)
+    async with session_factory() as s:
+        g = await s.get(SepGate, gate)
+        g.status, g.closed_at = "closed", datetime.utcnow()       # closed over the open item
+        await s.commit()
+    assert await _open_lines(client, pm_auth, lop_project.id) == []
+    async with session_factory() as s:
+        ev = (await s.execute(select(LopEvent).where(
+            LopEvent.line_id == line, LopEvent.field == "status",
+            LopEvent.new_value == "closed"))).scalars().all()
+    assert [e.reason for e in ev] == ["gate closed"]
+    ov = (await client.get(f"{BASE}/overview", headers=pm_auth)).json()
+    row = next(p for p in ov["projects"] if p["project_id"] == lop_project.id)
+    assert row["on_time_pct_4w"] is None and row["closed_week"] == 1
+
+
 # -------------------------------------------------------------------- risks
 async def test_risk_with_countermeasure_and_due_becomes_a_line(client, pm_auth, lop_project):
     await _form_risk(client, pm_auth, lop_project.id, countermeasure="Order spare insert",

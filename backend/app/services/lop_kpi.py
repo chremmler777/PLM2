@@ -53,6 +53,7 @@ class Item:
     project: Project
     untouched: bool = False
     moves_4w: int = 0
+    gate_closed: bool = False
 
     @property
     def open(self) -> bool:
@@ -128,6 +129,19 @@ async def _moves(db: AsyncSession, project_ids: list[int], today: date) -> dict[
     return out
 
 
+async def _gate_closed_ids(db: AsyncSession, project_ids: list[int]) -> set[int]:
+    """Lines whose latest close was their SEP gate closing over the open item."""
+    last: dict[int, Optional[str]] = {}
+    for line_id, reason in (await db.execute(
+            select(LopEvent.line_id, LopEvent.reason)
+            .join(LopLine, LopLine.id == LopEvent.line_id)
+            .where(LopLine.project_id.in_(project_ids), LopEvent.field == "status",
+                   LopEvent.new_value == "closed")
+            .order_by(LopEvent.id))).all():
+        last[line_id] = reason
+    return {i for i, r in last.items() if r == lop_sources.GATE_CLOSED_REASON}
+
+
 async def collect(db: AsyncSession, user: User, projects: list[Project]) -> Scope:
     """Every line of the projects with its rule state, in a fixed number of queries
     (plus one reconcile per project that has SEP or risk lines)."""
@@ -143,12 +157,13 @@ async def collect(db: AsyncSession, user: User, projects: list[Project]) -> Scop
     ctx = await LopService.context(db, user, lines, can_manage=False)
     untouched = await _untouched_line_ids(db, ids)
     moves = await _moves(db, ids, today)
+    gate_closed = await _gate_closed_ids(db, ids)
     by_project = {p.id: p for p in projects}
     for ln in lines:
         scope.items[ln.project_id].append(Item(
             line=ln, d=LopService.line_dict(ln, ctx), state=LopService._state(ln, ctx),
             project=by_project[ln.project_id], untouched=ln.id in untouched,
-            moves_4w=moves.get(ln.id, 0)))
+            moves_4w=moves.get(ln.id, 0), gate_closed=ln.id in gate_closed))
     return scope
 
 
@@ -159,8 +174,10 @@ def kpi(items: list[Item], today: date) -> dict:
     open_items = [i for i in items if i.open]
     controlled = sum(1 for i in open_items if i.d["under_control"])
     late_dated = [i.d["days_late"] for i in open_items if i.d["late"] and i.d["due_date"]]
+    # a line its gate closed over the open item was not done: not measured
     closed_recent = [i for i in items if not i.open and i.line.closed_at is not None
-                     and local_date(i.line.closed_at) >= month and i.line.first_due_date]
+                     and local_date(i.line.closed_at) >= month and i.line.first_due_date
+                     and not i.gate_closed]
     # closed_on_time is None only without a first due date or a closing time;
     # both are excluded just above, so every measured line is True or False.
     on_time = sum(1 for i in closed_recent if rules.closed_on_time(i.state) is True)
