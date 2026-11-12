@@ -112,3 +112,26 @@ export function escalationLabel(level: number | null | undefined): string | null
 export function lineKey(line: LopLine): string {
   return line.id != null ? String(line.id) : `pdb-${line.ref_key}`
 }
+
+const LIVE_FIELDS = [
+  'text', 'tool_number', 'age_days', 'escalation_level', 'escalated', 'committed_until',
+  'last_log_at', 'handover_impact', 'pdb_department', 'pdb_live',
+] as const
+
+/**
+ * Pinned PDB topics are lines of the project list (always there, snapshot
+ * text). When PDB answered, its live fields are merged onto the pinned line
+ * by ref_key; only the unpinned topics are added as rows of their own.
+ */
+export function withLiveTopics(lines: LopLine[], topics: LopLine[] | null | undefined): LopLine[] {
+  if (!topics) return lines
+  const live = new Map(topics.filter((t) => t.id != null).map((t) => [t.ref_key, t]))
+  const merged = lines.map((l) => {
+    const t = l.kind === 'pdb_topic' ? live.get(l.ref_key) : undefined
+    if (!t) return l
+    const out = { ...l } as Record<string, unknown>
+    for (const f of LIVE_FIELDS) out[f] = t[f]
+    return out as unknown as LopLine
+  })
+  return [...merged, ...topics.filter((t) => t.id == null)]
+}

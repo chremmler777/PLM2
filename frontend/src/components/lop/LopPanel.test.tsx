@@ -146,8 +146,10 @@ describe('LopPanel', () => {
   })
 
   it('a pinned PDB topic shows its tool and cannot be closed here', async () => {
-    pdb = pdbResponse({ topics: [pdbTopic({ id: 44, project_id: 2, pinned: true, group: 'other', responsible_id: 7,
-      responsible_name: 'Lena Logistics', due_date: '2026-11-20', first_due_date: '2026-11-20' })] })
+    const pin = pdbTopic({ id: 44, project_id: 2, pinned: true, group: 'other', responsible_id: 7,
+      responsible_name: 'Lena Logistics', due_date: '2026-11-20', first_due_date: '2026-11-20' })
+    project = lopProject({ lines: [pin] })
+    pdb = pdbResponse({ topics: [pin] })
     mount()
     const r = await row(44)
     expect(within(r).getByTestId('pin-marker')).toBeTruthy()
@@ -155,6 +157,42 @@ describe('LopPanel', () => {
     const editor = await openEditor(44)
     expect(within(editor).queryByRole('button', { name: 'Close line' })).toBeNull()
     expect(editor.textContent).toContain('closed in PDB')
+  })
+
+  it('shows a late pinned topic in Overdue when PDB cannot be reached', async () => {
+    project = lopProject({ lines: [pdbTopic({
+      id: 44, project_id: 2, pinned: true, group: 'overdue', late: true, days_late: 3, responsible_id: 7,
+      responsible_name: 'Lena Logistics', due_date: '2026-11-08', first_due_date: '2026-11-08',
+      text: 'Snapshot: tool leaks', tool_number: null, pdb_live: false,
+    })] })
+    pdb = pdbResponse({ available: false, reason: 'PDB answered 502', status: null, topics: [] })
+    mount()
+    const r = await row(44)
+    expect(within(screen.getByTestId('lop-group-overdue')).getByTestId('lop-row-44')).toBe(r)
+    expect(r.textContent).toContain('Snapshot: tool leaks')
+    expect(r.textContent).toContain('3 d late')
+    await waitFor(() => expect(screen.getByTestId('lop-pdb-group').textContent).toContain('PDB cannot be reached'))
+  })
+
+  it('merges live PDB text onto a pinned line and does not list it twice', async () => {
+    const snap = pdbTopic({ id: 44, project_id: 2, pinned: true, group: 'other', responsible_id: 7,
+      responsible_name: 'Lena Logistics', due_date: '2026-11-20', first_due_date: '2026-11-20',
+      ref_key: '501', text: 'Old snapshot', tool_number: null, age_days: null, escalated: false,
+      escalation_level: null, pdb_live: false })
+    project = lopProject({ lines: [snap] })
+    pdb = pdbResponse({ topics: [
+      { ...snap, text: 'Live issue\nTo do: live todo', tool_number: '227701', age_days: 41, pdb_live: true },
+      pdbTopic({ ref_key: '502', text: 'Another topic' }),
+    ] })
+    mount()
+    await screen.findByTestId('lop-row-pdb-502')
+    const r = await row(44)
+    expect(r.textContent).toContain('Live issue')
+    expect(r.textContent).toContain('227701')
+    expect(r.textContent).not.toContain('Old snapshot')
+    expect(screen.getAllByText(/Live issue/)).toHaveLength(1)
+    expect(within(screen.getByTestId('lop-pdb-group')).queryByText(/Live issue/)).toBeNull()
+    expect(screen.queryByTestId('lop-row-pdb-501')).toBeNull()
   })
 
   it('says PDB cannot be reached in the PDB group instead of an empty group', async () => {
@@ -273,6 +311,25 @@ describe('LopPanel', () => {
     await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/lop/lines/1', { due_date: '2026-11-25' }))
   })
 
+  it('Confirm date on a default due date sends the same date and no reason', async () => {
+    project = lopProject({ lines: [lopLine({ due_is_default: true, due_date: '2026-12-04', first_due_date: '2026-12-04' })] })
+    mount()
+    const editor = await openEditor(1)
+    expect(within(editor).getByTestId('default-due-editor').textContent).toBe('default')
+    fireEvent.click(within(editor).getByRole('button', { name: 'Confirm date' }))
+    await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/lop/lines/1', { due_date: '2026-12-04' }))
+  })
+
+  it('changing a default due date asks for no reason', async () => {
+    project = lopProject({ lines: [lopLine({ due_is_default: true, due_date: '2026-12-04', first_due_date: '2026-12-04' })] })
+    mount()
+    const editor = await openEditor(1)
+    fireEvent.change(within(editor).getByLabelText(/^Due date/), { target: { value: '2026-12-20' } })
+    expect(within(editor).queryByLabelText('Reason for moving the date')).toBeNull()
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/lop/lines/1', { due_date: '2026-12-20' }))
+  })
+
   it('refetches the project lines after a successful write', async () => {
     mount()
     await row(1)
@@ -330,7 +387,9 @@ describe('LopPanel', () => {
   })
 
   it('says "No unpinned PDB topics" when every open topic is pinned', async () => {
-    pdb = pdbResponse({ topics: [pdbTopic({ id: 44, project_id: 2, pinned: true, group: 'other' })] })
+    const pin = pdbTopic({ id: 44, project_id: 2, pinned: true, group: 'other' })
+    project = lopProject({ lines: [pin] })
+    pdb = pdbResponse({ topics: [pin] })
     mount()
     await row(44)
     await waitFor(() => expect(screen.getByTestId('lop-pdb-group').textContent).toContain('No unpinned PDB topics'))

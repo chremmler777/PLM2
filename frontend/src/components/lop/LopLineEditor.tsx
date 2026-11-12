@@ -2,7 +2,9 @@
  * The inline editor under a line. The PM sets title (PM tasks), department,
  * responsible, due date and next check, and moves the status; changing the
  * due date of a line that ever had one (set, cleared or moved) needs a
- * reason, a next-check date does not. Team members
+ * reason, a next-check date does not. The first date the PM sets on a default
+ * (gate target) date is the baseline: "Confirm date" or a new date, no reason.
+ * Team members
  * comment; everyone reads the history.
  */
 import { useState } from 'react'
@@ -11,7 +13,7 @@ import { lopApi, lopKeys, type TeamRow } from '../../api/lop'
 import { shortDay } from '../../lib/lop'
 import type { LinePatch, LopHistoryItem, LopLine } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
-import { InlineError, PersonOptions, inputCls, labelCls } from './lopUi'
+import { DefaultMarker, InlineError, PersonOptions, inputCls, labelCls } from './lopUi'
 import type { TeamPerson } from './lopTeam'
 import { useLopWrite } from './useLopWrite'
 
@@ -47,8 +49,9 @@ function PmForm({ line, projectId, team, people, teamError }: {
   }
   if (due !== (line.due_date ?? '')) body.due_date = due || null
   if (check !== (line.next_check_date ?? '')) body.next_check_date = check || null
-  // the server wants a reason once the line ever had a due date (first_due_date set)
-  const moving = 'due_date' in body && line.first_due_date != null
+  // the server wants a reason once the line ever had a due date (first_due_date set),
+  // except for the first date the PM sets on a default date
+  const moving = 'due_date' in body && line.first_due_date != null && !line.due_is_default
   if (moving && reason.trim()) body.reason = reason.trim()
   const changed = Object.keys(body).filter((k) => k !== 'reason').length > 0
   const blocked = !changed || (moving && !reason.trim()) || (line.kind === 'task' && !title.trim())
@@ -74,9 +77,14 @@ function PmForm({ line, projectId, team, people, teamError }: {
             <PersonOptions people={people} />
           </select>
         </label>
-        <label className={labelCls}>Due date
+        <label className={labelCls}>
+          <span>Due date{line.due_is_default && <DefaultMarker testId="default-due-editor" title="Gate target date, not yet set by the PM" />}</span>
           <input type="date" className={inputCls} value={due} onChange={(e) => setDue(e.target.value)} />
         </label>
+        {line.due_is_default && line.due_date && (
+          <button type="button" className={btnSm.ghost} disabled={patch.pending}
+            onClick={() => patch.run({ due_date: line.due_date })}>Confirm date</button>
+        )}
         <label className={labelCls}>Next check
           <input type="date" className={inputCls} value={check} onChange={(e) => setCheck(e.target.value)} />
         </label>

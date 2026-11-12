@@ -128,8 +128,8 @@ async def project_lop(project_id: int, view: Literal["meeting", "open", "closed"
         raise _http(e)
     await lop_sources.sync_project_lines(db, project_id, user.id)   # risk rows only
     can_manage = await LopService.can_manage(db, user, project_id)
-    lines = [ln for ln in await LopService.lines_for_project(db, project_id, view)
-             if ln.kind != "pdb_topic"]      # PDB topics come from /pdb only
+    # pinned PDB topics are lines like any other (snapshot text, no PDB call)
+    lines = await LopService.lines_for_project(db, project_id, view)
     ctx = await LopService.context(db, user, lines, can_manage=can_manage)
     meeting, last_meeting = await LopMeetings.summary(db, project_id)
     return {

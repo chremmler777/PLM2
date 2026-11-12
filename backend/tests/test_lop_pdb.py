@@ -245,9 +245,9 @@ async def test_pinned_topic_follows_the_rules(client, pm_auth, quality_auth, pdb
     mine = (await client.get(f"{BASE}/mine", headers=quality_auth)).json()
     assert [m["ref_key"] for m in mine] == ["7"]
     assert mine[0]["title"] == "Tool leaks" and mine[0]["late"] is True
-    # the project view does not deliver topics
+    # the project view lists the pin from its snapshot
     v = (await client.get(f"{BASE}/projects/{pdb_project.id}?view=open", headers=pm_auth)).json()
-    assert v["lines"] == []
+    assert [ln["ref_key"] for ln in v["lines"]] == ["7"]
 
 
 async def test_pdb_text_is_live_when_pdb_changed(client, pm_auth, pdb_project, pdb):
@@ -336,3 +336,34 @@ async def test_pinning_twice_returns_the_same_line(client, pm_auth, pdb_project,
     b = await _pin(client, pm_auth, pdb_project.id, 7, due_date="2026-12-01",
                    responsible_id=pdb_project.quality_user_id)
     assert a.status_code == 201 and b.status_code == 200 and a.json()["id"] == b.json()["id"]
+
+
+async def test_project_get_includes_pinned_topics_without_calling_pdb(
+        client, pm_auth, pdb_project, pdb):
+    pdb.topics = [topic(7, issue="Tool leaks")]
+    yesterday = (_today() - timedelta(days=1)).isoformat()
+    lid = (await _pin(client, pm_auth, pdb_project.id, 7,
+                      responsible_id=pdb_project.quality_user_id, due_date=yesterday)).json()["id"]
+    pdb.calls.clear()
+    pdb.fail = 503                       # would fail the test if PDB were asked
+    for view in ("open", "meeting"):
+        v = (await client.get(f"{BASE}/projects/{pdb_project.id}?view={view}", headers=pm_auth)).json()
+        assert [ln["id"] for ln in v["lines"]] == [lid]
+        ln = v["lines"][0]
+        assert ln["kind"] == "pdb_topic" and ln["pinned"] is True and ln["ref_key"] == "7"
+        assert ln["text"] == "Tool leaks" and ln["late"] is True and ln["group"] == "overdue"
+        assert ln["pdb_live"] is False
+    assert pdb.calls == []
+
+
+async def test_closed_pin_is_in_the_closed_view(client, pm_auth, pdb_project, pdb):
+    pdb.topics = [topic(7)]
+    lid = (await _pin(client, pm_auth, pdb_project.id, 7, due_date="2026-12-01",
+                      responsible_id=pdb_project.quality_user_id)).json()["id"]
+    pdb.topics = []                      # gone from PDB: the pin closes
+    pdb_client.clear_cache()
+    await _get(client, pm_auth, pdb_project.id)
+    closed = (await client.get(f"{BASE}/projects/{pdb_project.id}?view=closed", headers=pm_auth)).json()
+    assert [ln["id"] for ln in closed["lines"]] == [lid]
+    opened = (await client.get(f"{BASE}/projects/{pdb_project.id}?view=open", headers=pm_auth)).json()
+    assert opened["lines"] == []

@@ -23,7 +23,7 @@ from app.models.sep import SepGate
 from app.services import lop_rules as rules
 from app.services import lop_sources, pdb_client
 from app.services.lop_meetings import LopMeetings
-from app.services.lop_service import LopNotFound, LopService, _today, local_date
+from app.services.lop_service import FIRST_DATE_REASON, LopNotFound, LopService, _today, local_date
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,8 @@ async def _moves(db: AsyncSession, project_ids: list[int], today: date) -> dict[
     """line id -> date moves in the last 28 days: a due date that replaced an
     earlier one, and every next-check date set after the first one."""
     rows = (await db.execute(
-        select(LopEvent.line_id, LopEvent.field, LopEvent.old_value, LopEvent.created_at)
+        select(LopEvent.line_id, LopEvent.field, LopEvent.old_value, LopEvent.created_at,
+               LopEvent.reason)
         .join(LopLine, LopLine.id == LopEvent.line_id)
         .where(LopLine.project_id.in_(project_ids),
                LopEvent.field.in_(("due_date", "next_check_date")))
@@ -117,8 +118,8 @@ async def _moves(db: AsyncSession, project_ids: list[int], today: date) -> dict[
     since = today - timedelta(days=WINDOW_MONTH)
     out: dict[int, int] = {}
     seen_check: set[int] = set()
-    for line_id, field, old, created in rows:
-        counts = old is not None
+    for line_id, field, old, created, reason in rows:
+        counts = old is not None and not (field == "due_date" and reason == FIRST_DATE_REASON)
         if field == "next_check_date":
             counts = line_id in seen_check
             seen_check.add(line_id)

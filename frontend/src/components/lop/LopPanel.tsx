@@ -1,8 +1,9 @@
 /**
  * The project LOP (list of open points) the PM walks through in the weekly
  * meeting: the live PDB status on top, then view chips and filters, the PM's
- * buttons, and the grouped table. PDB topics come only from /pdb: pinned ones
- * sit in their normal group, the others in "PDB topics". Write controls follow
+ * buttons, and the grouped table. Pinned PDB topics are lines of the project
+ * list (always there, in their normal group); /pdb adds live fields to them
+ * and the unpinned topics, which sit in "PDB topics". Write controls follow
  * the server's flags (can_manage, can_report); the server enforces them.
  */
 import { useMemo, useState } from 'react'
@@ -10,6 +11,7 @@ import { useQuery } from '@tanstack/react-query'
 import { downloadLopXlsx, getProjectLop, getTeam, lopApi, lopKeys, teamQueryKey } from '../../api/lop'
 import { useAuth } from '../../contexts/AuthContext'
 import { apiErrorMessage } from '../../lib/apiError'
+import { withLiveTopics } from '../../lib/lop'
 import type { LopKind, LopLine, LopView } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
 import AddFromSepDialog from './AddFromSepDialog'
@@ -73,8 +75,7 @@ export default function LopPanel({ projectId }: { projectId: number }) {
 
   const all = useMemo(() => {
     const lines = data?.lines ?? []
-    const topics = pdbOn && pdb.data?.available ? pdb.data.topics ?? [] : []
-    return [...lines, ...topics]
+    return withLiveTopics(lines, pdbOn && pdb.data?.available ? pdb.data.topics ?? [] : null)
   }, [data, pdb.data, pdbOn])
 
   if (lop.isLoading) return <p className="text-xs text-slate-400">Loading the LOP…</p>

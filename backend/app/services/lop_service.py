@@ -24,6 +24,7 @@ from app.services.project_team_service import ProjectTeamService, is_live_member
 
 PM_DEPARTMENT = "Project Manager"
 _UNSET = object()
+FIRST_DATE_REASON = "first date set by the PM"
 
 
 class LopError(Exception):
@@ -366,7 +367,14 @@ class LopService:
 
         if "due_date" in body:
             new_due = body["due_date"]
-            if new_due != line.due_date:
+            if line.due_is_default:
+                # the first date the PM sets is the baseline, not a move
+                if line.due_date is not None or new_due is not None:
+                    LopService._event(session, line, user, "due_date", line.due_date,
+                                      new_due, FIRST_DATE_REASON)
+                line.due_date = line.first_due_date = new_due
+                line.due_is_default, changed = False, True
+            elif new_due != line.due_date:
                 if line.first_due_date is None:
                     line.first_due_date = new_due       # the first date, no reason
                 elif not reason:
