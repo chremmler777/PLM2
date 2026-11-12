@@ -331,7 +331,7 @@ async def sync_project_lines(session: AsyncSession, project_id: int, reader_id: 
     """Idempotent; writes only when something changed, never deletes.
     full: 1. every risk row gets a `lop_key` (own form event); 2. a row with a
     countermeasure and a due date becomes a line; 3. a line the PM never gave
-    another date follows its row's due date. Always: lines follow their source,
+    another date follows its row's due date (its first due date stays). Always: lines follow their source,
     closed when it closed (SEP item done / gate closed / row finished or
     removed), open again when it reopened. SEP items are never added here.
     System writes are attributed to the project's PM, else to the reader."""
@@ -360,7 +360,9 @@ async def sync_project_lines(session: AsyncSession, project_id: int, reader_id: 
                 if (due is not None and ln.status != "closed" and due != ln.due_date
                         and ln.id not in pm_moved):
                     _event(session, ln, None, "due_date", ln.due_date, due, RISK_ROW_REASON)
-                    ln.due_date = ln.first_due_date = due
+                    ln.due_date = due
+                    if ln.first_due_date is None:      # the on-time baseline never moves
+                        ln.first_due_date = due
                     ln.due_is_default = False
                     changed = True
                 continue

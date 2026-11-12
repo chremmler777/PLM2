@@ -463,7 +463,7 @@ async def test_risk_line_follows_the_row_due_date_until_the_pm_moves_it(client, 
     rows[0]["due"] = "2026-12-05"
     assert (await _patch_form(client, pm_auth, inst["id"], rows)).status_code == 200
     b = (await _open_lines(client, pm_auth, lop_project.id))[0]
-    assert b["due_date"] == b["first_due_date"] == "2026-12-05"
+    assert b["due_date"] == "2026-12-05" and b["first_due_date"] == "2026-11-30"
     h = (await client.get(f"{BASE}/lines/{line['id']}/history", headers=pm_auth)).json()
     assert any(e["type"] == "event" and e["field"] == "due_date" for e in h)
     r = await client.patch(f"{BASE}/lines/{line['id']}", headers=pm_auth,
@@ -472,6 +472,21 @@ async def test_risk_line_follows_the_row_due_date_until_the_pm_moves_it(client, 
     rows[0]["due"] = "2026-12-08"
     assert (await _patch_form(client, pm_auth, inst["id"], rows)).status_code == 200
     assert (await _open_lines(client, pm_auth, lop_project.id))[0]["due_date"] == "2026-12-20"
+
+
+async def test_risk_form_date_change_keeps_the_on_time_baseline(client, pm_auth, lop_project):
+    inst = await _form_risk(client, pm_auth, lop_project.id, countermeasure="Do it", due="2026-11-30")
+    first = (await _open_lines(client, pm_auth, lop_project.id))[0]
+    assert first["due_date"] == first["first_due_date"] == "2026-11-30"     # first sync sets both
+    rows = (await _risk_rows(client, pm_auth, lop_project.id))
+    for day in ("2026-12-05", "2026-12-09"):
+        rows[0]["due"] = day
+        assert (await _patch_form(client, pm_auth, inst["id"], rows)).status_code == 200
+        b = (await _open_lines(client, pm_auth, lop_project.id))[0]
+        assert b["due_date"] == day and b["first_due_date"] == "2026-11-30" and b["moved"] is True
+    ov = (await client.get(f"{BASE}/overview", headers=pm_auth)).json()
+    row = next(p for p in ov["projects"] if p["project_id"] == lop_project.id)
+    assert row["dates_moved_4w"] == 2
 
 
 async def test_other_integrity_errors_are_raised_not_swallowed(lop_project, session_factory):
