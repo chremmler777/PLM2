@@ -104,8 +104,9 @@ async def test_text_with_control_characters_does_not_break(client, pm_auth, lop_
 
 async def test_filename_carries_project_code_and_date(client, pm_auth, lop_project):
     r, _ = await _export(client, pm_auth, lop_project.id)
+    name = f"LOP lop1 {_today().isoformat()}.xlsx"
     assert r.headers["content-disposition"] == \
-        f'attachment; filename="LOP lop1 {_today().isoformat()}.xlsx"'
+        f'attachment; filename="{name}"; filename*=UTF-8\'\'{name.replace(" ", "%20")}'
 
 
 async def test_unpinned_pdb_topics_follow_the_lines_with_blank_number(
@@ -130,3 +131,83 @@ async def test_missing_or_disabled_project_is_404(client, pm_auth, plain_project
     assert r.status_code == 404
     r = await client.get(f"{BASE}/projects/999999/export.xlsx", headers=pm_auth)
     assert r.status_code == 404
+
+
+async def test_hostile_project_code_gives_a_safe_header(client, pm_auth, lop_project, session_factory):
+    async with session_factory() as s:
+        p = await s.get(Project, lop_project.id)
+        p.code = 'A"b/c\\d\r\nX-Evil: 1é中'
+        await s.commit()
+    r, ws = await _export(client, pm_auth, lop_project.id)
+    h = r.headers["content-disposition"]
+    h.encode("latin-1")
+    assert "\r" not in h and "\n" not in h
+    fallback = h.split('filename="')[1].split('"; filename*=')[0]
+    assert '"' not in fallback and "/" not in fallback and "\\" not in fallback
+    assert fallback.isascii() and fallback.endswith(".xlsx")
+    assert "filename*=UTF-8''LOP%20A%22b%2Fc" in h and "%C3%A9" in h
+
+
+async def test_pin_line_keeps_its_topic_off_the_unpinned_rows(client, pm_auth, pdb_project, pdb):
+    pdb.topics = [topic(21), topic(22)]
+    r = await client.post(f"{BASE}/projects/{pdb_project.id}/pdb/21/pin", headers=pm_auth,
+                          json={"due_date": (_today() + timedelta(days=3)).isoformat()})
+    assert r.status_code == 201, r.text
+    for view in ("open", "meeting"):
+        _, ws = await _export(client, pm_auth, pdb_project.id, f"?view={view}")
+        rows = _rows(ws)
+        assert len(rows) == 1 + 2
+        assert [r_[0] is None for r_ in rows[1:]] == [False, True]
+        assert sum("Issue 21" in r_[1] for r_ in rows[1:]) == 1
+
+
+async def test_follow_pdb_failure_does_not_fail_the_download(
+        client, pm_auth, pdb_project, pdb, monkeypatch):
+    from app.services.lop_service import LopService
+
+    async def boom(*a, **k):
+        raise RuntimeError("db hiccup")
+    monkeypatch.setattr(LopService, "follow_pdb", boom)
+    pdb.topics = [topic(31)]
+    await _add(client, pm_auth, pdb_project.id, "Still here")
+    _, ws = await _export(client, pm_auth, pdb_project.id)
+    rows = _rows(ws)
+    assert rows[0] == HEAD and len(rows) == 3 and rows[1][1] == "Still here"
+
+
+async def test_formula_like_text_stays_a_string(client, pm_auth, lop_project):
+    texts = ["=1+1", "@x", "+1", "-1"]
+    for t in texts:
+        line = await _add(client, pm_auth, lop_project.id, t)
+        r = await client.post(f"{BASE}/lines/{line['id']}/comments", headers=pm_auth,
+                              json={"text": t})
+        assert r.status_code == 201
+    _, ws = await _export(client, pm_auth, lop_project.id)
+    rows = _rows(ws)[2:]
+    assert sorted(r_[1] for r_ in rows) == sorted(texts)
+    for row in ws.iter_rows(min_row=3):
+        for c in (row[1], row[13]):
+            assert c.data_type == "s" and isinstance(c.value, str)
+
+
+async def test_meeting_view_exports_the_open_lines_and_topics(client, pm_auth, pdb_project, pdb):
+    pdb.topics = [topic(41)]
+    await _add(client, pm_auth, pdb_project.id, "For the meeting")
+    _, ws = await _export(client, pm_auth, pdb_project.id, "?view=meeting")
+    rows = _rows(ws)
+    assert rows[0] == HEAD and len(rows) == 3
+    assert rows[1][1] == "For the meeting" and rows[2][0] is None
+
+
+async def test_rows_are_ordered_by_group_then_due_date(client, pm_auth, lop_project):
+    t = _today()
+    far = t + timedelta(days=60)
+    await _add(client, pm_auth, lop_project.id, "far", due=far, dept=lop_project.apqp_id)
+    await _add(client, pm_auth, lop_project.id, "late recent",
+               due=t - timedelta(days=2), dept=lop_project.apqp_id)
+    await _add(client, pm_auth, lop_project.id, "late old",
+               due=t - timedelta(days=9), dept=lop_project.apqp_id)
+    await _add(client, pm_auth, lop_project.id, "undated")
+    _, ws = await _export(client, pm_auth, lop_project.id)
+    titles = [r_[1] for r_ in _rows(ws)[2:]]
+    assert titles == ["late old", "late recent", "undated", "far"]   # overdue, new, other

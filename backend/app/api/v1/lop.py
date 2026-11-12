@@ -1,6 +1,7 @@
 """Project LOP (list of open points): PM tasks, comments, history.
 Everything under /v1/lop. Everyone logged in reads; writes follow the rules
 in app/services/lop_service.py."""
+import logging
 from datetime import date
 from typing import Literal, Optional
 
@@ -16,6 +17,7 @@ from app.services.lop_meetings import LopMeetings
 from app.services.lop_service import LopError, LopService, _today
 from app.services.worksheet_export import XLSX_MEDIA_TYPE
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/lop", tags=["lop"])
 
 
@@ -150,31 +152,38 @@ async def export_xlsx(project_id: int, view: Literal["meeting", "open", "closed"
         project = await LopService.get_project(db, project_id, user)
     except LopError as e:
         raise _http(e)
+    code = project.code
     await lop_sources.sync_project_lines(db, project_id, user.id)
     can_manage = await LopService.can_manage(db, user, project_id)
-    lines = await LopService.lines_for_project(db, project_id, view)
-    topics, note, by_id = [], None, {}
+    topics, note = [], None
     if view != "closed":
-        try:
-            topics = await pdb_client.project_topics(project.code)
-        except pdb_client.PdbUnavailable as e:
-            note = ("PDB is not configured; PDB topics are missing from this list."
-                    if "not configured" in str(e)
-                    else "PDB could not be reached; PDB topics are missing from this list.")
+        if not pdb_client.is_configured():
+            note = "PDB is not configured; PDB topics are missing from this list."
         else:
-            await LopService.follow_pdb(db, project_id, {str(t["id"]) for t in topics})
-            by_id = {str(t["id"]): t for t in topics}
-            lines = await LopService.lines_for_project(db, project_id, view)
+            try:
+                topics = await pdb_client.project_topics(code)
+            except pdb_client.PdbUnavailable:
+                note = "PDB could not be reached; PDB topics are missing from this list."
+        if topics:
+            try:
+                await LopService.follow_pdb(db, project_id, {str(t["id"]) for t in topics})
+            except Exception:             # the download never fails because of this
+                logger.exception("Following PDB failed for project %s", project_id)
+                await db.rollback()       # expires loaded rows: re-read what is still needed
+                await db.refresh(user)
+    lines = await LopService.lines_for_project(db, project_id, view)
+    by_id = {str(t["id"]): t for t in topics}
+    # same definition as the /pdb route: any open pin line takes its topic off the unpinned list
+    pinned = {ln.ref_key for ln in await LopService.pinned_topic_lines(db, project_id)
+              if ln.status != "closed"}
     ctx = await LopService.context(db, user, lines, can_manage=can_manage)
     ctx.pdb = by_id
-    pinned = {ln.ref_key for ln in lines if ln.kind == "pdb_topic"}
     rows = lop_export.sort_lines([LopService.line_dict(ln, ctx) for ln in lines])
     extra = lop_export.sort_topics([LopService.pdb_topic_dict(t, ctx) for t in topics
                                     if str(t["id"]) not in pinned])
     data = lop_export.build_lop_xlsx(rows, extra, note)
-    name = f"LOP {project.code} {_today().isoformat()}.xlsx"
     return Response(data, media_type=XLSX_MEDIA_TYPE,
-                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+                    headers={"Content-Disposition": lop_export.content_disposition(code, _today())})
 
 
 @router.post("/projects/{project_id}/lines", status_code=201)

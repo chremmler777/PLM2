@@ -1,8 +1,10 @@
 """xlsx of a project's list of open points (sheet "LOP"): one row per line,
 unpinned PDB topics after them. Dates are real Excel dates."""
 from datetime import date, datetime
+import re
 from io import BytesIO
 from typing import Optional
+from urllib.parse import quote
 
 import xlsxwriter
 
@@ -79,3 +81,12 @@ def build_lop_xlsx(lines: list[dict], pdb_topics: list[dict], note: Optional[str
     ws.autofilter(top, 0, top + max(len(lines) + len(pdb_topics), 1), len(HEADERS) - 1)
     wb.close()
     return buf.getvalue()
+
+
+def content_disposition(code: str, day: date) -> str:
+    """Attachment header for "LOP <code> <date>.xlsx": an ASCII fallback name
+    (quotes, slashes, control and non-ASCII characters become "_") plus the
+    real name percent-encoded (RFC 5987)."""
+    real = f"LOP {re.sub(r'[\x00-\x1f\x7f]', '_', code or '')} {day.isoformat()}.xlsx"
+    fallback = re.sub(r'["\\/]|[^\x20-\x7e]', "_", real)
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(real, safe='')}"
