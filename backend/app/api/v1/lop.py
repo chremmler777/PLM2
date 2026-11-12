@@ -90,10 +90,13 @@ async def mine(user: User = Depends(get_current_user), db: AsyncSession = Depend
     if synced:
         rows = await LopService.my_open_lines(db, user)
     ctx = await LopService.context(db, user, [ln for ln, _ in rows], can_manage=False)
+    can_manage: dict[int, bool] = {}          # once per project, not per line (polled every 60 s)
     out = []
     for line, project in rows:
         d = LopService.line_dict(line, ctx)
-        d["can_manage"] = await LopService.can_manage(db, user, line.project_id)
+        if line.project_id not in can_manage:
+            can_manage[line.project_id] = await LopService.can_manage(db, user, line.project_id)
+        d["can_manage"] = can_manage[line.project_id]
         d["can_report"] = not d["can_manage"] and line.status != "closed"
         d.update(project_code=project.code, project_name=project.name)
         out.append(d)

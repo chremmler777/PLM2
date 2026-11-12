@@ -270,6 +270,25 @@ async def test_mine_lists_my_open_lines_across_projects(client, pm_auth, quality
     assert (await client.get(f"{BASE}/mine", headers=quality_auth)).json() == []
 
 
+async def test_mine_asks_can_manage_once_per_project(client, pm_auth, quality_auth, lop_project, monkeypatch):
+    from app.services.lop_service import LopService
+    for t in ("A", "B", "C"):
+        assert (await client.post(_lines(lop_project.id), headers=pm_auth,
+                                  json={"title": t, "department_id": lop_project.apqp_id,
+                                        "due_date": "2026-11-20"})).status_code == 201
+    calls = []
+    real = LopService.can_manage
+
+    async def counted(session, user, project_id):
+        calls.append(project_id)
+        return await real(session, user, project_id)
+
+    monkeypatch.setattr(LopService, "can_manage", staticmethod(counted))
+    mine = (await client.get(f"{BASE}/mine", headers=quality_auth)).json()
+    assert len(mine) == 3 and all(x["can_manage"] is False and x["can_report"] for x in mine)
+    assert calls == [lop_project.id]
+
+
 async def test_clearing_and_resetting_a_due_date_keeps_the_first_and_needs_reasons(client, pm_auth, line):
     url = f"{BASE}/lines/{line}"
     assert (await client.patch(url, headers=pm_auth, json={"due_date": None})).status_code == 400
