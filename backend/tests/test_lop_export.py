@@ -211,3 +211,17 @@ async def test_rows_are_ordered_by_group_then_due_date(client, pm_auth, lop_proj
     _, ws = await _export(client, pm_auth, lop_project.id)
     titles = [r_[1] for r_ in _rows(ws)[2:]]
     assert titles == ["late old", "late recent", "undated", "far"]   # overdue, new, other
+
+
+async def test_empty_pdb_list_closes_the_pins(client, pm_auth, pdb_project, pdb):
+    pdb.topics = [topic(51)]
+    r = await client.post(f"{BASE}/projects/{pdb_project.id}/pdb/51/pin", headers=pm_auth,
+                          json={"due_date": (_today() + timedelta(days=3)).isoformat()})
+    assert r.status_code == 201, r.text
+    line_id = r.json()["id"]
+    pdb.topics = []
+    pdb_client.clear_cache()
+    _, ws = await _export(client, pm_auth, pdb_project.id)
+    assert _rows(ws) == [HEAD]
+    _, ws = await _export(client, pm_auth, pdb_project.id, "?view=closed")
+    assert [r_[0] for r_ in _rows(ws)[1:]] == [line_id]

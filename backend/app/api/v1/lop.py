@@ -155,16 +155,17 @@ async def export_xlsx(project_id: int, view: Literal["meeting", "open", "closed"
     code = project.code
     await lop_sources.sync_project_lines(db, project_id, user.id)
     can_manage = await LopService.can_manage(db, user, project_id)
-    topics, note = [], None
+    topics, note, answered = [], None, False
     if view != "closed":
         if not pdb_client.is_configured():
             note = "PDB is not configured; PDB topics are missing from this list."
         else:
             try:
                 topics = await pdb_client.project_topics(code)
+                answered = True           # an empty list is an answer too
             except pdb_client.PdbUnavailable:
                 note = "PDB could not be reached; PDB topics are missing from this list."
-        if topics:
+        if answered:
             try:
                 await LopService.follow_pdb(db, project_id, {str(t["id"]) for t in topics})
             except Exception:             # the download never fails because of this
