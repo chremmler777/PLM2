@@ -184,7 +184,7 @@ def _identity(cookie: Optional[str]) -> tuple[Optional[str], list[str]]:
 
 
 def allowed(roles: list[str]) -> bool:
-    if "plm2_Admin" in roles:
+    if "plm2_Admin" in roles or get_settings().sandbox_open:
         return True
     wanted = {r.strip() for r in get_settings().sandbox_hub_roles.split(",") if r.strip()}
     return bool(wanted & set(roles))
@@ -195,6 +195,9 @@ def widen_roles(roles: list[str]) -> list[str]:
     plm2_Admin stays as it is."""
     if "plm2_Admin" in roles or not allowed(roles):
         return roles
+    if get_settings().sandbox_open:
+        # Open sandbox: full rights for everyone, in their own copy only.
+        return roles + ["plm2_Admin"]
     wanted = [r.strip() for r in get_settings().sandbox_hub_roles.split(",") if r.strip()]
     return roles + [r for r in wanted if r not in roles]
 

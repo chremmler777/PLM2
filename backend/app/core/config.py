@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # Sandbox instance (app/sandbox.py): one database per person, cloned from
     # sandbox_template_db; only plm2_Admin + sandbox_hub_roles get in.
     sandbox_mode: bool = False
+    #: Sandbox for everyone (2026-11-13): any logged-in person gets in and works
+    #: as plm2_Admin in their own copy. Off = only plm2_Admin + sandbox_hub_roles.
+    sandbox_open: bool = False
     sandbox_template_db: str = "plm_sbx_template"
     sandbox_meta_db: str = "plm_sbx_meta"
     sandbox_hub_roles: str = "plm2_ProjectManager,plm2_Sales"

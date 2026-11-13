@@ -102,7 +102,7 @@ export default function SandboxBanner() {
         className="fixed bottom-3 left-1/2 z-[9999] flex -translate-x-1/2 items-center gap-3 rounded-lg bg-orange-500 px-4 py-2 text-sm text-black shadow-lg"
       >
         <span className="font-bold">SANDBOX</span>
-        <span className="hidden sm:inline">Your own copy. Nothing here is real, no mails go out.</span>
+        <span className="hidden sm:inline">Your own copy of the PLM data, full rights for everyone. Nothing here changes the real PLM, no mails go out.</span>
         <button className={`${btn} bg-black text-white hover:bg-gray-800`} disabled={busy}
           onClick={() => setOpen(true)}>Feedback</button>
         <button className={`${btn} border border-black hover:opacity-80`} disabled={busy}

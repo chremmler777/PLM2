@@ -18,6 +18,8 @@ from app.services.lop_service import LopError, LopService, _today
 from app.services.worksheet_export import XLSX_MEDIA_TYPE
 
 logger = logging.getLogger(__name__)
+from app.core.config import get_settings
+
 router = APIRouter(prefix="/lop", tags=["lop"])
 
 
@@ -371,6 +373,9 @@ async def request_sampling(project_id: int, tool_number: str, body: SamplingRequ
     """The PM flags a tool that has no sampling date: PDB gets an open
     sampling request, so the tool stands on Scheduling's list as waiting for
     a slot. One open request per tool; a second flag returns the first."""
+    if get_settings().sandbox_mode:
+        # The sandbox reads the real PDB but must never write into it.
+        raise HTTPException(403, "Flag for planning is switched off in the sandbox: it would write into the real PDB")
     try:
         project = await LopService.get_project(db, project_id, user)
         if not await LopService.can_manage(db, user, project_id):

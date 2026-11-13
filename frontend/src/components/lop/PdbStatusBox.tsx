@@ -9,6 +9,7 @@
  * is said in words, never shown as an empty table.
  */
 import { useMemo, useState, type ReactNode } from 'react'
+import { IS_SANDBOX_INSTANCE } from '../../sandboxInstance/SandboxBanner'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronUp, Flag } from 'lucide-react'
 import { lopApi, lopKeys } from '../../api/lop'
@@ -100,7 +101,7 @@ function NextSampling({ tool, onRequest }: { tool: PdbTool; onRequest?: () => vo
       {tool.sampling_requested_week && (
         <span className="font-normal">{` · requested for week of ${shortDay(tool.sampling_requested_week)}, no slot yet`}</span>
       )}
-      {!tool.sampling_requested_week && onRequest && (
+      {!tool.sampling_requested_week && onRequest && !IS_SANDBOX_INSTANCE && (
         <button type="button" data-testid="pdb-request-sampling" onClick={onRequest}
           title="Tell PDB Scheduling that this tool needs a sampling slot"
           className="ml-2 rounded border border-red-400/70 px-1.5 py-0.5 text-[11px] font-medium text-red-100 hover:bg-red-900/40">

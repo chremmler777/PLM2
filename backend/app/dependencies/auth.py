@@ -128,14 +128,15 @@ async def get_current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
 
     hub_roles = plm2_roles(payload)
-    if not hub_roles:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "No plm2 role in token")
     if settings.sandbox_mode:
         # Sandbox (app/sandbox.py): in their own copy everyone let in works
-        # as Project Management AND Sales, so they can walk the whole offer
-        # and timing flow. Written as real memberships in that copy only.
+        # as Project Management AND Sales (or, in the open sandbox, as
+        # plm2_Admin even without any plm2 role), so they can walk the whole
+        # flow. Written as real memberships in that copy only.
         from app.sandbox import widen_roles
         hub_roles = widen_roles(hub_roles)
+    if not hub_roles:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "No plm2 role in token")
 
     # NOTE: the AdminPanel hub token currently mints {sub, username, department,
     # roles, auth_time} with NO "email" claim, so this always falls through to
