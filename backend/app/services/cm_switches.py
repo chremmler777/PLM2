@@ -63,6 +63,14 @@ ASKER_OWNS_QUESTION = True
 # costing is filled from it). Off = hours optional, as before.
 ASSESSMENT_HOURS_REQUIRED = True
 
+# Christoph 2026-11-14 (live CR-2026-0001: quote creation opened the second
+# the last assessment came in, three departments had never opened costing):
+# on a customer change every Responsible department closes its costing before
+# quote creation, also when it answered No on every row: implementation
+# support hours (0 allowed) and Finalize, or "no cost". Off = a department
+# that marked nothing impacted owes nothing, as before.
+ALL_RESPONSIBLE_CLOSE_COSTING = True
+
 # Christoph 2026-11-08: a Yes on the checklist says in words what changes; a
 # number, date or reference is welcome but not forced (timing risk has no
 # number to give). True brings back the digit rule.

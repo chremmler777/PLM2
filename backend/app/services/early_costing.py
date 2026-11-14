@@ -85,13 +85,36 @@ def _dept_name(a: ChangeAssessment) -> Optional[str]:
     return None if d is NO_VALUE or d is None else d.name
 
 
+def _owes_by_answer(change: ChangeRequest, department_id: int) -> bool:
+    """Its checklist marked something impacted (or it declared money/time)."""
+    from app.services.change_service import ChangeService
+    return any(a.verdict in COSTING_VERDICTS and ChangeService.owes_costing_input(a)
+               for a in _rows(change, department_id))
+
+
+def closes_only(change: ChangeRequest, department_id: int) -> bool:
+    """Christoph 2026-11-14: a Responsible department of a customer change
+    that answered feasible with nothing impacted. It has nothing to cost but
+    still closes its costing (implementation support hours, 0 allowed, then
+    Finalize; or "no cost") before quote creation opens. Switch
+    ALL_RESPONSIBLE_CLOSE_COSTING."""
+    from app.services import cm_switches
+    if not cm_switches.ALL_RESPONSIBLE_CLOSE_COSTING or not change.customer_relevant:
+        return False
+    if _owes_by_answer(change, department_id) or _always_owes(change, department_id):
+        return False
+    return any(a.verdict in COSTING_VERDICTS and a.rasic_letter == "R"
+               and a.status != "waived" and a.submitted_at is not None
+               for a in _rows(change, department_id))
+
+
 def owes(change: ChangeRequest, department_id: int) -> bool:
     """The department answered feasible and its answer owes a cost input
-    (or it is the Project Manager on a customer change)."""
-    from app.services.change_service import ChangeService
-    return (any(a.verdict in COSTING_VERDICTS and ChangeService.owes_costing_input(a)
-                for a in _rows(change, department_id))
-            or _always_owes(change, department_id))
+    (or it is the Project Manager on a customer change, or a Responsible
+    department that closes its costing with nothing impacted)."""
+    return (_owes_by_answer(change, department_id)
+            or _always_owes(change, department_id)
+            or closes_only(change, department_id))
 
 
 def has_costing_verdict(change: ChangeRequest, department_id: int) -> bool:
@@ -260,7 +283,8 @@ async def _has_answer(session: AsyncSession, change: ChangeRequest,
     q = select(func.count(CostingPosition.id)).where(
         CostingPosition.change_id == change.id,
         CostingPosition.department_id == department_id)
-    if not _always_owes(change, department_id):
+    # ... and so is the 0 of a department that had nothing to cost (2026-11-14)
+    if not _always_owes(change, department_id) and not closes_only(change, department_id):
         q = q.where(or_(CostingPosition.kind != "support_effort",
                         func.coalesce(CostingPosition.hours, 0) != 0))
     positions = (await session.execute(q)).scalar() or 0
@@ -526,6 +550,9 @@ async def _costing_hours_missing(session: AsyncSession, change: ChangeRequest,
     from app.services import cm_switches
     from app.models.change_impl import ImplementationBooking
     if not cm_switches.ASSESSMENT_HOURS_REQUIRED:
+        return False
+    if closes_only(change, department_id):
+        # nothing impacted: there was no costing work to book (2026-11-14)
         return False
     since = max((a.submitted_at for a in _rows(change, department_id) if a.submitted_at),
                 default=None)

@@ -22,9 +22,11 @@ IMPACTED = {"impacts": [{"key": "cycle_time", "answer": "yes", "impacted": True}
 
 
 async def _make(session_factory, seed, *, status="costing", extra_rows=(),
-                tool_verdict="feasible"):
+                tool_verdict="feasible", packaging_closed=True):
     """A customer change: Tool Engineer submitted feasible with an impact
-    (owes costing), Packaging submitted 'nothing impacted' (owes nothing).
+    (owes costing), Packaging submitted 'nothing impacted' and closed its
+    costing with "no cost" (2026-11-14: every Responsible department closes;
+    packaging_closed=False leaves it open).
     extra_rows: (department name, stage, letter, submitted)."""
     from datetime import datetime, timedelta
     async with session_factory() as s:
@@ -55,6 +57,10 @@ async def _make(session_factory, seed, *, status="costing", extra_rows=(),
         rows += [(n, st, l, "feasible" if sub else "pending", NOTHING_IMPACTED if sub else None, sub)
                  for n, st, l, sub in extra_rows]
         for name, stage, letter, verdict, details, sub in rows:
+            if name == "Packaging Engineer" and packaging_closed:
+                details = {**details, "costing_finalized_at": now.isoformat(),
+                           "costing_finalized_by": seed["admin_id"],
+                           "costing_no_cost": {"reason": "no_work"}}
             s.add(ChangeAssessment(
                 change_id=change.id, department_id=depts[name], stage_order=stage,
                 rasic_letter=letter, verdict=verdict,
@@ -163,9 +169,11 @@ async def test_a_guard_holds_the_move_and_says_why(client, admin_auth, session_f
     assert "not feasible" in st["held_by"]
 
 
-async def test_full_assessment_runs_through_costing_into_quote_creation(
+async def test_full_assessment_stops_in_costing_until_every_department_closed(
         session_factory, seed):
-    # in assessment, every answer in and nothing owed: both hops at once
+    # in assessment, every answer in, Tool Engineer answered No on every row:
+    # before 2026-11-14 both hops ran at once (live CR-2026-0001); now the
+    # change waits in costing for Tool Engineer to close its costing
     ids = await _make(session_factory, seed, status="in_assessment")
     async with session_factory() as s:
         a = (await s.execute(select(ChangeAssessment).where(
@@ -175,8 +183,8 @@ async def test_full_assessment_runs_through_costing_into_quote_creation(
         await s.commit()
     async with session_factory() as s:
         moved = await auto_advance.run_after(s, ids["change_id"], seed["admin_id"])
-    assert moved == ["costing", "quoting"]
-    assert await _status(session_factory, ids["change_id"]) == "quoting"
+    assert moved == ["costing"]
+    assert await _status(session_factory, ids["change_id"]) == "costing"
 
 
 async def test_switched_off_nothing_moves(monkeypatch, client, session_factory, seed):
