@@ -50,7 +50,8 @@ def _row(d: dict) -> list:
     unpinned = d.get("id") is None
     last = d.get("last_comment")
     return [
-        d.get("id"), d.get("text"), d.get("source_label"), d.get("tool_number"),
+        d.get("id"), d.get("text"), d.get("source_label"),
+        d.get("tool_number") or ", ".join(e["part_number"] for e in d.get("equipment") or []) or None,
         d.get("department_name"), _owners(d),
         _d(d.get("first_due_date")), _d(d.get("due_date")), _d(d.get("next_check_date")),
         None if unpinned or not d.get("days_late") else d["days_late"],

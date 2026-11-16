@@ -25,6 +25,16 @@ export interface LopLastComment {
 
 export interface LopOwner { id: number; name: string | null }
 
+/** A tool, gauge, EOAT or assembly equipment of the project in PLM. */
+export interface LopEquipment {
+  id: number
+  part_number: string
+  name: string
+  kind: 'tool' | 'gauge' | 'eoat' | 'assembly_equipment'
+  /** The tool it belongs to by its number (a tool: itself); null outside the numbering scheme. */
+  tool_number: string | null
+}
+
 export interface LopLine {
   /** null for a PDB topic nobody pinned (it is not a LOP line yet). */
   id: number | null
@@ -56,6 +66,8 @@ export interface LopLine {
   source_closed: boolean
   department_name: string | null
   responsible_name: string | null
+  /** Equipment of the project in PLM the line is about. */
+  equipment?: LopEquipment[]
   /** More people who own the line with the main owner (the responsible). */
   additional_owners?: LopOwner[]
   /** On "my lines": whether the caller is the main owner or an additional one. */
@@ -183,6 +195,8 @@ export interface LinePatch {
   clear_responsible?: boolean
   /** The full list of additional owners; [] removes them all. */
   additional_owner_ids?: number[]
+  /** The full list of linked equipment (PLM item ids); [] removes all links. */
+  equipment_ids?: number[]
   due_date?: string | null
   next_check_date?: string | null
   status?: LopStatus
@@ -197,6 +211,7 @@ export interface LineCreate {
   next_check_date?: string | null
   responsible_id?: number | null
   additional_owner_ids?: number[]
+  equipment_ids?: number[]
 }
 
 export type SamplingPurpose = 'material_test' | 'validation_mrr' | 'ecr_validation' | 'part_demand'

@@ -33,6 +33,8 @@ class LineCreate(BaseModel):
     responsible_id: Optional[int] = None
     #: More people who own the task with the main owner (the responsible).
     additional_owner_ids: Optional[list[int]] = None
+    #: Tools, gauges and assembly equipment of the project in PLM the task is about.
+    equipment_ids: Optional[list[int]] = None
 
 
 class LinePatch(BaseModel):
@@ -43,6 +45,8 @@ class LinePatch(BaseModel):
     clear_responsible: bool = False
     #: The full list of additional owners; [] removes them all.
     additional_owner_ids: Optional[list[int]] = None
+    #: The full list of linked equipment (PLM item ids); [] removes all links.
+    equipment_ids: Optional[list[int]] = None
     due_date: Optional[date] = None
     next_check_date: Optional[date] = None
     status: Optional[Literal["new", "open", "in_work", "done_check", "closed"]] = None
@@ -218,6 +222,18 @@ async def create_line(project_id: int, body: LineCreate,
     except LopError as e:
         raise _http(e)
     return await _one(db, user, line)
+
+
+@router.get("/projects/{project_id}/equipment")
+async def project_equipment(project_id: int, user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    """The project's tools, gauges and assembly equipment in PLM: what a line
+    can be linked to."""
+    try:
+        await LopService.get_project(db, project_id, user)
+    except LopError as e:
+        raise _http(e)
+    return await LopService.project_equipment(db, project_id)
 
 
 @router.get("/projects/{project_id}/sep-candidates")

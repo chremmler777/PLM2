@@ -52,7 +52,9 @@ export function LopHelpContent() {
           <li><B>+ Task</B>: write the task, pick the department and the due date. The project-team member of that
             department becomes responsible. A department nobody is named for comes to you. <B>Responsible</B> is the
             main owner: the task counts for that person and their department. <B>Additional owners</B> see the task as
-            theirs too and can report it done. Keep the task to
+            theirs too and can report it done. <B>Equipment</B> links the
+            task to a tool, gauge, EOAT or assembly equipment of the project in PLM; the Equipment filter then shows
+            everything for it. Tool topics from a sampling stay in PDB. Keep the task to
             one line; goal and steps go into <B>Details</B>. Drop files (drawing, photo, a mail saved as .msg) onto
             the form or onto the open line to attach them; the project team can attach too.</li>
           <li><B>Add from SEP</B>: pull in single SEP items or a whole gate. They do not come in by themselves.</li>

@@ -57,7 +57,7 @@ from app.models.training import TrainingVersion, TrainingSignoff, TrainingAttemp
 from app.models.tool_shrink import ToolShrinkDecision
 from app.models.mail import MailRecipient, MailOutbox
 from app.models.moldflow import ToolMoldflow
-from app.models.lop import LopLine, LopLineOwner, LopComment, LopEvent, LopFile, LopMeeting, LopMeetingMark
+from app.models.lop import LopLine, LopLineOwner, LopLineEquipment, LopComment, LopEvent, LopFile, LopMeeting, LopMeetingMark
 
 __all__ = [
     "Base",
@@ -141,5 +141,5 @@ __all__ = [
     "FormDefinition",
     "FormInstance",
     "FormEvent",
-    "LopLine", "LopLineOwner", "LopComment", "LopEvent", "LopFile", "LopMeeting", "LopMeetingMark",
+    "LopLine", "LopLineOwner", "LopLineEquipment", "LopComment", "LopEvent", "LopFile", "LopMeeting", "LopMeetingMark",
 ]

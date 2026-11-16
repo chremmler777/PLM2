@@ -4,7 +4,7 @@ import type { LopLine, LopProjectResponse, PdbResponse } from '../../types/lop'
 export function lopLine(over: Partial<LopLine> = {}): LopLine {
   return {
     id: 1, project_id: 2, kind: 'task', ref_key: null, title: 'Packaging proposal to customer',
-    details: null, file_count: 0, additional_owners: [],
+    details: null, file_count: 0, additional_owners: [], equipment: [],
     department_id: 10, responsible_id: 7, responsible_is_default: false,
     due_date: '2026-11-14', first_due_date: '2026-11-14', due_is_default: false, next_check_date: null,
     status: 'open', closed_at: null, closed_by: null, last_update_at: '2026-11-10', last_update_by: 5,

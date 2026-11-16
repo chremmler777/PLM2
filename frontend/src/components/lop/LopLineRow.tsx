@@ -8,6 +8,7 @@ import { lopApi } from '../../api/lop'
 import { MARK_LABEL, STATUS_LABEL, dueLabel, escalationLabel, pdbTopicUrl, shortDay, sourceLabel, sourceTone } from '../../lib/lop'
 import type { LinePatch, LopLine, LopMeetingRef, MeetingMark } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
+import { EquipmentTags } from './LopEquipment'
 import { DefaultMarker, InlineError } from './lopUi'
 import { useLopWrite } from './useLopWrite'
 
@@ -35,6 +36,7 @@ function TaskCell({ line }: { line: LopLine }) {
       </div>
       {more && <div className="text-[11px] text-slate-400">{more}</div>}
       {line.details && <div data-testid="lop-row-details" className="line-clamp-2 whitespace-pre-line text-[11px] text-slate-400" title={line.details}>{line.details}</div>}
+      <EquipmentTags equipment={line.equipment} />
       {!!line.file_count && (
         <span data-testid="lop-row-files" title={`${line.file_count} file${line.file_count === 1 ? '' : 's'} attached: open the line to see them`}
           className="mt-0.5 inline-flex items-center gap-0.5 text-[11px] text-sky-300">
