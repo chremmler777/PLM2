@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.entities import Plant, Project, User
 from app.models.lop import (
-    DETAILS_MAX, LOP_STATUSES, TITLE_MAX, LopComment, LopEvent, LopFile, LopLine,
+    DETAILS_MAX, LOP_STATUSES, TITLE_MAX, LopComment, LopEvent, LopFile, LopLine, LopLineOwner,
 )
 from app.models.workflow import Department, ProjectResponsible
 from app.services import lop_rules as rules
@@ -128,6 +128,8 @@ class LineContext:
     meetings: dict[int, dict] = field(default_factory=dict)
     # line id -> mark in the project's open meeting
     marks: dict[int, str] = field(default_factory=dict)
+    # line id -> user ids of its additional owners, in the order they were added
+    owners: dict[int, list[int]] = field(default_factory=dict)
     # line id -> number of attached files
     file_counts: dict[int, int] = field(default_factory=dict)
 
@@ -232,6 +234,48 @@ class LopService:
         if uid not in await LopService.team_user_ids(session, project_id):
             raise LopError("The responsible person must be in the project team")
 
+    # ---------------------------------------------------- additional owners
+    @staticmethod
+    async def owner_ids(session: AsyncSession, line_id: int) -> list[int]:
+        """The line's additional owners, in the order they were added."""
+        return list((await session.execute(
+            select(LopLineOwner.user_id).where(LopLineOwner.line_id == line_id)
+            .order_by(LopLineOwner.id))).scalars().all())
+
+    @staticmethod
+    async def set_additional_owners(session: AsyncSession, line: LopLine, user: User,
+                                    ids: Optional[list[int]], reason: Optional[str] = None) -> bool:
+        """Replace the line's additional owners with `ids` (team members only;
+        the main owner and repeats are dropped). Each add and remove is an
+        event; a person who was added gets a badge. True when the list changed.
+        The caller commits."""
+        wanted: list[int] = []
+        for uid in ids or []:
+            if uid != line.responsible_id and uid not in wanted:
+                wanted.append(uid)
+        team = await LopService.team_user_ids(session, line.project_id)
+        if any(uid not in team for uid in wanted):
+            raise LopError("An additional owner must be in the project team")
+        rows = list((await session.execute(
+            select(LopLineOwner).where(LopLineOwner.line_id == line.id))).scalars().all())
+        have = {r.user_id: r for r in rows}
+        gone = [r for r in rows if r.user_id not in wanted]
+        new = [uid for uid in wanted if uid not in have]
+        if not gone and not new:
+            return False
+        names = {u.id: _uname(u) for u in (await session.execute(select(User).where(
+            User.id.in_([r.user_id for r in gone] + new)))).scalars().all()}
+        for r in gone:
+            LopService._event(session, line, user, "additional_owner", names.get(r.user_id), None, reason)
+            await session.delete(r)
+        text = await LopService._line_text(session, line) if new else ""
+        for uid in new:
+            session.add(LopLineOwner(line_id=line.id, user_id=uid, added_by=user.id))
+            LopService._event(session, line, user, "additional_owner", None, names.get(uid), reason)
+            await LopService._badge(session, uid, user.id, line.project_id,
+                                    "you are an additional owner of a line", text)
+        return True
+
     # ---------------------------------------------------------------- badges
     @staticmethod
     async def _line_text(session: AsyncSession, line: LopLine) -> str:
@@ -305,7 +349,8 @@ class LopService:
                           department_id: Optional[int] = None,
                           due_date: Optional[date] = None,
                           next_check_date: Optional[date] = None,
-                          responsible_id: Optional[int] = None) -> LopLine:
+                          responsible_id: Optional[int] = None,
+                          additional_owner_ids: Optional[list[int]] = None) -> LopLine:
         await LopService.get_project(session, project_id, user)
         if not await LopService.can_manage(session, user, project_id):
             raise LopForbidden("Only the Project Manager creates lines")
@@ -332,6 +377,8 @@ class LopService:
         session.add(line)
         await session.flush()
         LopService._event(session, line, user, "created", None, title)
+        if additional_owner_ids:
+            await LopService.set_additional_owners(session, line, user, additional_owner_ids)
         await LopService.mark_in_meeting(session, line)
         await LopService.notify_assigned(session, user, [line])
         await session.commit()
@@ -354,9 +401,11 @@ class LopService:
         manage = await LopService.can_manage(session, user, line.project_id)
         if not manage:
             only_done = set(body) == {"status"} and body["status"] == "done_check"
-            if not (only_done and line.responsible_id == user.id and line.status != "closed"):
+            owner = line.responsible_id == user.id or (
+                only_done and user.id in await LopService.owner_ids(session, line.id))
+            if not (only_done and owner and line.status != "closed"):
                 raise LopForbidden("Only the Project Manager changes a line; "
-                                   "the responsible person can report it as done")
+                                   "its owners can report it as done")
         if body.get("clear_responsible") and body.get("responsible_id") is not None:
             raise LopError("Clear the responsible or name one, not both")
         from app.services import lop_sources
@@ -404,6 +453,15 @@ class LopService:
             await LopService._check_responsible(session, line.project_id, body["responsible_id"])
             changed |= await LopService._set_responsible(
                 session, line, user, body["responsible_id"], False, reason)
+
+        if "additional_owner_ids" in body:
+            changed |= await LopService.set_additional_owners(
+                session, line, user, body["additional_owner_ids"], reason)
+        if line.responsible_id != old_responsible and line.responsible_id is not None:
+            # the new main owner is not also an additional owner
+            rest = [uid for uid in await LopService.owner_ids(session, line.id)
+                    if uid != line.responsible_id]
+            await LopService.set_additional_owners(session, line, user, rest, reason)
 
         if "due_date" in body:
             new_due = body["due_date"]
@@ -625,7 +683,10 @@ class LopService:
         rows = (await session.execute(
             select(LopLine, Project).join(Project, Project.id == LopLine.project_id)
             .join(Plant, Plant.id == Project.plant_id)
-            .where(LopLine.responsible_id == user.id, LopLine.status != "closed",
+            .where(or_(LopLine.responsible_id == user.id,
+                       LopLine.id.in_(select(LopLineOwner.line_id)
+                                      .where(LopLineOwner.user_id == user.id))),
+                   LopLine.status != "closed",
                    Project.lop_enabled.is_(True),
                    Plant.organization_id == user.organization_id)
             .order_by(LopLine.due_date.is_(None), LopLine.due_date, LopLine.id))).all()
@@ -639,6 +700,11 @@ class LopService:
             return ctx
         ids = [ln.id for ln in lines]
         uids = {x for ln in lines for x in (ln.responsible_id, ln.last_update_by, ln.closed_by) if x}
+        for line_id, uid in (await session.execute(
+                select(LopLineOwner.line_id, LopLineOwner.user_id)
+                .where(LopLineOwner.line_id.in_(ids)).order_by(LopLineOwner.id))).all():
+            ctx.owners.setdefault(line_id, []).append(uid)
+            uids.add(uid)
         comments = (await session.execute(
             select(LopComment).where(LopComment.line_id.in_(ids))
             .order_by(LopComment.created_at, LopComment.id))).scalars().all()
@@ -746,6 +812,8 @@ class LopService:
             "source_closed": bool(src.get("closed")),
             "department_name": ctx.departments.get(line.department_id),
             "responsible_name": _uname(ctx.users.get(line.responsible_id)),
+            "additional_owners": [{"id": uid, "name": _uname(ctx.users.get(uid))}
+                                  for uid in ctx.owners.get(line.id, [])],
             "days_late": rules.days_late(s, today),
             "late": rules.is_late(s, today),
             "stale": rules.is_stale(s, today, stale_days),
@@ -758,7 +826,9 @@ class LopService:
             "meeting_mark": ctx.marks.get(line.id),
             "last_comment": ctx.last_comments.get(line.id),
             "can_manage": ctx.can_manage,
-            "can_report": (line.responsible_id == ctx.user_id and status != "closed"
+            "can_report": ((line.responsible_id == ctx.user_id
+                            or ctx.user_id in ctx.owners.get(line.id, []))
+                           and status != "closed"
                            and not ctx.can_manage),
         }
         if line.kind == "pdb_topic":
@@ -784,6 +854,7 @@ class LopService:
             "created_at": None, "created_by": None, "source_label": "PDB topic",
             "text": pdb_topic_text(topic), "source_context": None, "source_closed": False,
             "department_name": topic.get("department"), "responsible_name": None,
+            "additional_owners": [],
             "days_late": 0, "late": rules.is_late(s, ctx.today),
             "stale": rules.is_stale(s, ctx.today, stale_days),
             "under_control": rules.under_control(s),

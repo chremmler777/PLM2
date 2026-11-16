@@ -37,12 +37,21 @@ def _d(v: Optional[str]) -> Optional[date]:
     return date.fromisoformat(v[:10]) if v else None
 
 
+def _owners(d: dict) -> Optional[str]:
+    """The main owner, then the additional owners: "Main (+ A, B)"."""
+    more = [o["name"] for o in d.get("additional_owners") or [] if o.get("name")]
+    main = d.get("responsible_name")
+    if not more:
+        return main
+    return f"{main or 'no name'} (+ {', '.join(more)})"
+
+
 def _row(d: dict) -> list:
     unpinned = d.get("id") is None
     last = d.get("last_comment")
     return [
         d.get("id"), d.get("text"), d.get("source_label"), d.get("tool_number"),
-        d.get("department_name"), d.get("responsible_name"),
+        d.get("department_name"), _owners(d),
         _d(d.get("first_due_date")), _d(d.get("due_date")), _d(d.get("next_check_date")),
         None if unpinned or not d.get("days_late") else d["days_late"],
         "Open in PDB" if unpinned else STATUS_WORDS.get(d.get("status"), d.get("status")),

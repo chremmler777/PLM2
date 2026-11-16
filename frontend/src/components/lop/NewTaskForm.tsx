@@ -10,7 +10,7 @@ import { formatBytes } from '../../api/sepFiles'
 import { LOP_DETAILS_MAX, LOP_TITLE_MAX, type LineCreate } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
 import { FileDrop } from './LopFiles'
-import { InlineError, PersonOptions, inputCls, labelCls } from './lopUi'
+import { InlineError, OwnersPicker, PersonOptions, inputCls, labelCls } from './lopUi'
 import type { TeamPerson } from './lopTeam'
 import { lopErrorMessage, useLopWrite } from './useLopWrite'
 
@@ -22,6 +22,7 @@ export default function NewTaskForm({ projectId, team, people, teamError = null,
   const [dept, setDept] = useState('')
   const [resp, setResp] = useState('')
   const [due, setDue] = useState('')
+  const [owners, setOwners] = useState<number[]>([])
   const [files, setFiles] = useState<File[]>([])
   const [fileError, setFileError] = useState<string | null>(null)
   const create = useLopWrite(projectId, async (body: LineCreate) => {
@@ -48,6 +49,8 @@ export default function NewTaskForm({ projectId, team, people, teamError = null,
     if (dept) body.department_id = Number(dept)
     if (resp) body.responsible_id = Number(resp)
     if (due) body.due_date = due
+    const more = owners.filter((id) => String(id) !== resp)
+    if (more.length > 0) body.additional_owner_ids = more
     create.run(body)
   }
   const blocked = !title.trim() || tooLong || detailsTooLong || create.pending || added
@@ -65,12 +68,14 @@ export default function NewTaskForm({ projectId, team, people, teamError = null,
             {team.map((r) => <option key={r.department_id} value={r.department_id}>{r.department_name}</option>)}
           </select>
         </label>
-        <label className={labelCls}>Responsible
+        <label className={labelCls} title="The main owner: the task counts for this person and their department">Responsible
           <select className={inputCls} value={resp} onChange={(e) => setResp(e.target.value)}>
             <option value="">from department</option>
             <PersonOptions people={people} />
           </select>
         </label>
+        <OwnersPicker testId="lop-new-task-owners" people={people} value={owners}
+          mainId={resp ? Number(resp) : null} onChange={setOwners} />
         <label className={labelCls}>Due date
           <input type="date" className={inputCls} value={due} onChange={(e) => setDue(e.target.value)} />
         </label>

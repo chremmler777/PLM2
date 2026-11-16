@@ -14,18 +14,21 @@ import { shortDay } from '../../lib/lop'
 import { LOP_DETAILS_MAX, LOP_TITLE_MAX, type LinePatch, type LopHistoryItem, type LopLine } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
 import LopFiles from './LopFiles'
-import { DefaultMarker, InlineError, PersonOptions, inputCls, labelCls } from './lopUi'
+import { DefaultMarker, InlineError, OwnersPicker, PersonOptions, inputCls, labelCls } from './lopUi'
 import type { TeamPerson } from './lopTeam'
 import { useLopWrite } from './useLopWrite'
 
 const FIELD_LABEL: Record<string, string> = {
   due_date: 'due date', next_check_date: 'next check', status: 'status', responsible: 'responsible',
-  department: 'department', title: 'title', details: 'details',
+  department: 'department', title: 'title', details: 'details', responsible_id: 'responsible',
 }
 
 function historyText(h: LopHistoryItem): string {
   if (h.type === 'comment') return h.text
   if (h.field === 'file') return h.new_value ? `file attached: ${h.new_value}` : `file removed: ${h.old_value ?? ''}`
+  if (h.field === 'additional_owner') {
+    return `additional owner ${h.new_value ? `added: ${h.new_value}` : `removed: ${h.old_value ?? ''}`}${h.reason ? ` (${h.reason})` : ''}`
+  }
   if (h.field === 'details') return `details ${h.old_value ? (h.new_value ? 'changed' : 'removed') : 'added'}${h.reason ? ` (${h.reason})` : ''}`
   const field = FIELD_LABEL[h.field] ?? h.field.replace(/_/g, ' ')
   const fmt = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? shortDay(v) : v || 'none')
@@ -37,6 +40,8 @@ function PmForm({ line, projectId, team, people, teamError }: {
 }) {
   const [title, setTitle] = useState(line.title ?? '')
   const [details, setDetails] = useState(line.details ?? '')
+  const ownersBefore = (line.additional_owners ?? []).map((o) => o.id)
+  const [owners, setOwners] = useState<number[]>(ownersBefore)
   const [dept, setDept] = useState(line.department_id != null ? String(line.department_id) : '')
   const [resp, setResp] = useState(line.responsible_id != null ? String(line.responsible_id) : '')
   const [due, setDue] = useState(line.due_date ?? '')
@@ -52,6 +57,8 @@ function PmForm({ line, projectId, team, people, teamError }: {
     if (resp) body.responsible_id = Number(resp)
     else body.clear_responsible = true
   }
+  const ownersNow = owners.filter((id) => String(id) !== resp)
+  if (ownersNow.join(',') !== ownersBefore.join(',')) body.additional_owner_ids = ownersNow
   if (due !== (line.due_date ?? '')) body.due_date = due || null
   if (check !== (line.next_check_date ?? '')) body.next_check_date = check || null
   // the server wants a reason once the line ever had a due date (first_due_date set),
@@ -79,12 +86,14 @@ function PmForm({ line, projectId, team, people, teamError }: {
             {team.map((r) => <option key={r.department_id} value={r.department_id}>{r.department_name}</option>)}
           </select>
         </label>
-        <label className={labelCls}>Responsible
+        <label className={labelCls} title="The main owner: the line counts for this person and their department">Responsible
           <select className={inputCls} value={resp} onChange={(e) => setResp(e.target.value)}>
             <option value="">no name</option>
             <PersonOptions people={people} />
           </select>
         </label>
+        <OwnersPicker testId={`lop-owners-${line.id}`} people={people} value={owners}
+          mainId={resp ? Number(resp) : null} onChange={setOwners} />
         <label className={labelCls}>
           <span>Due date{line.due_is_default && <DefaultMarker testId="default-due-editor" title="Gate target date, not yet set by the PM" />}</span>
           <input type="date" className={inputCls} value={due} onChange={(e) => setDue(e.target.value)} />

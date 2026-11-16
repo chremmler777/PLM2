@@ -23,6 +23,8 @@ export interface LopLastComment {
   created_at: string | null
 }
 
+export interface LopOwner { id: number; name: string | null }
+
 export interface LopLine {
   /** null for a PDB topic nobody pinned (it is not a LOP line yet). */
   id: number | null
@@ -54,6 +56,10 @@ export interface LopLine {
   source_closed: boolean
   department_name: string | null
   responsible_name: string | null
+  /** More people who own the line with the main owner (the responsible). */
+  additional_owners?: LopOwner[]
+  /** On "my lines": whether the caller is the main owner or an additional one. */
+  my_role?: 'main' | 'additional'
   days_late: number
   late: boolean
   stale: boolean
@@ -175,6 +181,8 @@ export interface LinePatch {
   department_id?: number | null
   responsible_id?: number
   clear_responsible?: boolean
+  /** The full list of additional owners; [] removes them all. */
+  additional_owner_ids?: number[]
   due_date?: string | null
   next_check_date?: string | null
   status?: LopStatus
@@ -188,6 +196,7 @@ export interface LineCreate {
   due_date?: string | null
   next_check_date?: string | null
   responsible_id?: number | null
+  additional_owner_ids?: number[]
 }
 
 export type SamplingPurpose = 'material_test' | 'validation_mrr' | 'ecr_validation' | 'part_demand'

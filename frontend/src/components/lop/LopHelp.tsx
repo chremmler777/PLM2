@@ -50,7 +50,9 @@ export function LopHelpContent() {
       <Section title="Project Manager: set the list up">
         <ol className={list}>
           <li><B>+ Task</B>: write the task, pick the department and the due date. The project-team member of that
-            department becomes responsible. A department nobody is named for comes to you. Keep the task to
+            department becomes responsible. A department nobody is named for comes to you. <B>Responsible</B> is the
+            main owner: the task counts for that person and their department. <B>Additional owners</B> see the task as
+            theirs too and can report it done. Keep the task to
             one line; goal and steps go into <B>Details</B>. Drop files (drawing, photo, a mail saved as .msg) onto
             the form or onto the open line to attach them; the project team can attach too.</li>
           <li><B>Add from SEP</B>: pull in single SEP items or a whole gate. They do not come in by themselves.</li>

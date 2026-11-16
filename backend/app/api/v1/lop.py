@@ -33,6 +33,8 @@ class LineCreate(BaseModel):
     due_date: Optional[date] = None
     next_check_date: Optional[date] = None
     responsible_id: Optional[int] = None
+    #: More people who own the task with the main owner (the responsible).
+    additional_owner_ids: Optional[list[int]] = None
 
 
 class LinePatch(BaseModel):
@@ -41,6 +43,8 @@ class LinePatch(BaseModel):
     department_id: Optional[int] = None
     responsible_id: Optional[int] = None
     clear_responsible: bool = False
+    #: The full list of additional owners; [] removes them all.
+    additional_owner_ids: Optional[list[int]] = None
     due_date: Optional[date] = None
     next_check_date: Optional[date] = None
     status: Optional[Literal["new", "open", "in_work", "done_check", "closed"]] = None
@@ -112,6 +116,7 @@ async def mine(user: User = Depends(get_current_user), db: AsyncSession = Depend
             can_manage[line.project_id] = await LopService.can_manage(db, user, line.project_id)
         d["can_manage"] = can_manage[line.project_id]
         d["can_report"] = not d["can_manage"] and line.status != "closed"
+        d["my_role"] = "main" if line.responsible_id == user.id else "additional"
         d.update(project_code=project.code, project_name=project.name)
         out.append(d)
     return out
@@ -527,7 +532,9 @@ async def my_escalations(user: User = Depends(get_current_user), db: AsyncSessio
         pid = e["project_id"]
         if pid not in manages:
             manages[pid] = await LopService.can_manage(db, user, pid)
-        own = e["kind"] == "line" and e["line"].get("responsible_id") == user.id
+        own = e["kind"] == "line" and (
+            e["line"].get("responsible_id") == user.id
+            or any(o["id"] == user.id for o in e["line"].get("additional_owners") or []))
         if own or manages[pid]:
             out.append({**e, "own": own})
     return out

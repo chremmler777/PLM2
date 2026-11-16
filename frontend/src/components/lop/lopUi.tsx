@@ -22,6 +22,39 @@ export function DefaultMarker({ testId, title }: { testId: string; title: string
   )
 }
 
+/**
+ * Additional owners of a line: the chosen people as chips with a remove, and
+ * a select that adds one more. The main owner is never offered.
+ */
+export function OwnersPicker({ people, value, mainId, onChange, testId }: {
+  people: TeamPerson[]; value: number[]; mainId: number | null; onChange(ids: number[]): void; testId?: string
+}) {
+  const chosen = value.filter((id) => id !== mainId)
+  const name = (id: number) => people.find((p) => p.id === id)?.name ?? `person ${id}`
+  const free = people.filter((p) => p.id !== mainId && !chosen.includes(p.id))
+  return (
+    <div className={labelCls} data-testid={testId}>
+      <span id={testId ? `${testId}-label` : undefined}>Additional owners</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {chosen.map((id) => (
+          <span key={id} className="flex h-7 items-center gap-1 rounded-md border border-slate-600 px-2 text-xs text-slate-100">
+            {name(id)}
+            <button type="button" aria-label={`Remove ${name(id)} as additional owner`}
+              className="text-slate-500 hover:text-red-300" onClick={() => onChange(chosen.filter((x) => x !== id))}>✕</button>
+          </span>
+        ))}
+        {free.length > 0 && (
+          <select className={inputCls} value="" aria-label="Add an additional owner"
+            onChange={(e) => { if (e.target.value) onChange([...chosen, Number(e.target.value)]) }}>
+            <option value="">{chosen.length ? 'add another…' : 'none · add…'}</option>
+            <PersonOptions people={free} />
+          </select>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function PersonOptions({ people }: { people: TeamPerson[] }) {
   return <>{people.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.department})</option>)}</>
 }
