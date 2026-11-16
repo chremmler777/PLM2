@@ -69,7 +69,7 @@ describe('EquipmentTab', () => {
     expect(within(card()).getByText('Assembly equipment')).toBeTruthy()
     expect(within(card()).getByText('3345-20')).toBeTruthy()
     expect(screen.getByText('No tool: assembly operation')).toBeTruthy()
-    expect(screen.getByText('No article linked yet')).toBeTruthy()
+    expect(screen.getByText(/No article linked yet/)).toBeTruthy()
     cleanup()
     mount(gauge)
     expect(screen.getByText('No tool: assembly gauge')).toBeTruthy()
@@ -81,7 +81,7 @@ describe('EquipmentTab', () => {
     await within(tools).findByText('3345')
     expect(within(tools).getByText('3346')).toBeTruthy()
     const rows = within(screen.getByTestId('equipment-articles')).getAllByRole('listitem')
-    expect(rows[0].textContent).toContain('206.887.233 50-2277-001-0 Cover LH')
+    expect(rows[0].textContent).toContain('206.887.233 Cover LH50-2277-001-0')
     expect((screen.getByLabelText('Amount of 50-2277-001-0') as HTMLInputElement).value).toBe('2')
     expect((screen.getByLabelText('Amount of 50-2277-002-0') as HTMLInputElement).value).toBe('1')
   })
@@ -146,6 +146,55 @@ describe('EquipmentTab', () => {
     await waitFor(() => expect(screen.queryByText('Change')).toBeNull())
     expect(dropOnCard()).toBe(false)
     expect(clientMocks.post).not.toHaveBeenCalled()
+  })
+
+  it('Open BOM shows the project articles; the + adds one, linked ones are marked', async () => {
+    mount(station, { relations: [rel(3, 'assembles', art1, 2)] })
+    fireEvent.click(await screen.findByText('Open BOM'))
+    const bom = screen.getByTestId('equipment-bom')
+    const source = within(bom).getByTestId('bom-source')
+    expect(within(source).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(source).getByText('in BOM')).toBeTruthy()
+    expect(within(source).queryByLabelText('Add 50-2277-001-0')).toBeNull()
+    fireEvent.click(within(source).getByLabelText('Add 50-2277-002-0'))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/10/relations', { to_part_id: 21, relation_type: 'assembles' }))
+    expect((within(bom).getByLabelText('Amount of 50-2277-001-0') as HTMLInputElement).value).toBe('2')
+  })
+
+  it('in the BOM an article is dragged into the list, search narrows, Add all takes the rest', async () => {
+    mount(gauge)
+    fireEvent.click(await screen.findByText('Open BOM'))
+    const bom = screen.getByTestId('equipment-bom')
+    const source = within(bom).getByTestId('bom-source')
+    const dataTransfer = { effectAllowed: '', dropEffect: '', setData: vi.fn() }
+    fireEvent.dragStart(within(source).getAllByRole('listitem')[0], { dataTransfer })
+    fireEvent.dragOver(within(bom).getByTestId('bom-drop'), { dataTransfer })
+    fireEvent.drop(within(bom).getByTestId('bom-drop'), { dataTransfer })
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/11/relations', { to_part_id: 20, relation_type: 'checks' }))
+    clientMocks.post.mockClear()
+    fireEvent.change(within(bom).getByLabelText('Search articles'), { target: { value: 'cover rh' } })
+    expect(within(source).getAllByRole('listitem')).toHaveLength(1)
+    fireEvent.change(within(bom).getByLabelText('Search articles'), { target: { value: '' } })
+    fireEvent.click(within(bom).getByText('Add all 2 shown'))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledTimes(2))
+    expect(toastMocks.success).toHaveBeenCalledWith('2 articles added to 3345-40')
+  })
+
+  it('the BOM adds a served tool from the Tools list and closes on Done', async () => {
+    mount(station)
+    fireEvent.click(await screen.findByText('Open BOM'))
+    const bom = screen.getByTestId('equipment-bom')
+    fireEvent.click(within(bom).getByRole('tab', { name: 'Tools' }))
+    fireEvent.click(within(bom).getByLabelText('Add 3346'))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/10/relations', { to_part_id: 2, relation_type: 'serves' }))
+    fireEvent.click(within(bom).getByText('Done'))
+    expect(screen.queryByTestId('equipment-bom')).toBeNull()
+  })
+
+  it('without the right, or when obsolete, there is no Open BOM', async () => {
+    mount(station, { rights: { ...ALL, can_edit_assembly_equipment: false } })
+    await waitFor(() => expect(screen.queryByText('Change')).toBeNull())
+    expect(screen.queryByText('Open BOM')).toBeNull()
   })
 
   it('the change dialog needs Correction or Change, and a note for a change', async () => {

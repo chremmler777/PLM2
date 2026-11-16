@@ -2,8 +2,9 @@
  * Equipment card: one gauge, assembly station or EOAT. Which tools it serves (one,
  * several or none: an assembly operation or assembly gauge needs no tool), which
  * articles it takes in or checks (assembly equipment with an amount per article),
- * and its history. Links come by drag and drop from the item list: a tool row adds a
- * served tool, an article row adds an article. Field edits go through a dialog that
+ * and its history. The BOM is built in its own workspace ("Open BOM": articles on the
+ * left, dragged or added into the list on the right); a row dragged from the item list
+ * onto the card links too. Field edits go through a dialog that
  * asks whether it is a correction or a change; marking obsolete asks for a note.
  * The backend enforces the rights (equipment_rights.py); this only hides controls.
  */
@@ -14,19 +15,8 @@ import client from '../../api/client';
 import { apiErrorMessage } from '../../lib/apiError';
 import { formatDate, formatDateTime } from '../../lib/format';
 import { useCanEditAssemblyEquipment, useCanEditGauges } from '../../hooks/queries/useToolRights';
+import EquipmentBom, { BomRows, type EquipmentRelation } from './EquipmentBom';
 import type { Part } from './projectTypes';
-
-interface EquipmentRelation {
-  id: number;
-  relation_type: string;
-  direction: 'outgoing' | 'incoming';
-  other_part_id: number;
-  other_part_number: string;
-  other_part_name: string;
-  other_item_category: string;
-  other_customer_part_number?: string | null;
-  quantity?: number | null;
-}
 
 interface HistoryEntry {
   id: number;
@@ -78,7 +68,7 @@ export default function EquipmentTab({ projectId, part, parts, draggingPartId = 
   const editable = canEdit && !obsolete;
   const articleLink = isGauge ? 'checks' : 'assembles';
   const [dragOver, setDragOver] = useState(false);
-  const [dialog, setDialog] = useState<'edit' | 'obsolete' | null>(null);
+  const [dialog, setDialog] = useState<'edit' | 'obsolete' | 'bom' | null>(null);
 
   const { data: relations } = useQuery({
     queryKey: ['part-relations', part.id],
@@ -101,16 +91,23 @@ export default function EquipmentTab({ projectId, part, parts, draggingPartId = 
   const onError = (fallback: string) => (error: unknown) => { toast.error(apiErrorMessage(error, fallback)); };
 
   const linkMutation = useMutation({
-    mutationFn: async ({ other, relationType }: { other: Part; relationType: string }) => {
-      await client.post(`/v1/parts/${part.id}/relations`, { to_part_id: other.id, relation_type: relationType });
+    // One after the other: each link writes its own history line, in the order added.
+    mutationFn: async ({ others, relationType }: { others: Part[]; relationType: string }) => {
+      for (const other of others) {
+        await client.post(`/v1/parts/${part.id}/relations`, { to_part_id: other.id, relation_type: relationType });
+      }
     },
-    onSuccess: (_d, { other, relationType }) => {
-      toast.success(relationType === 'serves'
-        ? `Linked: ${part.part_number} serves tool ${other.part_number}`
-        : `Linked: ${part.part_number} ${relationType} ${other.part_number}`);
+    onSuccess: (_d, { others, relationType }) => {
+      const what = relationType === 'serves' ? 'tools' : 'articles';
+      toast.success(others.length > 1
+        ? `${others.length} ${what} added to ${part.part_number}`
+        : relationType === 'serves'
+          ? `Linked: ${part.part_number} serves tool ${others[0].part_number}`
+          : `Linked: ${part.part_number} ${relationType} ${others[0].part_number}`);
       refresh();
     },
-    onError: onError('Failed to link the items'),
+    // Some of a set may already be saved when one fails: show what is there now.
+    onError: (error: unknown) => { toast.error(apiErrorMessage(error, 'Failed to link the items')); refresh(); },
   });
   const unlinkMutation = useMutation({
     mutationFn: async (relationId: number) => { await client.delete(`/v1/parts/relations/${relationId}`); },
@@ -142,7 +139,7 @@ export default function EquipmentTab({ projectId, part, parts, draggingPartId = 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    if (acceptsDrop && dragged && dropType) linkMutation.mutate({ other: dragged, relationType: dropType });
+    if (acceptsDrop && dragged && dropType) linkMutation.mutate({ others: [dragged], relationType: dropType });
     onDropDone?.();
   };
 
@@ -227,52 +224,27 @@ export default function EquipmentTab({ projectId, part, parts, draggingPartId = 
         </div>
 
         <div data-testid="equipment-articles">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
-            Articles {isGauge ? 'checked' : 'taken in'}
-          </h4>
+          <div className="mb-1.5 flex items-center justify-between gap-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Articles {isGauge ? 'checked' : 'taken in'}
+              {articles.length > 0 && <span className="ml-1.5 font-normal tabular-nums">{articles.length}</span>}
+            </h4>
+            {editable && (
+              <button type="button" onClick={() => setDialog('bom')}
+                className={`${BTN} bg-blue-600 hover:bg-blue-500 text-white`}>
+                Open BOM
+              </button>
+            )}
+          </div>
           {articles.length === 0 ? (
-            <p className="text-sm text-slate-500">No article linked yet</p>
+            <p className="text-sm text-slate-400">
+              No article linked yet.{editable ? ' Open the BOM to drag the articles in.' : ''}
+            </p>
           ) : (
-            <ul className="space-y-1.5">
-              {articles.map((a) => (
-                <li key={a.id} className="flex items-center gap-2 p-2 bg-slate-700/50 rounded border border-slate-600 text-sm">
-                  <button type="button" onClick={() => onOpenPart(a.other_part_id)} className="flex-1 min-w-0 text-left hover:text-sky-300">
-                    {a.other_customer_part_number && (
-                      <span className="font-mono text-slate-100">{a.other_customer_part_number} </span>
-                    )}
-                    <span className={`font-mono ${a.other_customer_part_number ? 'text-slate-400 text-xs' : 'text-slate-100'}`}>{a.other_part_number}</span>
-                    <span className="text-slate-300"> {a.other_part_name}</span>
-                  </button>
-                  {!isGauge && (
-                    <input
-                      key={`${a.id}-${a.quantity}`}
-                      type="number" min="0.001" step="any"
-                      aria-label={`Amount of ${a.other_part_number}`}
-                      defaultValue={a.quantity ?? ''}
-                      disabled={!editable}
-                      onBlur={(e) => { const el = e.currentTarget; saveQuantity(a, el.value, () => { el.value = String(a.quantity ?? ''); }); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                      className="w-20 flex-shrink-0 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-right text-slate-100 text-sm tabular-nums disabled:opacity-60"
-                    />
-                  )}
-                  {editable && (
-                    <button type="button" aria-label={`Remove article ${a.other_part_number}`}
-                      onClick={() => unlinkMutation.mutate(a.id)} disabled={unlinkMutation.isPending}
-                      className="flex-shrink-0 px-1 text-xs text-red-400 hover:text-red-300">
-                      ✕
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <BomRows articles={articles} isGauge={isGauge} editable={editable} busy={unlinkMutation.isPending}
+              onOpenPart={onOpenPart} onQuantity={saveQuantity} onRemove={(id) => unlinkMutation.mutate(id)} />
           )}
         </div>
-
-        {editable && (
-          <p className="text-[11px] text-slate-500">
-            Drag an article or a tool from the item list onto this card to link it.
-          </p>
-        )}
       </section>
 
       <section className="bg-slate-800 rounded-lg border border-slate-700 p-4" aria-label="History">
@@ -302,6 +274,12 @@ export default function EquipmentTab({ projectId, part, parts, draggingPartId = 
       </section>
 
       {dialog === 'edit' && <EditDialog part={part} onClose={() => setDialog(null)} onSaved={refresh} />}
+      {dialog === 'bom' && editable && (
+        <EquipmentBom part={part} parts={parts} kindLabel={equipmentKindLabel(part)} tools={tools} articles={articles}
+          isGauge={isGauge} busy={linkMutation.isPending || unlinkMutation.isPending}
+          onAdd={(others, type) => linkMutation.mutate({ others, relationType: type === 'serves' ? 'serves' : articleLink })}
+          onRemove={(id) => unlinkMutation.mutate(id)} onQuantity={saveQuantity} onClose={() => setDialog(null)} />
+      )}
       {dialog === 'obsolete' && <ObsoleteDialog part={part} onClose={() => setDialog(null)} onSaved={refresh} />}
     </>
   );
