@@ -18,6 +18,8 @@ from app.models.database import Base
 LOP_KINDS = ("task", "sep_item", "risk", "pdb_topic")
 LOP_STATUSES = ("new", "open", "in_work", "done_check", "closed")
 LOP_MARKS = ("updated", "moved", "escalated", "none")
+TITLE_MAX = 500
+DETAILS_MAX = 5000
 
 
 class LopLine(Base):
@@ -31,7 +33,9 @@ class LopLine(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     kind: Mapped[str] = mapped_column(String(20))
     ref_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(TITLE_MAX), nullable=True)
+    # The PM's longer text under the title: goal, steps, done-when.
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
     department_id: Mapped[int | None] = mapped_column(
         ForeignKey("wf_departments.id"), nullable=True)
     responsible_id: Mapped[int | None] = mapped_column(
@@ -60,6 +64,30 @@ class LopComment(Base):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LopFile(Base):
+    """A file attached to a line (drawing, photo, mail, measurement sheet).
+
+    The row is the record, `stored_path` points at the blob under
+    uploads/lop/<project>/<line>/. Removing is soft: the row stays flagged and
+    the blob is left on disk, so the history keeps pointing at something.
+    """
+    __tablename__ = "lop_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    line_id: Mapped[int] = mapped_column(ForeignKey("lop_lines.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    stored_path: Mapped[str] = mapped_column(String(500))
+    content_type: Mapped[str] = mapped_column(String(100))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class LopEvent(Base):

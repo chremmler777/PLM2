@@ -30,6 +30,10 @@ export interface LopLine {
   kind: LopKind
   ref_key: string | null
   title: string | null
+  /** The PM's longer text under the title (goal, steps, done-when). */
+  details?: string | null
+  /** Number of files attached to the line. */
+  file_count?: number
   department_id: number | null
   responsible_id: number | null
   responsible_is_default: boolean
@@ -147,8 +151,27 @@ export type LopHistoryItem =
     old_value: string | null; new_value: string | null; reason: string | null; created_at: string | null
   }
 
+/** A file attached to a line. */
+export interface LopFile {
+  id: number
+  line_id: number
+  filename: string
+  content_type: string
+  size_bytes: number
+  uploaded_by: number | null
+  uploaded_by_name: string | null
+  uploaded_at: string | null
+  /** The PM removes any file, everybody else only their own. */
+  can_delete: boolean
+}
+
+/** The title column holds 500 characters; longer text belongs into details. */
+export const LOP_TITLE_MAX = 500
+export const LOP_DETAILS_MAX = 5000
+
 export interface LinePatch {
   title?: string
+  details?: string | null
   department_id?: number | null
   responsible_id?: number
   clear_responsible?: boolean
@@ -160,6 +183,7 @@ export interface LinePatch {
 
 export interface LineCreate {
   title: string
+  details?: string | null
   department_id?: number | null
   due_date?: string | null
   next_check_date?: string | null
