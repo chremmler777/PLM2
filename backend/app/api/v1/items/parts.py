@@ -2,7 +2,8 @@
 import logging
 import os
 import uuid
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,9 +12,12 @@ from sqlalchemy import select
 from app.dependencies import get_current_user
 from app.models import get_db
 from app.models import User
+from app.models.entities import Project
 from app.models.part import Part, PartFile
 from app.services.part_service import PartService, RevisionService, ChangelogService
 from app.services.equipment_rights import require_category_editor
+from app.services import equipment_service
+from app.services.equipment_service import EquipmentError
 from app.services.project_structure_service import project_structure
 from app.services.thumbnail_service import (
     set_thumbnail, clear_thumbnail, media_type_for, InvalidThumbnail, ThumbnailTooLarge,
@@ -44,6 +48,10 @@ async def create_part(
     """Create a new part in a project. Tools, gauges and assembly equipment need the
     right of their category (tool_rights / equipment_rights); articles do not."""
     await require_category_editor(db, current_user, body.item_category)
+    # Equipment numbers are unique across the organization: <tool>-xx belongs to one item
+    if body.item_category in equipment_service.EQUIPMENT_CATEGORIES and await equipment_service.number_taken(
+            db, body.project_id, body.part_number):
+        raise HTTPException(status.HTTP_409_CONFLICT, equipment_service.number_taken_text(body.part_number))
     try:
         part = await PartService.create_part(
             session=db,
@@ -78,6 +86,102 @@ async def create_part(
         await db.rollback()
         logger.error(f"Failed to create part: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+class ObsoleteRequest(BaseModel):
+    note: Optional[str] = None
+
+
+@router.get("/next-equipment-number", response_model=dict)
+async def next_equipment_number(
+    family: int,
+    tool_id: Optional[int] = None,
+    project_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Next free equipment number, looking at every item of the organization.
+    With tool_id: <tool>-xx of family 1 (EOAT), 2 (in-cell station), 3 (secondary
+    station) or 4 (gauge). Without a tool, with project_id: <project code>-6x (assembly
+    equipment or EOAT) or -7x (gauge). number is null when all ten numbers are used."""
+    try:
+        if tool_id is not None:
+            tool = await db.get(Part, tool_id)
+            if tool is None or tool.item_category != "tool":
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Tool not found")
+            base = tool.part_number
+            number = await equipment_service.next_number_for_tool(db, tool, family)
+        elif project_id is not None:
+            project = await db.get(Project, project_id)
+            if project is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+            base = project.code
+            number = await equipment_service.next_number_without_tool(db, project, family)
+        else:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name the tool (tool_id) or the project (project_id).")
+    except EquipmentError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    return {"tool_id": tool_id, "base": base, "family": family, "number": number}
+
+
+async def _equipment_for_write(db: AsyncSession, part_id: int, user) -> Part:
+    part = await db.get(Part, part_id)
+    if part is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Part not found")
+    if not equipment_service.is_equipment(part):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, equipment_service.NOT_EQUIPMENT)
+    await require_category_editor(db, user, part.item_category)
+    return part
+
+
+@router.post("/{part_id}/obsolete", response_model=PartResponse)
+async def mark_part_obsolete(
+    part_id: int,
+    body: ObsoleteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Take a gauge or assembly equipment out of use. It stays in PLM, greyed, takes no
+    new links and cannot be edited until reactivated. The note is required."""
+    part = await _equipment_for_write(db, part_id, current_user)
+    try:
+        await equipment_service.mark_obsolete(db, part, current_user.id, body.note)
+    except EquipmentError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    await db.commit()
+    await db.refresh(part)
+    return part
+
+
+@router.post("/{part_id}/reactivate", response_model=PartResponse)
+async def reactivate_part(
+    part_id: int,
+    body: ObsoleteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Put an obsolete gauge or assembly equipment back in use."""
+    part = await _equipment_for_write(db, part_id, current_user)
+    try:
+        await equipment_service.reactivate(db, part, current_user.id, body.note)
+    except EquipmentError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    await db.commit()
+    await db.refresh(part)
+    return part
+
+
+@router.get("/{part_id}/history", response_model=List[dict])
+async def get_part_history(
+    part_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The item's log, newest first, with the kind of each change (same rows as
+    /changelog, in the shape the equipment card shows)."""
+    if await db.get(Part, part_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Part not found")
+    return await equipment_service.history(db, part_id)
 
 
 @router.get("/{part_id}", response_model=PartDetailResponse)
@@ -128,19 +232,41 @@ async def update_part(
         await require_category_editor(db, current_user, target.item_category)
         if body.item_category and body.item_category != target.item_category:
             await require_category_editor(db, current_user, body.item_category)
+    # Gauges and assembly equipment: every edit says whether it is a correction or a change
+    # and lands in the history. Moving the item in the tree and recording a calibration are
+    # routine and need no choice. Obsolete items are locked.
+    equipment = equipment_service.is_equipment(target)
+    kind = note = None
+    log_mark = 0
+    if equipment:
+        sent = body.model_fields_set - {"change_kind", "change_note"}
+        try:
+            if sent:
+                equipment_service.require_active(target)
+            if sent - {"parent_part_id", "last_calibrated_at"}:
+                kind, note = equipment_service.check_edit_kind(body.change_kind, body.change_note)
+        except EquipmentError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+        log_mark = await equipment_service.last_log_id(db, part_id)
     try:
+        if kind is not None:
+            await equipment_service.edit_own_fields(
+                db, target, current_user.id, kind, note,
+                part_number=body.part_number,
+                description=body.description, update_description='description' in body.model_fields_set,
+                calibration_interval_months=body.calibration_interval_months)
         part = await PartService.update_part(
             session=db,
             part_id=part_id,
             name=body.name,
-            description=body.description,
+            description=None if equipment else body.description,
             part_type=body.part_type,
             supplier=body.supplier,
             updated_by=current_user.id,
             parent_part_id=body.parent_part_id,
             update_parent='parent_part_id' in body.model_fields_set,
             item_category=body.item_category,
-            calibration_interval_months=body.calibration_interval_months,
+            calibration_interval_months=None if equipment else body.calibration_interval_months,
             last_calibrated_at=body.last_calibrated_at,
             supplier_id=body.supplier_id,
             update_supplier='supplier_id' in body.model_fields_set,
@@ -169,6 +295,8 @@ async def update_part(
         )
         if not part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+        if kind is not None:
+            await equipment_service.stamp_since(db, part_id, log_mark, kind, note)
         await db.commit()
         return part
     except Exception as e:

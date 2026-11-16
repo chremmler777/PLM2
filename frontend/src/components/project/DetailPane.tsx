@@ -3,6 +3,7 @@
  * content below them scrolls. Used by the project page and the pop-out
  * detail window.
  */
+import { useEffect } from 'react';
 import RevisionWorkflowSection from '../workflows/RevisionWorkflowSection';
 import { formatDate } from '../../lib/format';
 import PartBOMSection from '../PartBOMSection';
@@ -19,9 +20,10 @@ import { BomTreeSection } from './BomTreeSection';
 import { ChangelogList } from './ChangelogModal';
 import DetailHeader from './DetailHeader';
 import DocumentsTab from './DocumentsTab';
+import EquipmentTab from './EquipmentTab';
 import ToolDfmTab from './ToolDfmTab';
 import ToolInfoTab from './ToolInfoTab';
-import { detailTabsFor, effectiveDetailTab, type DetailTab } from './detailTabs';
+import { detailTabsFor, effectiveDetailTab, isEquipmentCategory, type DetailTab } from './detailTabs';
 import {
   CATEGORY_META, LOCKED_REVISION_STATUSES, phaseColor, statusColor, type Part, type Project,
 } from './projectTypes';
@@ -36,14 +38,24 @@ export interface DetailPaneProps {
   onTabChange(tab: DetailTab): void;
   onPopOut?: () => void;
   emptyText?: string;
+  /** The item-list row being dragged (project page only): the equipment card takes the drop. */
+  draggingPartId?: number | null;
+  onDropDone?(): void;
 }
 
 export default function DetailPane({
   projectId, project, parts, structure, sel, tab, onTabChange, onPopOut,
-  emptyText = 'Select an item from the list',
+  emptyText = 'Select an item from the list', draggingPartId = null, onDropDone,
 }: DetailPaneProps) {
   const { data: revisionFiles } = useRevisionFiles(sel.revisionId || 0);
   const part = parts?.find((p) => p.id === sel.partId);
+  // A gauge or equipment opens on its card: that is where it is linked and changed.
+  const opensOnCard = !!part && isEquipmentCategory(part.item_category);
+  const partId = part?.id;
+  useEffect(() => {
+    if (opensOnCard) onTabChange('equipment');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partId, opensOnCard]);
 
   if (!part) {
     return (
@@ -95,6 +107,12 @@ export default function DetailPane({
         {effectiveTab === 'dfm' && (
           // Keyed by part: the open DFM PDF never carries over to another tool.
           <ToolDfmTab key={part.id} partId={part.id} projectId={projectId} />
+        )}
+
+        {effectiveTab === 'equipment' && (
+          // Keyed by part: an open dialog never carries over to another item.
+          <EquipmentTab key={part.id} projectId={projectId} part={part} parts={parts ?? []}
+            draggingPartId={draggingPartId} onDropDone={onDropDone} onOpenPart={sel.openPart} />
         )}
 
         {effectiveTab === 'tool' && (

@@ -20,13 +20,18 @@ const parts: Part[] = [
 
 const ALL = { can_edit_tools: true, can_edit_gauges: true, can_edit_assembly_equipment: true }
 
+/** What the server answers for the next free number: undefined = no usable answer (the fallback stays), null = family full. */
+let serverNumber: string | null | undefined = undefined
+const onCreated = vi.fn()
+
 function mount(rights: Record<string, boolean> = ALL) {
   clientMocks.get.mockImplementation((url: string) =>
-    Promise.resolve({ data: url === '/v1/auth/me' ? rights : [] }))
+    Promise.resolve({ data: url === '/v1/auth/me' ? rights
+      : url === '/v1/parts/next-equipment-number' ? (serverNumber === undefined ? {} : { number: serverNumber, base: '1748' }) : [] }))
   const onClose = vi.fn()
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <AddPartModal projectId={7} parts={parts} isOpen onClose={onClose} />
+      <AddPartModal projectId={7} projectCode="1748" parts={parts} isOpen onClose={onClose} onCreated={onCreated} />
     </QueryClientProvider>,
   )
   return onClose
@@ -42,6 +47,8 @@ describe('AddPartModal', () => {
     clientMocks.get.mockReset()
     clientMocks.post.mockReset()
     Object.values(toastMocks).forEach((m) => m.mockReset())
+    serverNumber = undefined
+    onCreated.mockReset()
   })
   afterEach(cleanup)
 
@@ -64,7 +71,7 @@ describe('AddPartModal', () => {
   it('suggests the next free gauge number of the picked tool and keeps it editable', () => {
     mount()
     pick('Item Category *', 'gauge')
-    expect(number().value).toBe('')
+    expect(number().value).toBe('1748-70') // no tool yet: on the project code
     pick('Serves tool', '1')
     expect(number().value).toBe('3345-41') // 3345-40 exists
     pick('Serves tool', '2')
@@ -119,5 +126,72 @@ describe('AddPartModal', () => {
     fireEvent.click(screen.getByText('Add Part'))
     await waitFor(() => expect(toastMocks.error).toHaveBeenCalledWith('Only APQP, the Project Manager or an admin can change gauges; you can view them.'))
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('a tool is optional: none is picked by default and the wording fits the kind', () => {
+    mount()
+    pick('Item Category *', 'gauge')
+    const tool = screen.getByLabelText('Serves tool') as HTMLSelectElement
+    expect(tool.value).toBe('')
+    expect(tool.options[0].textContent).toBe('No tool (assembly gauge)')
+    expect(screen.getByTestId('serves-tool-help').textContent).toContain('No tool is needed. A number on the project code is filled in below')
+    expect(number().value).toBe('1748-70')
+    pick('Item Category *', 'eoat')
+    expect((screen.getByLabelText('Serves tool') as HTMLSelectElement).options[0].textContent).toBe('No tool (assembly operation)')
+    pick('Item Category *', 'assembly_equipment')
+    expect((screen.getByLabelText('Serves tool') as HTMLSelectElement).options[0].textContent).toBe('No tool (assembly operation)')
+    expect(screen.queryByLabelText('Station type')).toBeNull() // only numbers by tool have a station family
+    expect(number().value).toBe('1748-60')
+    pick('Item Category *', 'article') // a number the dialog filled in does not stick to an article
+    expect(number().value).toBe('')
+  })
+
+  it('asks the server for the number without a tool by project, and says when all ten are used', async () => {
+    serverNumber = '1748-63'
+    mount()
+    pick('Item Category *', 'eoat')
+    await waitFor(() => expect(number().value).toBe('1748-63'))
+    expect(clientMocks.get).toHaveBeenCalledWith('/v1/parts/next-equipment-number', { params: { project_id: 7, family: 6 } })
+    cleanup()
+    serverNumber = null
+    mount()
+    pick('Item Category *', 'gauge')
+    await waitFor(() => expect(screen.getByTestId('serves-tool-help').textContent)
+      .toBe('All numbers 1748-70 to -79 are used, type a number.'))
+    expect(number().value).toBe('')
+  })
+
+  it('takes the number from the server, which sees other projects, over the local guess', async () => {
+    serverNumber = '3345-43'
+    mount()
+    pick('Item Category *', 'gauge')
+    pick('Serves tool', '1')
+    expect(number().value).toBe('3345-41') // the stand-in from this project's list
+    await waitFor(() => expect(number().value).toBe('3345-43'))
+    expect(clientMocks.get).toHaveBeenCalledWith('/v1/parts/next-equipment-number', { params: { tool_id: 1, family: 4 } })
+  })
+
+  it('never replaces a number the user typed with the server answer', async () => {
+    serverNumber = '3345-43'
+    mount()
+    pick('Item Category *', 'gauge')
+    pick('Serves tool', '1')
+    fireEvent.change(number(), { target: { value: 'MY-1' } })
+    await waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/parts/next-equipment-number', expect.anything()))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(number().value).toBe('MY-1')
+  })
+
+  it('creates an assembly operation without a tool and hands the new item to the page', async () => {
+    clientMocks.post.mockResolvedValue({ data: { id: 42 } })
+    const onClose = mount()
+    pick('Item Category *', 'assembly_equipment')
+    expect(number().value).toBe('1748-60')
+    fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Clip station' } })
+    fireEvent.click(screen.getByText('Add Part'))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(42))
+    expect(onClose).toHaveBeenCalled()
+    expect(clientMocks.post).toHaveBeenCalledTimes(1) // no serves link
+    expect(clientMocks.post.mock.calls[0][1]).toMatchObject({ part_number: '1748-60', item_category: 'assembly_equipment' })
   })
 })

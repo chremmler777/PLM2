@@ -84,11 +84,11 @@ async def test_update_needs_the_right_of_the_items_category(client, eng_auth, ad
     assert res.status_code == 403
 
     await _join(session_factory, seed, "APQP")
-    assert (await client.put(f"/api/v1/parts/{gauge}", json={"name": "Gauge A"}, headers=eng_auth)).status_code == 200
+    assert (await client.put(f"/api/v1/parts/{gauge}", json={"name": "Gauge A", "change_kind": "correction"}, headers=eng_auth)).status_code == 200
     assert (await client.put(f"/api/v1/parts/{station}", json={"name": "x"}, headers=eng_auth)).status_code == 403
 
     await _join(session_factory, seed, "Manufacturing Engineer")
-    assert (await client.put(f"/api/v1/parts/{station}", json={"name": "Degate"}, headers=eng_auth)).status_code == 200
+    assert (await client.put(f"/api/v1/parts/{station}", json={"name": "Degate", "change_kind": "correction"}, headers=eng_auth)).status_code == 200
 
 
 # ---- relations -------------------------------------------------------------

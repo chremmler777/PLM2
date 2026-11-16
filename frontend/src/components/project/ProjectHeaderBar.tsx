@@ -104,7 +104,7 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
               block
             />
             <button role="menuitem" onClick={() => { setMenuOpen(false); onAddPart(); }} className={menuItem}>
-              + Add Part
+              + Add item (article, tool, gauge, equipment)
             </button>
             <div className="px-3 py-2">
               <CustomerNamingSelect projectId={project.id} value={project.customer_naming ?? null} />

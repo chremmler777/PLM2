@@ -3,17 +3,21 @@
  * It offers only the kinds the viewer may create (tools: Tool Engineer; gauges: APQP or
  * Project Manager; assembly equipment and EOATs: Manufacturing Engineer or Project
  * Manager; an admin all). A gauge, EOAT or station can name the tool it serves: the
- * dialog then suggests the next free number of that tool and links the two.
+ * dialog then fills in the next free number of that tool (asked from the server, which
+ * looks across all projects; the project's own list is the stand-in until it answers)
+ * and links the two. A tool is optional: an assembly operation or an assembly gauge has
+ * none and is numbered on the project code (<code>-60, ... for equipment, <code>-70, ...
+ * for gauges). Articles are linked afterwards by drag and drop.
  */
-import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import { apiErrorMessage } from '../../lib/apiError';
 import { comparePartNumbers } from '../../lib/partDisplay';
 import { useCanEditAssemblyEquipment, useCanEditGauges, useCanEditTools } from '../../hooks/queries/useToolRights';
 import {
-  EQUIPMENT_KINDS, categoryOfKind, familyOfKind, suggestEquipmentNumber, type ItemKind,
+  EQUIPMENT_KINDS, categoryOfKind, familyOfKind, noToolFamilyOfKind, suggestEquipmentNumber, type ItemKind,
 } from './equipmentNumbers';
 import { useCatalogParts } from '../../hooks/queries/useProjectDetail';
 import { useSuppliers } from '../../hooks/queries/useSuppliers';
@@ -40,14 +44,20 @@ const EMPTY_FORM = {
 
 export default function AddPartModal({
   projectId,
+  projectCode,
   parts,
   isOpen,
   onClose,
+  onCreated,
 }: {
   projectId: number;
+  /** Base of the number of equipment without a tool: <project code>-60, -70, ... */
+  projectCode?: string;
   parts: Part[] | undefined;
   isOpen: boolean;
   onClose: () => void;
+  /** The new item's id, so the page can select it and open its card. */
+  onCreated?: (partId: number) => void;
 }) {
   const queryClient = useQueryClient();
   const { data: catalogParts } = useCatalogParts();
@@ -56,19 +66,69 @@ export default function AddPartModal({
   const canEditGauges = useCanEditGauges();
   const canEditAssemblyEquipment = useCanEditAssemblyEquipment();
   const [formData, setFormData] = useState(EMPTY_FORM);
+  /** The number the dialog last filled in itself; a number the user typed is never replaced. */
+  const lastSuggestion = useRef('');
   const tools = (parts ?? []).filter((p) => p.item_category === 'tool')
     .sort((a, b) => comparePartNumbers(a.part_number, b.part_number));
   const servedTool = (data: typeof formData) =>
     EQUIPMENT_KINDS.has(data.kind) ? tools.find((t) => String(t.id) === data.serves_tool_id) : undefined;
 
+  /**
+   * What the number hangs on: the served tool (families 1 to 4), or the project code
+   * when the item serves no tool (family 6 assembly operation, 7 assembly gauge).
+   */
+  const numberBase = (data: typeof formData): { base: string | null; family: number; toolId: number | null } | null => {
+    if (!EQUIPMENT_KINDS.has(data.kind)) return null;
+    const tool = servedTool(data);
+    if (tool) return { base: tool.part_number, family: familyOfKind(data.kind, data.station)!, toolId: tool.id };
+    return { base: projectCode ?? null, family: noToolFamilyOfKind(data.kind), toolId: null };
+  };
+
   /** After the kind, the tool or the station type changed: put the next free number in (it stays editable). */
   const withSuggestedNumber = (next: typeof formData): typeof formData => {
-    const tool = servedTool(next);
-    const family = familyOfKind(next.kind, next.station);
-    if (!tool || family === null) return next;
-    const suggestion = suggestEquipmentNumber(tool.part_number, family, (parts ?? []).map((p) => p.part_number));
-    return suggestion ? { ...next, part_number: suggestion } : next;
+    const target = numberBase(next);
+    const suggestion = target?.base
+      ? suggestEquipmentNumber(target.base, target.family, (parts ?? []).map((p) => p.part_number))
+      : null;
+    // A number the user typed stays; one the dialog filled in follows the new choice.
+    const ours = next.part_number === '' || next.part_number === lastSuggestion.current;
+    if (!suggestion) {
+      if (!ours) return next;
+      lastSuggestion.current = '';
+      return { ...next, part_number: '' };
+    }
+    lastSuggestion.current = suggestion;
+    return { ...next, part_number: suggestion };
   };
+
+  // The server knows the numbers of every project; its answer replaces the stand-in
+  // unless the user has typed a number of their own in the meantime.
+  const target = numberBase(formData);
+  const { data: serverNumber } = useQuery({
+    queryKey: ['next-equipment-number', projectId, target?.toolId ?? null, target?.family ?? null],
+    queryFn: async () => (await client.get('/v1/parts/next-equipment-number', {
+      params: target!.toolId !== null
+        ? { tool_id: target!.toolId, family: target!.family }
+        : { project_id: projectId, family: target!.family },
+    })).data as { number?: string | null; base?: string },
+    enabled: isOpen && !!target,
+    staleTime: 0,
+  });
+  // All ten numbers of the family are used: say so and let the user type one.
+  const familyFull = !!target && !!serverNumber && serverNumber.number === null;
+  const fullBase = serverNumber?.base ?? target?.base ?? '';
+  useEffect(() => {
+    if (!serverNumber || !target) return;
+    const number = serverNumber.number;
+    if (number === undefined) return;
+    setFormData((current) => {
+      const ours = current.part_number === '' || current.part_number === lastSuggestion.current;
+      if (!ours || current.part_number === (number ?? '')) return current;
+      lastSuggestion.current = number ?? '';
+      return { ...current, part_number: number ?? '' };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverNumber, target?.toolId, target?.family]);
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
@@ -105,12 +165,15 @@ export default function AddPartModal({
       }
       return res.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
+    onSuccess: async (created: { id?: number } | undefined) => {
+      // The list first, so the page finds the new item when it selects it.
+      await queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
       queryClient.invalidateQueries({ queryKey: ['project-structure', projectId] });
       queryClient.invalidateQueries({ queryKey: ['part-relations'] });
+      queryClient.invalidateQueries({ queryKey: ['next-equipment-number'] });
       setFormData(EMPTY_FORM);
       onClose();
+      if (created?.id) onCreated?.(created.id);
     },
     onError: (error: unknown) => {
       toast.error(apiErrorMessage(error, 'Failed to create the item'));
@@ -157,24 +220,24 @@ export default function AddPartModal({
                 onChange={(e) => setFormData(withSuggestedNumber({ ...formData, serves_tool_id: e.target.value }))}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
               >
-                <option value="">No tool (type the number yourself)</option>
+                <option value="">{formData.kind === 'gauge' ? 'No tool (assembly gauge)' : 'No tool (assembly operation)'}</option>
                 {tools.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.part_number} - {t.name}
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-slate-400 mt-1">
+              <p data-testid="serves-tool-help" className="text-xs text-slate-400 mt-1">
                 {formData.serves_tool_id
-                  ? 'The next free number of this tool is filled in below and the item is linked to the tool.'
-                  : tools.length === 0
-                    ? 'This project has no tool yet.'
-                    : 'Pick the tool to get the next free number and the link to it.'}
+                  ? 'The next free number of this tool is filled in below and the item is linked to the tool. More tools can be added on its card.'
+                  : familyFull
+                    ? `All numbers ${fullBase}-${target!.family}0 to -${target!.family}9 are used, type a number.`
+                    : 'No tool is needed. A number on the project code is filled in below; you can change it. Articles are linked afterwards by drag and drop.'}
               </p>
             </div>
           )}
 
-          {formData.kind === 'assembly_equipment' && (
+          {formData.kind === 'assembly_equipment' && formData.serves_tool_id && (
             <div>
               <label htmlFor="add-part-station" className="block text-sm font-medium text-slate-300 mb-1">Station type</label>
               <select

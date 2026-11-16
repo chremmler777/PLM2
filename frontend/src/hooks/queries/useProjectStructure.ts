@@ -4,7 +4,9 @@ import client from '../../api/client';
 export interface StructureRevision { id: number; revision_name: string; customer_index: string | null; status: string; phase: 'review' | 'official'; parent_revision_id: number | null; is_active: boolean;
   /** Spec §17: a customer major still waiting for triage (or its change). */
   intake_pending?: boolean; intake_id?: number | null }
-export interface StructureRelated { relation_type: string; direction: 'outgoing' | 'incoming'; label: string; part_id: number; part_number: string; name: string; item_category: string }
+export interface StructureRelated { relation_type: string; direction: 'outgoing' | 'incoming'; label: string; part_id: number; part_number: string; name: string; item_category: string;
+  /** assembles only: how many of the article the equipment takes in. */
+  quantity?: number | null; obsolete_at?: string | null }
 export interface StructureBrief { part_id: number; part_number: string; customer_part_number: string | null; name: string; thumbnail_url?: string | null }
 export interface StructureArticle extends StructureBrief {
   lifecycle_phase: string; active_revision_id: number | null;

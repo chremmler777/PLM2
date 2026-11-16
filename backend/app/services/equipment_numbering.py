@@ -1,4 +1,5 @@
-"""Equipment numbering: <tool#>[-<2-digit op code>].
+"""Equipment numbering: <tool#>[-<2-digit op code>], or <project code>-<op code>
+for equipment that serves no tool (families 6 and 7, added 2026-11-16).
 
 Adopted 2026-07-24 from the 'Naming of Equipment' thread. Molds keep the bare
 tool number — they take no -00 suffix — so the 251 existing tool records are
@@ -10,13 +11,24 @@ import re
 
 TOOL_WIDTH = 4
 
+# Equipment that serves no tool hangs on the PROJECT CODE instead of a tool number
+# (Christoph, 2026-11-16: "just open a new xx number, 60 or so"): 1748-60, -61, ...
+# for an assembly operation (assembly equipment or EOAT without a tool), 1748-70, ...
+# for an assembly gauge. Change the two families here and nowhere else.
+NO_TOOL_STATION_FAMILY = 6
+NO_TOOL_GAUGE_FAMILY = 7
+PROJECT_FAMILIES = frozenset({NO_TOOL_STATION_FAMILY, NO_TOOL_GAUGE_FAMILY})
+
 # First digit of the op code -> kind of equipment.
 OP_CODE_KINDS: dict[int, str] = {
     1: "eoat",
     2: "in_cell_station",
     3: "secondary_station",
     4: "gauge",
+    NO_TOOL_STATION_FAMILY: "assembly_operation",
+    NO_TOOL_GAUGE_FAMILY: "assembly_gauge",
 }
+TOOL_FAMILIES = frozenset(OP_CODE_KINDS) - PROJECT_FAMILIES
 
 # A sheet cell may name several tools ("918/919") and may carry a cavity or
 # variant suffix ("3197-001-0"). Only the leading digit run identifies a tool:
@@ -57,8 +69,27 @@ def classify(op_code: str) -> str:
     return kind
 
 
+def is_project_op_code(op_code: str | None) -> bool:
+    """True for the families whose number hangs on a project code, not on a tool."""
+    return bool(op_code) and op_code[0].isdigit() and int(op_code[0]) in PROJECT_FAMILIES
+
+
+def tool_number_of(number: str) -> str | None:
+    """The tool an item belongs to by its number, or None when the number names no
+    tool: a project-code number (1748-60 is not equipment of a tool 1748) or a number
+    outside the scheme. A bare tool number is its own tool."""
+    try:
+        head, op_code = parse_equipment_number(number)
+    except ValueError:
+        return None
+    return None if is_project_op_code(op_code) else head
+
+
 def parse_equipment_number(number: str) -> tuple[str, str | None]:
     """Split an equipment number into (tool number, op code or None).
+
+    For the project families (6, 7) the head is a PROJECT CODE, not a tool number;
+    never look it up as a tool. Use tool_number_of() when the tool is what you want.
 
     Split on the LAST hyphen: the tool namespace already uses hyphens two other
     ways — '0674-2' is the second tool of 0674, and the 91-xxxx family numbers
@@ -76,7 +107,8 @@ def parse_equipment_number(number: str) -> tuple[str, str | None]:
 
 
 def equipment_number(tool: str, op_family: int, index: int) -> str:
-    """Compose a number: ('3454', 4, 1) -> '3454-41'."""
+    """Compose a number: ('3454', 4, 1) -> '3454-41'. For the project families the
+    base is the project code: ('1748', 6, 0) -> '1748-60'."""
     if op_family not in OP_CODE_KINDS:
         raise ValueError(f"Unknown op-code family {op_family}")
     if not 0 <= index <= 9:
@@ -91,4 +123,4 @@ def item_category_for(op_code: str) -> str:
     Gauges are split out from generic equipment: they are inventoried, audited,
     and owned by Quality rather than Tooling.
     """
-    return "gauge" if classify(op_code) == "gauge" else "assembly_equipment"
+    return "gauge" if classify(op_code) in ("gauge", "assembly_gauge") else "assembly_equipment"

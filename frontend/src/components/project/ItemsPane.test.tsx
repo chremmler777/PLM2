@@ -228,4 +228,54 @@ describe('ItemsPane', () => {
       await waitFor(() => expect(screen.queryByTestId('link-hint')).toBeNull())
     })
   })
+
+  it('has an "+ Add" button above the list that opens the create dialog', () => {
+    const onAddItem = vi.fn()
+    mount({ onAddItem })
+    fireEvent.click(screen.getByRole('button', { name: 'Add item (article, tool, gauge, equipment)' }))
+    expect(onAddItem).toHaveBeenCalled()
+  })
+
+  describe('obsolete items', () => {
+    const withObsolete: Part[] = [
+      ...parts,
+      { id: 7, part_number: '199401-40', name: 'Old gauge', part_type: 'internal_mfg', item_category: 'gauge', active_revision_id: null, parent_part_id: null, obsolete_at: '2026-11-01T10:00:00' },
+    ]
+
+    it('are hidden behind "Show obsolete (n)" and greyed with a tag when shown', () => {
+      mount({ parts: withObsolete })
+      expect(screen.getByText('Items (2)')).toBeTruthy()
+      expect(screen.queryByTestId('item-row-7')).toBeNull()
+      fireEvent.click(screen.getByLabelText('Show obsolete (1)'))
+      expect(screen.getByText('Items (3)')).toBeTruthy()
+      expect(screen.getByTestId('item-row-7').className).toContain('opacity-50')
+      expect(screen.getByTestId('row-obsolete-7').textContent).toBe('obsolete')
+    })
+
+    it('offers no toggle when nothing is obsolete', () => {
+      mount()
+      expect(screen.queryByTestId('show-obsolete')).toBeNull()
+    })
+
+    it('are no drop target for an article', () => {
+      mount({ parts: withObsolete })
+      fireEvent.click(screen.getByTestId('show-obsolete'))
+      const dataTransfer = { effectAllowed: '' }
+      fireEvent.dragStart(screen.getByTestId('item-row-2'), { dataTransfer })
+      const target = screen.getByTestId('item-row-7')
+      fireEvent.dragOver(target, { dataTransfer })
+      expect(target.className).not.toContain('border-green-500')
+      fireEvent.drop(target, { dataTransfer })
+      expect(clientMocks.post).not.toHaveBeenCalled()
+    })
+  })
+
+  it('reports the dragged row to the page when the page holds the drag state', () => {
+    const onDraggingChange = vi.fn()
+    mount({ draggingPartId: null, onDraggingChange })
+    fireEvent.dragStart(screen.getByTestId('item-row-2'), { dataTransfer: { effectAllowed: '' } })
+    expect(onDraggingChange).toHaveBeenCalledWith(2)
+    fireEvent.dragEnd(screen.getByTestId('item-row-2'))
+    expect(onDraggingChange).toHaveBeenLastCalledWith(null)
+  })
 })

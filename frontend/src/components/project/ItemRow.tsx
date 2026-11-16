@@ -92,6 +92,7 @@ export default function ItemRow(props: ItemRowProps) {
     draggingPartId !== null &&
     draggingPartId !== part.id &&
     !!onLinkDrop &&
+    !part.obsolete_at &&
     !!linkDropCategories?.has(part.item_category);
   const acceptsDrop = isDropTarget || isLinkTarget;
 
@@ -190,7 +191,7 @@ export default function ItemRow(props: ItemRowProps) {
               : selected
                 ? 'bg-blue-900/40 border-blue-500'
                 : 'border-transparent hover:bg-slate-800'
-          } ${draggingPartId === part.id ? 'opacity-40' : ''} ${isMirrorHighlighted ? 'ring-1 ring-red-400/60' : ''}`}
+          } ${draggingPartId === part.id ? 'opacity-40' : part.obsolete_at ? 'opacity-50' : ''} ${isMirrorHighlighted ? 'ring-1 ring-red-400/60' : ''}`}
         >
           <div className="flex items-center gap-2 min-w-0">
             <PartThumbnail url={thumbnailUrl} name={name} testId={`row-thumb-${part.id}`} />
@@ -199,6 +200,9 @@ export default function ItemRow(props: ItemRowProps) {
                 <span className="truncate text-slate-100">{name}</span>
                 {part.part_type === 'sub_assembly' && <span className="text-yellow-400 flex-shrink-0" title="Sub-assembly">★</span>}
                 {hasChildren && <span className="text-xs text-slate-500 flex-shrink-0">({node.children.length})</span>}
+                {part.obsolete_at && (
+                  <span data-testid={`row-obsolete-${part.id}`} className="flex-shrink-0 rounded bg-slate-700 px-1.5 text-[11px] text-slate-300">obsolete</span>
+                )}
                 <span className="ml-auto flex-shrink-0 flex items-center gap-1 text-[11px] text-slate-400">
                   {activeRevision && (
                     <RevisionLabel testId={`row-rev-${part.id}`} name={activeRevision.revision_name} index={activeRevision.customer_index} />

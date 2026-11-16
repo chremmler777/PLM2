@@ -28,6 +28,9 @@ export interface Part {
   active_revision_id: number | null;
   parent_part_id?: number | null;
   item_category: string;
+  /** Gauges and assembly equipment: set while the item is obsolete (greyed, no new links). */
+  obsolete_at?: string | null;
+  description?: string | null;
   calibration_interval_months?: number | null;
   last_calibrated_at?: string | null;
   next_calibration_due?: string | null;
