@@ -82,9 +82,30 @@ async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None,
     if not changes:
         return []
     items: dict[int, list[str]] = {}
-    for e in await late_entries(session, changes, now):
-        if keep is None or keep(e["department_id"]):
-            items.setdefault(e["change_id"], []).append(e["text"])
+    entries = await late_entries(session, changes, now)
+    # Christoph 2026-11-16: a passed deadline names who holds the change up,
+    # not only "deadline passed": the late items this reader does not get
+    # (other departments' managers do), or, when nothing counts as late yet,
+    # who the change is waiting on right now.
+    passed = {e["change_id"] for e in entries if e["kind"] == "deadline"
+              and (keep is None or keep(e["department_id"]))}
+    waiting = await open_with(session, {i: changes[i] for i in passed}, now) if passed else {}
+    for e in entries:
+        if not (keep is None or keep(e["department_id"])):
+            continue
+        text = e["text"]
+        if e["kind"] == "deadline":
+            others = [x for x in entries if x["change_id"] == e["change_id"] and x["kind"] != "deadline"]
+            unseen = [x["text"] for x in others if not (keep is None or keep(x["department_id"]))]
+            if unseen:
+                text += "; late in other departments: " + "; ".join(unseen)
+            elif not others:
+                c = changes[e["change_id"]]
+                lead = getattr(c, "lead_name", None)
+                text += "; waiting on: " + ("; ".join(waiting.get(c.id) or [])
+                                            or (f"nobody is named, lead {lead} decides the next step"
+                                                if lead else "nobody is named and there is no lead"))
+        items.setdefault(e["change_id"], []).append(text)
     out = []
     for cid in sorted(items, key=lambda i: changes[i].change_number):
         c = changes[cid]
@@ -98,6 +119,53 @@ async def _open_changes(session: AsyncSession, viewer: Optional[User]) -> dict:
     from app.services.change_service import _org_scope
     return {c.id: c for c in (await session.execute(_org_scope(select(ChangeRequest).where(
         ChangeRequest.status.not_in(TERMINAL_STATUSES)), viewer))).scalars().all()}
+
+
+async def open_with(session: AsyncSession, changes: dict, now: datetime) -> dict[int, list[str]]:
+    """Who each of these changes ({id: change}) is waiting on right now, late
+    or not, in words: open department assessments and change tasks, the
+    computed rows that owe a number or a decision (owed_items), and the stage
+    row of the status (hand-over, quote, customer answer). The department and
+    the person are named, so a passed deadline can say who holds it."""
+    out: dict[int, list[str]] = {}
+    if not changes:
+        return out
+    names = dict((await session.execute(select(Department.id, Department.name))).all())
+
+    def add(cid: int, text: str) -> None:
+        if text not in out.setdefault(cid, []):
+            out[cid].append(text)
+
+    for a in (await session.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id.in_(changes),
+            ChangeAssessment.status == "active",
+            ChangeAssessment.wf_instance_task_id.is_(None))
+            .order_by(ChangeAssessment.id))).scalars().all():
+        who = f", {a.owner_name}" if a.owner_name else ""
+        due = f" (due {fmt_date(a.due_date)})" if a.due_date else ""
+        add(a.change_id, f"{names.get(a.department_id, 'a department')} assessment{who}{due}")
+    from app.services.notification_sweep import change_task_query
+    q, change_of = change_task_query()
+    for t, cid in (await session.execute(q.where(change_of.in_(list(changes))))).all():
+        who = f", {t.owner_name}" if t.owner_id is not None and t.owner_name else ""
+        add(cid, f"{names.get(t.department_id, 'a department')}{who} (due {fmt_date(t.due_date)})")
+    from app.services.owed_items import owed_items
+    for i in await owed_items(session, list(changes.values()), now, with_owners=False):
+        add(i["change"].id, f"{i['label']} ({i['owner']}, due {fmt_date(i['due'])})")
+    for c in changes.values():
+        what = SALES_ROWS.get(c.status)
+        if c.status == "quoted" and c.customer_response not in (None, "pending"):
+            what = None
+        if what is None:
+            continue
+        if c.status == "captured":
+            lead = getattr(c, "lead_name", None)
+            who = f"Lead {lead}" if lead else "Project Management"
+        else:
+            owner = c.sales_owner_name if c.sales_owner_id else None
+            who = "Sales" + (f" ({owner})" if owner else "")
+        add(c.id, f"{who}: {what}")
+    return out
 
 
 async def late_by_change(session: AsyncSession, changes: dict,
