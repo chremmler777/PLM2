@@ -41,11 +41,14 @@ export interface DetailPaneProps {
   /** The item-list row being dragged (project page only): the equipment card takes the drop. */
   draggingPartId?: number | null;
   onDropDone?(): void;
+  /** Equipment just created on the project page: its card opens on the BOM. */
+  openBomPartId?: number | null;
+  onBomClosed?(): void;
 }
 
 export default function DetailPane({
   projectId, project, parts, structure, sel, tab, onTabChange, onPopOut,
-  emptyText = 'Select an item from the list', draggingPartId = null, onDropDone,
+  emptyText = 'Select an item from the list', draggingPartId = null, onDropDone, openBomPartId = null, onBomClosed,
 }: DetailPaneProps) {
   const { data: revisionFiles } = useRevisionFiles(sel.revisionId || 0);
   const part = parts?.find((p) => p.id === sel.partId);
@@ -112,7 +115,8 @@ export default function DetailPane({
         {effectiveTab === 'equipment' && (
           // Keyed by part: an open dialog never carries over to another item.
           <EquipmentTab key={part.id} projectId={projectId} part={part} parts={parts ?? []}
-            draggingPartId={draggingPartId} onDropDone={onDropDone} onOpenPart={sel.openPart} />
+            draggingPartId={draggingPartId} onDropDone={onDropDone} onOpenPart={sel.openPart}
+            openBom={openBomPartId === part.id} onBomClosed={onBomClosed} />
         )}
 
         {effectiveTab === 'tool' && (

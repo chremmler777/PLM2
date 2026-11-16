@@ -90,6 +90,8 @@ function ProjectDetailView() {
   const [detailTab, setDetailTab] = useState<DetailTab>('documents');
   // The item-list row being dragged: the list rows and the equipment card both take the drop.
   const [draggingPartId, setDraggingPartId] = useState<number | null>(null);
+  // Equipment just created: its card opens straight on the BOM, where the articles are dragged in.
+  const [openBomPartId, setOpenBomPartId] = useState<number | null>(null);
 
   const { data: paintOverview } = useQuery({
     queryKey: ['project-paint-overview', id],
@@ -250,6 +252,8 @@ function ProjectDetailView() {
                   onTabChange={setDetailTab}
                   draggingPartId={draggingPartId}
                   onDropDone={() => setDraggingPartId(null)}
+                  openBomPartId={openBomPartId}
+                  onBomClosed={() => setOpenBomPartId(null)}
                   onPopOut={selectionChannelSupported() ? openPopout : undefined}
                 />
               </div>
@@ -268,7 +272,10 @@ function ProjectDetailView() {
       {changelogPartId && <ChangelogModal partId={changelogPartId} onClose={() => setChangelogPartId(null)} />}
 
       <AddPartModal projectId={id} projectCode={project?.code} parts={parts} isOpen={showAddModal} onClose={() => setShowAddModal(false)}
-        onCreated={(partId) => selectPart(partId)} />
+        onCreated={(partId, isEquipment) => {
+          selectPart(partId);
+          if (isEquipment) { setDetailTab('equipment'); setOpenBomPartId(partId); }
+        }} />
     </div>
   );
 }

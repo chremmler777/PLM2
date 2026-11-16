@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AddPartModal from './AddPartModal'
 import type { Part } from './projectTypes'
@@ -40,6 +40,8 @@ function mount(rights: Record<string, boolean> = ALL) {
 const kind = () => screen.getByLabelText('Item Category *') as HTMLSelectElement
 const number = () => screen.getByLabelText('Part Number *') as HTMLInputElement
 const pick = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
+const pickTool = (label: string) => fireEvent.click(within(screen.getByTestId('serves-tool-list')).getByText(label))
+const submit = () => fireEvent.click(screen.getByRole('button', { name: /Add Part|Create and open BOM/ }))
 const kinds = () => Array.from(kind().options).map((o) => o.value)
 
 describe('AddPartModal', () => {
@@ -72,9 +74,9 @@ describe('AddPartModal', () => {
     mount()
     pick('Item Category *', 'gauge')
     expect(number().value).toBe('1748-70') // no tool yet: on the project code
-    pick('Serves tool', '1')
+    pickTool('3345 - Tool Cover')
     expect(number().value).toBe('3345-41') // 3345-40 exists
-    pick('Serves tool', '2')
+    pickTool('3450 - Tool Console')
     expect(number().value).toBe('3450-40')
     fireEvent.change(number(), { target: { value: '3450-45' } })
     expect(number().value).toBe('3450-45')
@@ -83,7 +85,7 @@ describe('AddPartModal', () => {
   it('suggests EOAT and station numbers, and the station type switches the family', () => {
     mount()
     pick('Item Category *', 'eoat')
-    pick('Serves tool', '1')
+    pickTool('3345 - Tool Cover')
     expect(number().value).toBe('3345-11') // 3345-10 exists
     pick('Item Category *', 'assembly_equipment')
     expect(number().value).toBe('3345-20')
@@ -96,9 +98,9 @@ describe('AddPartModal', () => {
       Promise.resolve({ data: url === '/v1/parts' ? { id: 99 } : {} }))
     const onClose = mount()
     pick('Item Category *', 'eoat')
-    pick('Serves tool', '1')
+    pickTool('3345 - Tool Cover')
     fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'EOAT 2' } })
-    fireEvent.click(screen.getByText('Add Part'))
+    submit()
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(clientMocks.post).toHaveBeenNthCalledWith(1, '/v1/parts',
       expect.objectContaining({ part_number: '3345-11', item_category: 'assembly_equipment', project_id: 7 }))
@@ -111,7 +113,7 @@ describe('AddPartModal', () => {
     pick('Item Category *', 'gauge')
     fireEvent.change(number(), { target: { value: 'G-7' } })
     fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Free gauge' } })
-    fireEvent.click(screen.getByText('Add Part'))
+    submit()
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(clientMocks.post).toHaveBeenCalledTimes(1)
     expect(clientMocks.post.mock.calls[0][1]).toMatchObject({ part_number: 'G-7', item_category: 'gauge' })
@@ -123,7 +125,7 @@ describe('AddPartModal', () => {
     pick('Item Category *', 'gauge')
     fireEvent.change(number(), { target: { value: 'G-7' } })
     fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'x' } })
-    fireEvent.click(screen.getByText('Add Part'))
+    submit()
     await waitFor(() => expect(toastMocks.error).toHaveBeenCalledWith('Only APQP, the Project Manager or an admin can change gauges; you can view them.'))
     expect(onClose).not.toHaveBeenCalled()
   })
@@ -131,15 +133,15 @@ describe('AddPartModal', () => {
   it('a tool is optional: none is picked by default and the wording fits the kind', () => {
     mount()
     pick('Item Category *', 'gauge')
-    const tool = screen.getByLabelText('Serves tool') as HTMLSelectElement
-    expect(tool.value).toBe('')
-    expect(tool.options[0].textContent).toBe('No tool (assembly gauge)')
+    const options = () => within(screen.getByTestId('serves-tool-list')).getAllByRole('option')
+    expect(options()[0].textContent).toBe('No tool (assembly gauge)')
+    expect(options()[0].getAttribute('aria-selected')).toBe('true')
     expect(screen.getByTestId('serves-tool-help').textContent).toContain('No tool is needed. A number on the project code is filled in below')
     expect(number().value).toBe('1748-70')
     pick('Item Category *', 'eoat')
-    expect((screen.getByLabelText('Serves tool') as HTMLSelectElement).options[0].textContent).toBe('No tool (assembly operation)')
+    expect(options()[0].textContent).toBe('No tool (assembly operation)')
     pick('Item Category *', 'assembly_equipment')
-    expect((screen.getByLabelText('Serves tool') as HTMLSelectElement).options[0].textContent).toBe('No tool (assembly operation)')
+    expect(options()[0].textContent).toBe('No tool (assembly operation)')
     expect(screen.queryByLabelText('Station type')).toBeNull() // only numbers by tool have a station family
     expect(number().value).toBe('1748-60')
     pick('Item Category *', 'article') // a number the dialog filled in does not stick to an article
@@ -165,7 +167,7 @@ describe('AddPartModal', () => {
     serverNumber = '3345-43'
     mount()
     pick('Item Category *', 'gauge')
-    pick('Serves tool', '1')
+    pickTool('3345 - Tool Cover')
     expect(number().value).toBe('3345-41') // the stand-in from this project's list
     await waitFor(() => expect(number().value).toBe('3345-43'))
     expect(clientMocks.get).toHaveBeenCalledWith('/v1/parts/next-equipment-number', { params: { tool_id: 1, family: 4 } })
@@ -175,7 +177,7 @@ describe('AddPartModal', () => {
     serverNumber = '3345-43'
     mount()
     pick('Item Category *', 'gauge')
-    pick('Serves tool', '1')
+    pickTool('3345 - Tool Cover')
     fireEvent.change(number(), { target: { value: 'MY-1' } })
     await waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/parts/next-equipment-number', expect.anything()))
     await new Promise((r) => setTimeout(r, 20))
@@ -188,10 +190,25 @@ describe('AddPartModal', () => {
     pick('Item Category *', 'assembly_equipment')
     expect(number().value).toBe('1748-60')
     fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Clip station' } })
-    fireEvent.click(screen.getByText('Add Part'))
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(42))
+    submit()
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(42, true))
     expect(onClose).toHaveBeenCalled()
     expect(clientMocks.post).toHaveBeenCalledTimes(1) // no serves link
     expect(clientMocks.post.mock.calls[0][1]).toMatchObject({ part_number: '1748-60', item_category: 'assembly_equipment' })
+  })
+
+  it('the tool list narrows as you type, and equipment shows no article fields', () => {
+    mount()
+    pick('Item Category *', 'gauge')
+    const options = () => within(screen.getByTestId('serves-tool-list')).getAllByRole('option').map((o) => o.textContent)
+    expect(options()).toEqual(['No tool (assembly gauge)', '3345 - Tool Cover', '3450 - Tool Console'])
+    fireEvent.change(screen.getByLabelText('Serves tool'), { target: { value: 'console' } })
+    expect(options()).toEqual(['No tool (assembly gauge)', '3450 - Tool Console']) // the picked one stays visible
+    expect(screen.queryByTestId('add-part-customer-number')).toBeNull()
+    expect(screen.queryByText('Type *')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Create and open BOM' })).toBeTruthy()
+    pick('Item Category *', 'article')
+    expect(screen.getByTestId('add-part-customer-number')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Add Part' })).toBeTruthy()
   })
 })
