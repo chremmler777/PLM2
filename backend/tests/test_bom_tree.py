@@ -1,4 +1,5 @@
 """BOM follows the revision; tree explosion and where-used."""
+import pytest
 from tests.conftest import post_active
 from datetime import date
 
@@ -122,6 +123,7 @@ async def test_tree_uses_a_given_revision(client, eng_auth, seed, session_factor
     assert r.json()["revision_id"] == e2_id  # active = newest customer major
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_project_assemblies_lists_self_made_roots_even_without_lines(client, eng_auth, seed):
     top, top_rev = await _mk_part(client, eng_auth, seed, "TOP")
     sub, sub_rev = await _mk_part(client, eng_auth, seed, "SUB")

@@ -1,4 +1,5 @@
 """HTTP flow: customer data → E1/E2 → official 1 → proposal 1.1 → promote."""
+import pytest
 from tests.conftest import activate_pending, login
 
 
@@ -108,6 +109,7 @@ async def test_customer_part_number_settable_on_create_and_update(client, eng_au
     assert r.json()["customer_part_number"] == "3CR.807.425.B"
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_tool_phases_run_rfq_dfm_preseries_series(client, eng_auth, admin_auth, seed):
     res = await client.post("/api/v1/parts", headers=eng_auth, json={
         "project_id": seed["project_id"], "part_number": "199401", "name": "Tool", "part_type": "purchased",

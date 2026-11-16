@@ -3,7 +3,8 @@
  * level bold) and phase on line 1, and the labelled KTX / Tier 1 / OEM
  * numbers with the mirror / paint / proposal marks on line 2. The expand
  * block (revisions, linked items) and drag-to-restructure onto a
- * sub-assembly work as before.
+ * sub-assembly work as before. An article dragged onto a tool, gauge or
+ * equipment row links the two (the pane decides who may).
  */
 import { Fragment, useState } from 'react';
 import ColourSwatch from '../paint/ColourSwatch';
@@ -52,6 +53,10 @@ export interface ItemRowProps {
   onDragStartPart(id: number): void;
   onDragEndPart(): void;
   onDropOnPart(targetId: number): void;
+  /** Categories (tool, gauge, assembly_equipment) the dragged item may be linked to; empty when no article is dragged. */
+  linkDropCategories?: Set<string>;
+  /** An article was dropped on this tool, gauge or equipment row: link them. */
+  onLinkDrop?(targetId: number): void;
   /** Mirror-pair dotted connector segments for this row's gutter cell. */
   mirrorConnectors?: Map<number, MirrorSegment[]>;
   /** Fixed gutter width in px, shared by every row so they stay aligned; 0 hides it. */
@@ -65,7 +70,7 @@ export default function ItemRow(props: ItemRowProps) {
   const {
     node, depth = 0, projectCode, structure, paintByPartId, selectedPartId, isExpanded, onSetExpanded,
     onSelect, onContextMenu, onSelectRevision, draggingPartId, invalidDropIds,
-    onDragStartPart, onDragEndPart, onDropOnPart,
+    onDragStartPart, onDragEndPart, onDropOnPart, linkDropCategories, onLinkDrop,
     mirrorConnectors, mirrorGutterWidth = 0, hoveredMirrorPairIds, onHoverRow,
   } = props;
   const [dragOver, setDragOver] = useState(false);
@@ -81,6 +86,14 @@ export default function ItemRow(props: ItemRowProps) {
     draggingPartId !== part.id &&
     part.part_type === 'sub_assembly' &&
     !invalidDropIds.has(part.id);
+  // The sub-assembly drop wins; otherwise an article lands on a tool, gauge or equipment to link them.
+  const isLinkTarget =
+    !isDropTarget &&
+    draggingPartId !== null &&
+    draggingPartId !== part.id &&
+    !!onLinkDrop &&
+    !!linkDropCategories?.has(part.item_category);
+  const acceptsDrop = isDropTarget || isLinkTarget;
 
   const customerNumber = part.customer_part_number ?? article?.customer_part_number ?? null;
   const activeRevision = article?.revisions.find((r) => r.is_active);
@@ -158,7 +171,7 @@ export default function ItemRow(props: ItemRowProps) {
           }}
           onDragEnd={onDragEndPart}
           onDragOver={(e) => {
-            if (isDropTarget) {
+            if (acceptsDrop) {
               e.preventDefault();
               setDragOver(true);
             }
@@ -168,10 +181,11 @@ export default function ItemRow(props: ItemRowProps) {
             e.preventDefault();
             setDragOver(false);
             if (isDropTarget) onDropOnPart(part.id);
+            else if (isLinkTarget) onLinkDrop?.(part.id);
           }}
           style={mirrorGutterWidth > 0 ? { paddingLeft: `${8 + mirrorGutterWidth}px` } : undefined}
           className={`flex-1 min-w-0 text-left px-2 py-1 rounded border transition ${
-            dragOver && isDropTarget
+            dragOver && acceptsDrop
               ? 'bg-green-900/40 border-green-500'
               : selected
                 ? 'bg-blue-900/40 border-blue-500'
