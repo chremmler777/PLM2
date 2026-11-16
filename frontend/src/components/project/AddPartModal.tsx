@@ -7,7 +7,10 @@
  * looks across all projects; the project's own list is the stand-in until it answers)
  * and links the two. A tool is optional: an assembly operation or an assembly gauge has
  * none and is numbered on the project code (<code>-60, ... for equipment, <code>-70, ...
- * for gauges). Articles are linked afterwards by drag and drop.
+ * for gauges). The tool is picked from a list that narrows as you type, not a long
+ * dropdown. Equipment shows only the fields it has (no customer number, type, catalog
+ * part or supplier); after creating it the page opens its BOM, where the articles are
+ * dragged in.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -56,8 +59,8 @@ export default function AddPartModal({
   parts: Part[] | undefined;
   isOpen: boolean;
   onClose: () => void;
-  /** The new item's id, so the page can select it and open its card. */
-  onCreated?: (partId: number) => void;
+  /** The new item's id, so the page can select it; for equipment it also opens the BOM. */
+  onCreated?: (partId: number, isEquipment: boolean) => void;
 }) {
   const queryClient = useQueryClient();
   const { data: catalogParts } = useCatalogParts();
@@ -66,6 +69,7 @@ export default function AddPartModal({
   const canEditGauges = useCanEditGauges();
   const canEditAssemblyEquipment = useCanEditAssemblyEquipment();
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [toolSearch, setToolSearch] = useState('');
   /** The number the dialog last filled in itself; a number the user typed is never replaced. */
   const lastSuggestion = useRef('');
   const tools = (parts ?? []).filter((p) => p.item_category === 'tool')
@@ -172,8 +176,9 @@ export default function AddPartModal({
       queryClient.invalidateQueries({ queryKey: ['part-relations'] });
       queryClient.invalidateQueries({ queryKey: ['next-equipment-number'] });
       setFormData(EMPTY_FORM);
+      setToolSearch('');
       onClose();
-      if (created?.id) onCreated?.(created.id);
+      if (created?.id) onCreated?.(created.id, EQUIPMENT_KINDS.has(formData.kind));
     },
     onError: (error: unknown) => {
       toast.error(apiErrorMessage(error, 'Failed to create the item'));
@@ -182,11 +187,13 @@ export default function AddPartModal({
 
   if (!isOpen) return null;
 
+  const isEquipment = EQUIPMENT_KINDS.has(formData.kind);
   const subAssemblies = parts?.filter((p) => p.part_type === 'sub_assembly') || [];
 
   return (
     <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center">
-      <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 max-w-md w-full mx-4">
+      <div role="dialog" aria-modal="true" aria-label="Add New Item"
+        className="bg-slate-800 rounded-lg border border-slate-700 p-6 max-w-md w-full mx-4 max-h-[92vh] overflow-y-auto">
         <h2 className="text-xl font-bold text-slate-100 mb-4">Add New Item</h2>
 
         <div className="space-y-4">
@@ -214,25 +221,41 @@ export default function AddPartModal({
           {EQUIPMENT_KINDS.has(formData.kind) && (
             <div>
               <label htmlFor="add-part-serves-tool" className="block text-sm font-medium text-slate-300 mb-1">Serves tool</label>
-              <select
+              <input
                 id="add-part-serves-tool"
-                value={formData.serves_tool_id}
-                onChange={(e) => setFormData(withSuggestedNumber({ ...formData, serves_tool_id: e.target.value }))}
-                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
-              >
-                <option value="">{formData.kind === 'gauge' ? 'No tool (assembly gauge)' : 'No tool (assembly operation)'}</option>
-                {tools.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.part_number} - {t.name}
-                  </option>
-                ))}
-              </select>
+                type="search"
+                value={toolSearch}
+                onChange={(e) => setToolSearch(e.target.value)}
+                placeholder="Type a tool number or name to narrow the list"
+                className="w-full bg-slate-700 border border-slate-600 rounded-t px-3 py-2 text-slate-100 text-sm placeholder:text-slate-400 focus:border-sky-400 focus:outline-none"
+              />
+              <ul role="listbox" aria-label="Tools" data-testid="serves-tool-list"
+                className="max-h-44 overflow-y-auto rounded-b border border-t-0 border-slate-600 bg-slate-900/40 text-sm">
+                {[{ id: '', label: formData.kind === 'gauge' ? 'No tool (assembly gauge)' : 'No tool (assembly operation)' },
+                  ...tools.map((t) => ({ id: String(t.id), label: `${t.part_number} - ${t.name}` }))]
+                  .filter((o) => o.id === formData.serves_tool_id
+                    || toolSearch.toLowerCase().split(/\s+/).filter(Boolean).every((w) => o.label.toLowerCase().includes(w)))
+                  .map((o) => {
+                    const selected = o.id === formData.serves_tool_id;
+                    return (
+                      <li key={o.id || 'none'} role="option" aria-selected={selected}>
+                        <button type="button"
+                          onClick={() => setFormData(withSuggestedNumber({ ...formData, serves_tool_id: o.id }))}
+                          className={`block w-full truncate px-3 py-1.5 text-left ${
+                            selected ? 'bg-blue-600 text-white' : 'text-slate-200 hover:bg-slate-700'
+                          }`}>
+                          {o.label}
+                        </button>
+                      </li>
+                    );
+                  })}
+              </ul>
               <p data-testid="serves-tool-help" className="text-xs text-slate-400 mt-1">
                 {formData.serves_tool_id
                   ? 'The next free number of this tool is filled in below and the item is linked to the tool. More tools can be added on its card.'
                   : familyFull
                     ? `All numbers ${fullBase}-${target!.family}0 to -${target!.family}9 are used, type a number.`
-                    : 'No tool is needed. A number on the project code is filled in below; you can change it. Articles are linked afterwards by drag and drop.'}
+                    : 'No tool is needed. A number on the project code is filled in below; you can change it.'}
               </p>
             </div>
           )}
@@ -278,6 +301,7 @@ export default function AddPartModal({
             />
           </div>
 
+          {!isEquipment && (<>
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">Customer Part Number</label>
             <input
@@ -302,6 +326,8 @@ export default function AddPartModal({
             />
           </div>
 
+          </>)}
+
           <div>
             <label htmlFor="add-part-name" className="block text-sm font-medium text-slate-300 mb-1">Name *</label>
             <input
@@ -314,6 +340,7 @@ export default function AddPartModal({
             />
           </div>
 
+          {!isEquipment && (<>
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">Type *</label>
             <select
@@ -396,6 +423,8 @@ export default function AddPartModal({
             </div>
           )}
 
+          </>)}
+
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">Description</label>
             <textarea
@@ -420,7 +449,7 @@ export default function AddPartModal({
             disabled={createMutation.isPending || !formData.part_number || !formData.name}
             className="flex-1 px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white text-sm font-medium"
           >
-            {createMutation.isPending ? 'Creating...' : 'Add Part'}
+            {createMutation.isPending ? 'Creating...' : isEquipment ? 'Create and open BOM' : 'Add Part'}
           </button>
         </div>
       </div>

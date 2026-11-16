@@ -56,9 +56,12 @@ export interface EquipmentTabProps {
   draggingPartId?: number | null;
   onDropDone?(): void;
   onOpenPart(partId: number): void;
+  /** Just created: start on the BOM workspace. */
+  openBom?: boolean;
+  onBomClosed?(): void;
 }
 
-export default function EquipmentTab({ projectId, part, parts, draggingPartId = null, onDropDone, onOpenPart }: EquipmentTabProps) {
+export default function EquipmentTab({ projectId, part, parts, draggingPartId = null, onDropDone, onOpenPart, openBom = false, onBomClosed }: EquipmentTabProps) {
   const queryClient = useQueryClient();
   const isGauge = part.item_category === 'gauge';
   const canEditGauges = useCanEditGauges();
@@ -68,7 +71,7 @@ export default function EquipmentTab({ projectId, part, parts, draggingPartId = 
   const editable = canEdit && !obsolete;
   const articleLink = isGauge ? 'checks' : 'assembles';
   const [dragOver, setDragOver] = useState(false);
-  const [dialog, setDialog] = useState<'edit' | 'obsolete' | 'bom' | null>(null);
+  const [dialog, setDialog] = useState<'edit' | 'obsolete' | 'bom' | null>(openBom ? 'bom' : null);
 
   const { data: relations } = useQuery({
     queryKey: ['part-relations', part.id],
@@ -278,7 +281,7 @@ export default function EquipmentTab({ projectId, part, parts, draggingPartId = 
         <EquipmentBom part={part} parts={parts} kindLabel={equipmentKindLabel(part)} tools={tools} articles={articles}
           isGauge={isGauge} busy={linkMutation.isPending || unlinkMutation.isPending}
           onAdd={(others, type) => linkMutation.mutate({ others, relationType: type === 'serves' ? 'serves' : articleLink })}
-          onRemove={(id) => unlinkMutation.mutate(id)} onQuantity={saveQuantity} onClose={() => setDialog(null)} />
+          onRemove={(id) => unlinkMutation.mutate(id)} onQuantity={saveQuantity} onClose={() => { setDialog(null); onBomClosed?.(); }} />
       )}
       {dialog === 'obsolete' && <ObsoleteDialog part={part} onClose={() => setDialog(null)} onSaved={refresh} />}
     </>
