@@ -87,9 +87,9 @@ describe('LOP equipment', () => {
     pdb = pdbResponse({ topics: [pdbTopic({ tool_number: '3345' })] })
     mount()
     await screen.findByTestId('lop-row-1')
-    const filter = screen.getByLabelText('Equipment')
+    const filter = screen.getByLabelText('Article or equipment')
     expect(within(filter).getAllByRole('option').map((o) => o.textContent)).toEqual(
-      ['Equipment: all', '3345', '3345-40', '3346', '3346-10'])
+      ['Article / equipment: all', '3345', '3345-40', '3346', '3346-10'])
     fireEvent.change(filter, { target: { value: '3345' } })
     expect(screen.getByTestId('lop-row-1')).toBeTruthy()
     expect(screen.queryByTestId('lop-row-2')).toBeNull()
@@ -105,6 +105,22 @@ describe('LOP equipment', () => {
     mount()
     fireEvent.click(await screen.findByRole('button', { name: '+ Task' }))
     const form = await screen.findByTestId('lop-new-task')
-    expect(await within(form).findByText(/No tools, gauges or equipment in PLM/)).toBeTruthy()
+    expect(await within(form).findByText(/No articles, tools, gauges or equipment in PLM/)).toBeTruthy()
+  })
+
+  it('links an article and shows it by its customer number', async () => {
+    equipment = [{ id: 200, part_number: '21-3345-0001', name: 'UBV Mitte part', kind: 'article', tool_number: null,
+      customer_part_number: '51.12.7.123.456' }, TOOL]
+    mount()
+    fireEvent.click(await screen.findByRole('button', { name: '+ Task' }))
+    const form = await screen.findByTestId('lop-new-task')
+    fireEvent.change(within(form).getByLabelText('Task'), { target: { value: 'Sink mark' } })
+    await within(form).findByRole('option', { name: /51\.12\.7\.123\.456 · 21-3345-0001/ })
+    link(form, 200)
+    expect(within(form).getByRole('button', { name: 'Remove Article 51.12.7.123.456' })).toBeTruthy()
+    expect(within(form).queryByTestId('lop-tool-hint')).toBeNull()
+    fireEvent.click(within(form).getByRole('button', { name: 'Add task' }))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/lop/projects/2/lines',
+      { title: 'Sink mark', equipment_ids: [200] }))
   })
 })

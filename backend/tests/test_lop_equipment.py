@@ -40,7 +40,8 @@ async def test_the_pick_list_holds_tools_gauges_and_equipment_of_the_project(cli
     r = await client.get(f"{BASE}/projects/{lop_project.id}/equipment", headers=pm_auth)
     assert r.status_code == 200, r.text
     got = {e["part_number"]: e for e in r.json()}
-    assert set(got) == {"3345", "3345-40", "3345-10", "3345-20"}          # no article, no other project
+    assert set(got) == {"3345", "3345-40", "3345-10", "3345-20", "21-3345-0001"}   # not the other project
+    assert got["21-3345-0001"]["kind"] == "article" and got["21-3345-0001"]["tool_number"] is None
     assert got["3345"]["kind"] == "tool" and got["3345-40"]["kind"] == "gauge"
     assert got["3345-10"]["kind"] == "eoat" and got["3345-20"]["kind"] == "assembly_equipment"
     assert got["3345-10"]["tool_number"] == "3345" and got["3345"]["tool_number"] == "3345"
@@ -53,7 +54,7 @@ async def test_a_task_is_created_with_equipment(client, pm_auth, lop_project, eq
     eq = r.json()["equipment"]
     assert [e["part_number"] for e in eq] == ["3345", "3345-40"]            # by number, once each
     assert eq[1] == {"id": equipment.gauge, "part_number": "3345-40", "name": "Gauge UBV Mitte",
-                     "kind": "gauge", "tool_number": "3345"}
+                     "kind": "gauge", "tool_number": "3345", "customer_part_number": None}
 
 
 async def test_no_equipment_is_an_empty_list(client, pm_auth, line):
@@ -64,11 +65,19 @@ async def test_no_equipment_is_an_empty_list(client, pm_auth, line):
 
 
 async def test_only_equipment_of_the_same_project_can_be_linked(client, pm_auth, lop_project, equipment):
-    for bad in (equipment.article, equipment.other, 987654):
+    for bad in (equipment.other, 987654):
         r = await client.post(_lines(lop_project.id), headers=pm_auth,
                               json={"title": "x", "equipment_ids": [bad]})
         assert r.status_code == 400, bad
-        assert "tools, gauges and assembly equipment of this project" in r.json()["detail"]
+        assert "articles, tools, gauges and assembly equipment of this project" in r.json()["detail"]
+
+
+async def test_a_line_is_linked_to_an_article(client, pm_auth, lop_project, equipment):
+    r = await client.post(_lines(lop_project.id), headers=pm_auth,
+                          json={"title": "Sink mark on A-surface", "equipment_ids": [equipment.article, equipment.tool]})
+    assert r.status_code == 201, r.text
+    assert [(e["kind"], e["part_number"]) for e in r.json()["equipment"]] == [
+        ("article", "21-3345-0001"), ("tool", "3345")]
 
 
 async def test_pm_changes_the_equipment_and_history_says_so(client, pm_auth, line, equipment):
