@@ -17,7 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.entities import Plant, Project, User
-from app.models.lop import LOP_STATUSES, LopComment, LopEvent, LopLine
+from app.models.lop import (
+    DETAILS_MAX, LOP_STATUSES, TITLE_MAX, LopComment, LopEvent, LopFile, LopLine,
+)
 from app.models.workflow import Department, ProjectResponsible
 from app.services import lop_rules as rules
 from app.services.project_team_service import ProjectTeamService, is_live_member
@@ -126,6 +128,28 @@ class LineContext:
     meetings: dict[int, dict] = field(default_factory=dict)
     # line id -> mark in the project's open meeting
     marks: dict[int, str] = field(default_factory=dict)
+    # line id -> number of attached files
+    file_counts: dict[int, int] = field(default_factory=dict)
+
+
+def clean_title(raw: Optional[str]) -> str:
+    """The title, trimmed. Empty or longer than the column is a plain 400."""
+    title = (raw or "").strip()
+    if not title:
+        raise LopError("A title is required")
+    if len(title) > TITLE_MAX:
+        raise LopError(f"The title is too long: {len(title)} characters, {TITLE_MAX} are allowed. "
+                       "Keep the title short and put the rest into Details.")
+    return title
+
+
+def clean_details(raw: Optional[str]) -> Optional[str]:
+    """The details text, trimmed; blank is None."""
+    details = (raw or "").strip() or None
+    if details and len(details) > DETAILS_MAX:
+        raise LopError(f"The details are too long: {len(details)} characters, {DETAILS_MAX} are allowed. "
+                       "Attach the rest as a file.")
+    return details
 
 
 class LopService:
@@ -277,16 +301,16 @@ class LopService:
 
     @staticmethod
     async def create_task(session: AsyncSession, user: User, project_id: int, *,
-                          title: str, department_id: Optional[int] = None,
+                          title: str, details: Optional[str] = None,
+                          department_id: Optional[int] = None,
                           due_date: Optional[date] = None,
                           next_check_date: Optional[date] = None,
                           responsible_id: Optional[int] = None) -> LopLine:
         await LopService.get_project(session, project_id, user)
         if not await LopService.can_manage(session, user, project_id):
             raise LopForbidden("Only the Project Manager creates lines")
-        title = (title or "").strip()
-        if not title:
-            raise LopError("A title is required")
+        title = clean_title(title)
+        details = clean_details(details)
         if department_id is not None:
             await LopService._check_department(session, department_id)
         if responsible_id is not None:
@@ -297,7 +321,7 @@ class LopService:
                 session, project_id, department_id)
         has_date = due_date is not None or next_check_date is not None
         line = LopLine(
-            project_id=project_id, kind="task", title=title,
+            project_id=project_id, kind="task", title=title, details=details,
             department_id=department_id, responsible_id=responsible_id,
             responsible_is_default=is_default, due_date=due_date,
             first_due_date=due_date, next_check_date=next_check_date,
@@ -348,12 +372,16 @@ class LopService:
         if "title" in body:
             if line.kind != "task":
                 raise LopError("Only a PM task has its own title")
-            title = (body["title"] or "").strip()
-            if not title:
-                raise LopError("A title is required")
+            title = clean_title(body["title"])
             if title != line.title:
                 LopService._event(session, line, user, "title", line.title, title, reason)
                 line.title, changed = title, True
+
+        if "details" in body:
+            details = clean_details(body["details"])
+            if details != line.details:
+                LopService._event(session, line, user, "details", line.details, details, reason)
+                line.details, changed = details, True
 
         if "department_id" in body:
             new_dept = body["department_id"]
@@ -628,6 +656,10 @@ class LopService:
         if dept_ids:
             ctx.departments = dict((await session.execute(
                 select(Department.id, Department.name).where(Department.id.in_(dept_ids)))).all())
+        ctx.file_counts = dict((await session.execute(
+            select(LopFile.line_id, func.count(LopFile.id))
+            .where(LopFile.line_id.in_(ids), LopFile.is_deleted.is_(False))
+            .group_by(LopFile.line_id))).all())
         from app.services import lop_sources
         ctx.sources = await lop_sources.load_sources(session, lines)
         ctx.reopened = set((await session.execute(
@@ -701,7 +733,8 @@ class LopService:
         created_on = local_date(line.created_at or datetime.utcnow())
         d = {
             "id": line.id, "project_id": line.project_id, "kind": line.kind,
-            "ref_key": line.ref_key, "title": line.title,
+            "ref_key": line.ref_key, "title": line.title, "details": line.details,
+            "file_count": ctx.file_counts.get(line.id, 0),
             "department_id": line.department_id, "responsible_id": line.responsible_id,
             "responsible_is_default": line.responsible_is_default,
             "due_date": _iso(line.due_date), "first_due_date": _iso(line.first_due_date),
@@ -743,7 +776,8 @@ class LopService:
         stale_days = get_settings().lop_stale_days
         return {
             "id": None, "project_id": None, "kind": "pdb_topic", "ref_key": str(topic["id"]),
-            "title": None, "department_id": None, "responsible_id": None,
+            "title": None, "details": None, "file_count": 0,
+            "department_id": None, "responsible_id": None,
             "responsible_is_default": False, "due_date": None, "first_due_date": None,
             "due_is_default": False, "next_check_date": None, "status": "open",
             "closed_at": None, "closed_by": None, "last_update_at": None, "last_update_by": None,

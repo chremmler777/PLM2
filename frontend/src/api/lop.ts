@@ -1,9 +1,9 @@
 /**
  * Project LOP API (backend/app/api/v1/lop.py), all under /v1/lop.
  */
-import client from './client'
+import client, { API_BASE_URL } from './client'
 import type {
-  LinePatch, LineCreate, LopHistoryItem, LopLine, LopLineInProject, LopLinesQuery,
+  LinePatch, LineCreate, LopFile, LopHistoryItem, LopLine, LopLineInProject, LopLinesQuery,
   LopMeetingDetail, LopOverview, LopProjectResponse, LopView, MeetingMark, PdbResponse, PinBody, SepCandidateGate, LopMyEscalation, SamplingRequestBody
 } from '../types/lop'
 
@@ -17,6 +17,7 @@ export const lopKeys = {
   sep: (projectId: number) => ['lop', projectId, 'sep-candidates'] as const,
   meeting: (projectId: number, meetingId: number) => ['lop', projectId, 'meeting', meetingId] as const,
   history: (projectId: number, lineId: number) => ['lop', projectId, 'history', lineId] as const,
+  files: (projectId: number, lineId: number) => ['lop', projectId, 'files', lineId] as const,
 }
 
 const isNotFound = (e: unknown) => (e as { response?: { status?: number } })?.response?.status === 404
@@ -58,6 +59,18 @@ export const lopApi = {
     (await client.post(`/v1/lop/lines/${lineId}/comments`, { text })).data,
   history: async (lineId: number): Promise<LopHistoryItem[]> =>
     (await client.get(`/v1/lop/lines/${lineId}/history`)).data,
+  files: async (lineId: number): Promise<LopFile[]> =>
+    (await client.get(`/v1/lop/lines/${lineId}/files`)).data,
+  /** One multipart request carries the whole drop. The shared client sets a JSON
+   * Content-Type; clearing it lets the browser write the multipart boundary. */
+  attachFiles: async (lineId: number, files: File[]): Promise<LopFile[]> => {
+    const form = new FormData()
+    files.forEach((f) => form.append('files', f))
+    return (await client.post(`/v1/lop/lines/${lineId}/files`, form, { headers: { 'Content-Type': undefined } })).data
+  },
+  removeFile: async (lineId: number, fileId: number): Promise<void> => {
+    await client.delete(`/v1/lop/lines/${lineId}/files/${fileId}`)
+  },
   sepCandidates: async (projectId: number): Promise<SepCandidateGate[]> =>
     ((await client.get(`/v1/lop/projects/${projectId}/sep-candidates`)).data?.gates ?? []),
   addSepItem: async (projectId: number, itemId: number, dueDate?: string | null) =>
@@ -80,6 +93,10 @@ export const lopApi = {
   sendMinutes: async (meetingId: number): Promise<{ sent_to: number }> =>
     (await client.post(`/v1/lop/meetings/${meetingId}/minutes`)).data,
 }
+
+/** Absolute href for an `<a download>` of one attached file. */
+export const lopFileUrl = (lineId: number, fileId: number): string =>
+  `${API_BASE_URL}/v1/lop/lines/${lineId}/files/${fileId}/download`
 
 function filenameFrom(disposition: string | undefined, fallback: string): string {
   const m = /filename="?([^";]+)"?/i.exec(disposition ?? '')

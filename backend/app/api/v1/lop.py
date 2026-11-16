@@ -5,14 +5,17 @@ import logging
 from datetime import date
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+import os
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
 from app.models import User, get_db
-from app.services import lop_export, lop_kpi, lop_sources, pdb_client
+from app.services import lop_export, lop_files, lop_kpi, lop_sources, pdb_client
 from app.services.lop_meetings import LopMeetings
 from app.services.lop_service import LopError, LopService, _today
 from app.services.worksheet_export import XLSX_MEDIA_TYPE
@@ -23,6 +26,7 @@ router = APIRouter(prefix="/lop", tags=["lop"])
 
 class LineCreate(BaseModel):
     title: str
+    details: Optional[str] = None
     department_id: Optional[int] = None
     due_date: Optional[date] = None
     next_check_date: Optional[date] = None
@@ -31,6 +35,7 @@ class LineCreate(BaseModel):
 
 class LinePatch(BaseModel):
     title: Optional[str] = None
+    details: Optional[str] = None
     department_id: Optional[int] = None
     responsible_id: Optional[int] = None
     clear_responsible: bool = False
@@ -279,6 +284,51 @@ async def history(line_id: int, user: User = Depends(get_current_user),
                   db: AsyncSession = Depends(get_db)):
     try:
         return await LopService.history(db, user, line_id)
+    except LopError as e:
+        raise _http(e)
+
+
+# -------------------------------------------------------------------- files
+@router.post("/lines/{line_id}/files", status_code=201)
+async def attach_files(line_id: int, files: list[UploadFile] = File(...),
+                       user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The project team attaches one or more files of any type to a line."""
+    try:
+        rows = await lop_files.store(db, user, line_id, files)
+        line = await LopService.get_line(db, user, line_id)
+        return await lop_files.dicts(db, user, line, rows)
+    except LopError as e:
+        raise _http(e)
+
+
+@router.get("/lines/{line_id}/files")
+async def list_files(line_id: int, user: User = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
+    try:
+        return await lop_files.listing(db, user, line_id)
+    except LopError as e:
+        raise _http(e)
+
+
+@router.get("/lines/{line_id}/files/{file_id}/download")
+async def download_file(line_id: int, file_id: int, user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    try:
+        _, f = await lop_files.get(db, user, line_id, file_id)
+    except LopError as e:
+        raise _http(e)
+    if not os.path.exists(f.stored_path):
+        raise HTTPException(404, "File not found")
+    return FileResponse(f.stored_path, filename=f.filename,
+                        media_type=f.content_type or "application/octet-stream")
+
+
+@router.delete("/lines/{line_id}/files/{file_id}", status_code=204)
+async def remove_file(line_id: int, file_id: int, user: User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
+    """The PM removes any file, everybody else only their own. Soft delete."""
+    try:
+        await lop_files.remove(db, user, line_id, file_id)
     except LopError as e:
         raise _http(e)
 

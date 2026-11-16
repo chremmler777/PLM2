@@ -11,19 +11,22 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { lopApi, lopKeys, type TeamRow } from '../../api/lop'
 import { shortDay } from '../../lib/lop'
-import type { LinePatch, LopHistoryItem, LopLine } from '../../types/lop'
+import { LOP_DETAILS_MAX, LOP_TITLE_MAX, type LinePatch, type LopHistoryItem, type LopLine } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
+import LopFiles from './LopFiles'
 import { DefaultMarker, InlineError, PersonOptions, inputCls, labelCls } from './lopUi'
 import type { TeamPerson } from './lopTeam'
 import { useLopWrite } from './useLopWrite'
 
 const FIELD_LABEL: Record<string, string> = {
   due_date: 'due date', next_check_date: 'next check', status: 'status', responsible: 'responsible',
-  department: 'department', title: 'title',
+  department: 'department', title: 'title', details: 'details',
 }
 
 function historyText(h: LopHistoryItem): string {
   if (h.type === 'comment') return h.text
+  if (h.field === 'file') return h.new_value ? `file attached: ${h.new_value}` : `file removed: ${h.old_value ?? ''}`
+  if (h.field === 'details') return `details ${h.old_value ? (h.new_value ? 'changed' : 'removed') : 'added'}${h.reason ? ` (${h.reason})` : ''}`
   const field = FIELD_LABEL[h.field] ?? h.field.replace(/_/g, ' ')
   const fmt = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? shortDay(v) : v || 'none')
   return `${field}: ${fmt(h.old_value)} → ${fmt(h.new_value)}${h.reason ? ` (${h.reason})` : ''}`
@@ -33,6 +36,7 @@ function PmForm({ line, projectId, team, people, teamError }: {
   line: LopLine; projectId: number; team: TeamRow[]; people: TeamPerson[]; teamError: string | null
 }) {
   const [title, setTitle] = useState(line.title ?? '')
+  const [details, setDetails] = useState(line.details ?? '')
   const [dept, setDept] = useState(line.department_id != null ? String(line.department_id) : '')
   const [resp, setResp] = useState(line.responsible_id != null ? String(line.responsible_id) : '')
   const [due, setDue] = useState(line.due_date ?? '')
@@ -42,6 +46,7 @@ function PmForm({ line, projectId, team, people, teamError }: {
 
   const body: LinePatch = {}
   if (line.kind === 'task' && title.trim() !== (line.title ?? '')) body.title = title.trim()
+  if (details.trim() !== (line.details ?? '')) body.details = details.trim() || null
   if (dept !== (line.department_id != null ? String(line.department_id) : '')) body.department_id = dept ? Number(dept) : null
   if (resp !== (line.responsible_id != null ? String(line.responsible_id) : '')) {
     if (resp) body.responsible_id = Number(resp)
@@ -54,7 +59,10 @@ function PmForm({ line, projectId, team, people, teamError }: {
   const moving = 'due_date' in body && line.first_due_date != null && !line.due_is_default
   if (moving && reason.trim()) body.reason = reason.trim()
   const changed = Object.keys(body).filter((k) => k !== 'reason').length > 0
+  const titleTooLong = line.kind === 'task' && title.trim().length > LOP_TITLE_MAX
+  const detailsTooLong = details.trim().length > LOP_DETAILS_MAX
   const blocked = !changed || (moving && !reason.trim()) || (line.kind === 'task' && !title.trim())
+    || titleTooLong || detailsTooLong
 
   const status = (s: LinePatch['status']) => patch.run({ status: s })
   return (
@@ -96,6 +104,21 @@ function PmForm({ line, projectId, team, people, teamError }: {
         )}
         <button type="button" className={btnSm.primary} disabled={blocked || patch.pending} onClick={() => patch.run(body)}>Save</button>
       </div>
+      {titleTooLong && (
+        <InlineError>
+          The title is too long: {title.trim().length} of {LOP_TITLE_MAX} characters. Keep it to one line and put the rest into Details.
+        </InlineError>
+      )}
+      <label className={labelCls}>Details
+        <textarea rows={Math.min(10, Math.max(3, details.split('\n').length + 1))} className={`${inputCls} h-auto py-1`}
+          value={details} aria-invalid={detailsTooLong} placeholder="Goal, steps, when it is done"
+          onChange={(e) => setDetails(e.target.value)} />
+      </label>
+      {detailsTooLong && (
+        <InlineError>
+          The details are too long: {details.trim().length} of {LOP_DETAILS_MAX} characters. Attach the rest as a file.
+        </InlineError>
+      )}
       <div className="flex flex-wrap items-center gap-1.5">
         {(line.status === 'new' || line.status === 'open') && (
           <button type="button" className={btnSm.ghost} disabled={patch.pending} onClick={() => status('in_work')}>Mark in work</button>
@@ -155,6 +178,13 @@ export default function LopLineEditor({ line, projectId, team, people, teamError
         <p className="text-[11px] text-slate-400">Its source is closed; the line follows it.</p>
       )}
       {line.can_manage && <PmForm key={`${line.id}-${line.last_update_at}`} line={line} projectId={projectId} team={team} people={people} teamError={teamError} />}
+      {!line.can_manage && line.details && (
+        <div data-testid={`lop-details-${line.id}`}>
+          <span className="text-[11px] text-slate-400">Details</span>
+          <p className="whitespace-pre-wrap text-xs text-slate-200">{line.details}</p>
+        </div>
+      )}
+      <LopFiles line={line} projectId={projectId} canAttach={canComment} />
       <Comments line={line} projectId={projectId} canComment={canComment} />
     </div>
   )

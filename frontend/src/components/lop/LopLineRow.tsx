@@ -3,7 +3,7 @@
  * Confirm name, Confirm / Reopen a done line (PM), Done, please check (the
  * responsible), Discussed / Escalate during a meeting, Pin an open PDB topic.
  */
-import { ChevronDown, ChevronRight, Pin } from 'lucide-react'
+import { ChevronDown, ChevronRight, Paperclip, Pin } from 'lucide-react'
 import { lopApi } from '../../api/lop'
 import { MARK_LABEL, STATUS_LABEL, dueLabel, escalationLabel, pdbTopicUrl, shortDay, sourceLabel, sourceTone } from '../../lib/lop'
 import type { LinePatch, LopLine, LopMeetingRef, MeetingMark } from '../../types/lop'
@@ -34,6 +34,13 @@ function TaskCell({ line }: { line: LopLine }) {
         {first}
       </div>
       {more && <div className="text-[11px] text-slate-400">{more}</div>}
+      {line.details && <div data-testid="lop-row-details" className="line-clamp-2 whitespace-pre-line text-[11px] text-slate-400" title={line.details}>{line.details}</div>}
+      {!!line.file_count && (
+        <span data-testid="lop-row-files" title={`${line.file_count} file${line.file_count === 1 ? '' : 's'} attached: open the line to see them`}
+          className="mt-0.5 inline-flex items-center gap-0.5 text-[11px] text-sky-300">
+          <Paperclip size={11} aria-hidden="true" />{line.file_count}
+        </span>
+      )}
       {line.kind === 'risk' && line.source_context && <div className="text-[11px] text-slate-400">Risk: {line.source_context}</div>}
     </div>
   )
