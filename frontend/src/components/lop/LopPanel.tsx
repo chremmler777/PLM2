@@ -140,8 +140,8 @@ export default function LopPanel({ projectId }: { projectId: number }) {
           {SOURCES.map((s) => <option key={s.kind} value={s.kind}>{s.label}</option>)}
         </select>
         {tools.length > 0 && (
-          <select aria-label="Equipment" className={inputCls} value={tool} onChange={(e) => setTool(e.target.value)}>
-            <option value="">Equipment: all</option>
+          <select aria-label="Article or equipment" className={inputCls} value={tool} onChange={(e) => setTool(e.target.value)}>
+            <option value="">Article / equipment: all</option>
             {tools.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         )}

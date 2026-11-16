@@ -25,12 +25,14 @@ export interface LopLastComment {
 
 export interface LopOwner { id: number; name: string | null }
 
-/** A tool, gauge, EOAT or assembly equipment of the project in PLM. */
+/** An article, tool, gauge, EOAT or assembly equipment of the project in PLM. */
 export interface LopEquipment {
   id: number
   part_number: string
   name: string
-  kind: 'tool' | 'gauge' | 'eoat' | 'assembly_equipment'
+  kind: 'article' | 'tool' | 'gauge' | 'eoat' | 'assembly_equipment'
+  /** Articles: the number the customer knows the part by. */
+  customer_part_number?: string | null
   /** The tool it belongs to by its number (a tool: itself); null outside the numbering scheme. */
   tool_number: string | null
 }

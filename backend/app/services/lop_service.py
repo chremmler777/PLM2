@@ -137,7 +137,9 @@ class LineContext:
     file_counts: dict[int, int] = field(default_factory=dict)
 
 
-EQUIPMENT_CATEGORIES = ("tool", "gauge", "assembly_equipment")
+#: What a line can be linked to: the project's items in PLM. Articles since
+#: Christoph 2026-11-16 ("add linking article").
+EQUIPMENT_CATEGORIES = ("tool", "gauge", "assembly_equipment", "article")
 
 
 def equipment_dict(part) -> dict:
@@ -146,6 +148,10 @@ def equipment_dict(part) -> dict:
     tool_number: the tool it belongs to by its number (a tool: itself)."""
     from app.services.equipment_numbering import classify, parse_equipment_number
     kind, tool_number = part.item_category, None
+    if kind == "article":                       # an article number is not <tool>-<op code>
+        return {"id": part.id, "part_number": part.part_number, "name": part.name,
+                "kind": kind, "tool_number": None,
+                "customer_part_number": part.customer_part_number}
     try:
         tool_number, op_code = parse_equipment_number(part.part_number)
         if part.item_category == "assembly_equipment" and op_code and classify(op_code) == "eoat":
@@ -153,7 +159,7 @@ def equipment_dict(part) -> dict:
     except ValueError:
         pass                                    # a number outside the scheme: no tool, plain kind
     return {"id": part.id, "part_number": part.part_number, "name": part.name,
-            "kind": kind, "tool_number": tool_number}
+            "kind": kind, "tool_number": tool_number, "customer_part_number": None}
 
 
 def clean_title(raw: Optional[str]) -> str:
@@ -301,8 +307,8 @@ class LopService:
     # ------------------------------------------------------------- equipment
     @staticmethod
     async def project_equipment(session: AsyncSession, project_id: int) -> list[dict]:
-        """The project's tools, gauges and assembly equipment in PLM, by number:
-        what a line can be linked to."""
+        """The project's articles, tools, gauges and assembly equipment in PLM,
+        by number: what a line can be linked to."""
         from app.models.part import Part
         rows = (await session.execute(
             select(Part).where(Part.project_id == project_id,
@@ -322,7 +328,7 @@ class LopService:
             select(Part).where(Part.id.in_(wanted)))).scalars().all()} if wanted else {}
         if any(i not in parts or parts[i].project_id != line.project_id
                or parts[i].item_category not in EQUIPMENT_CATEGORIES for i in wanted):
-            raise LopError("A line can only be linked to tools, gauges and assembly equipment "
+            raise LopError("A line can only be linked to articles, tools, gauges and assembly equipment "
                            "of this project in PLM")
         rows = list((await session.execute(
             select(LopLineEquipment).where(LopLineEquipment.line_id == line.id))).scalars().all())
