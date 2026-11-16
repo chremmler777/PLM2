@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.entities import Plant, Project, User
-from app.models.lop import LopEvent, LopLine
+from app.models.lop import LopEvent, LopLine, LopLineOwner
 from app.models.notification import Notification
 from app.models.workflow import Department, ProjectResponsible
 from app.services import lop_rules as rules
@@ -96,23 +96,28 @@ async def digest_for(session: AsyncSession, user: User, today: date,
          .where(Project.lop_enabled.is_(True), Plant.organization_id == user.organization_id,
                 LopLine.status != "closed")
          .order_by(LopLine.due_date.is_(None), LopLine.due_date, LopLine.id))
-    cond = LopLine.responsible_id == user.id
+    owned = select(LopLineOwner.line_id).where(LopLineOwner.user_id == user.id)
+    cond = or_(LopLine.responsible_id == user.id, LopLine.id.in_(owned))
     if managed:
         cond = or_(cond, (LopLine.project_id.in_(managed)) & (LopLine.status == "done_check"))
     lines = list((await session.execute(q.where(cond))).scalars().all())
     if not lines:
         return None
     team: dict[int, set[int]] = {}
-    for pid in {ln.project_id for ln in lines if ln.responsible_id == user.id}:
-        team[pid] = await LopService.team_user_ids(session, pid)
     ctx = await LopService.context(session, user, lines, can_manage=False)
+
+    def owns(ln: LopLine) -> bool:
+        return ln.responsible_id == user.id or user.id in ctx.owners.get(ln.id, [])
+    for pid in {ln.project_id for ln in lines if owns(ln)}:
+        team[pid] = await LopService.team_user_ids(session, pid)
     codes = dict((await session.execute(select(Project.id, Project.code).where(
         Project.id.in_({ln.project_id for ln in lines})))).all())
     since = await _since(session, user, now)
     my_name = _uname(user)
     became_mine = set((await session.execute(
         select(LopEvent.line_id).where(
-            LopEvent.line_id.in_([ln.id for ln in lines]), LopEvent.field == "responsible",
+            LopEvent.line_id.in_([ln.id for ln in lines]),
+            LopEvent.field.in_(("responsible", "additional_owner")),
             LopEvent.new_value == my_name, LopEvent.created_at > since))).scalars().all())
 
     out: dict[str, list[tuple[str, int, str]]] = {s: [] for s in SECTIONS}
@@ -120,14 +125,15 @@ async def digest_for(session: AsyncSession, user: User, today: date,
 
     def add(section: str, ln: LopLine, extra: str = "") -> None:
         text, _ = LopService._text_and_label(ln, ctx)
-        out[section].append((codes[ln.project_id], ln.id, f"#{ln.id} {_one_line(text)} | {_when(ln)}{extra}"))
+        role = " | additional owner" if ln.responsible_id != user.id and owns(ln) else ""
+        out[section].append((codes[ln.project_id], ln.id, f"#{ln.id} {_one_line(text)} | {_when(ln)}{role}{extra}"))
         shown.add(ln.id)
 
     for ln in lines:
         s = LopService._state(ln, ctx)
         if s.status == "closed":
             continue
-        mine = ln.responsible_id == user.id and user.id in team.get(ln.project_id, set())
+        mine = owns(ln) and user.id in team.get(ln.project_id, set())
         if mine and ln.status != "done_check":
             if ln.id in became_mine or (ln.created_at and ln.created_at > since):
                 add("New for you", ln)
@@ -172,6 +178,9 @@ async def _digest_candidates(session: AsyncSession) -> list[User]:
     ids = set((await session.execute(
         open_lines.with_only_columns(LopLine.responsible_id)
         .where(LopLine.responsible_id.is_not(None)))).scalars().all())
+    ids |= set((await session.execute(
+        select(LopLineOwner.user_id).where(
+            LopLineOwner.line_id.in_(open_lines.with_only_columns(LopLine.id))))).scalars().all())
     waiting = open_lines.where(LopLine.status == "done_check").with_only_columns(LopLine.project_id)
     for col in (ProjectResponsible.user_id, ProjectResponsible.backup_user_id):
         ids |= set((await session.execute(

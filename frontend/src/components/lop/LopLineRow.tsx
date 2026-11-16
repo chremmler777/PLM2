@@ -76,12 +76,19 @@ function DueCell({ line }: { line: LopLine }) {
 
 function ResponsibleCell({ line }: { line: LopLine }) {
   if (line.kind === 'pdb_topic' && !line.pinned) return <span className="text-slate-500">department only</span>
-  if (!line.responsible_name) return <span className="font-medium text-amber-300">no name</span>
+  const more = (line.additional_owners ?? []).map((o) => o.name ?? 'unknown')
+  const also = more.length > 0 && (
+    <div data-testid="lop-row-owners" className="text-[11px] text-slate-400" title="Additional owners">+ {more.join(', ')}</div>
+  )
+  if (!line.responsible_name) return <><span className="font-medium text-amber-300">no name</span>{also}</>
   return (
-    <span>
-      {line.responsible_name}
-      {line.responsible_is_default && <DefaultMarker testId="default-name" title="No team member for this department: the PM by default" />}
-    </span>
+    <>
+      <span>
+        {line.responsible_name}
+        {line.responsible_is_default && <DefaultMarker testId="default-name" title="No team member for this department: the PM by default" />}
+      </span>
+      {also}
+    </>
   )
 }
 

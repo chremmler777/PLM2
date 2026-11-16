@@ -66,6 +66,22 @@ class LopComment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class LopLineOwner(Base):
+    """An additional owner of a line. The main owner is lop_lines.responsible_id
+    (department, lateness and escalation stay with that person); additional
+    owners see the line as theirs and can report it done."""
+    __tablename__ = "lop_line_owners"
+    __table_args__ = (
+        UniqueConstraint("line_id", "user_id", name="uq_lop_line_owner"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    line_id: Mapped[int] = mapped_column(ForeignKey("lop_lines.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    added_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class LopFile(Base):
     """A file attached to a line (drawing, photo, mail, measurement sheet).
 

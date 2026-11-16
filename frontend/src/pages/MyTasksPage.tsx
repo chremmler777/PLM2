@@ -355,6 +355,10 @@ function LopLinesSection() {
                       <span data-testid="lop-task-escalated"
                         className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-bold text-white">Escalated</span>
                     )}
+                    {l.my_role === 'additional' && (
+                      <span data-testid="lop-task-additional" title={`Main owner: ${l.responsible_name ?? 'no name'}`}
+                        className="ml-2 rounded border border-slate-600 px-1.5 py-0.5 text-[11px] text-slate-300">additional owner</span>
+                    )}
                     {l.department_name && <span className="text-xs text-slate-500 ml-2">{l.department_name}</span>}
                   </td>
                   <td className={`px-4 py-3 align-top text-xs tabular-nums whitespace-nowrap ${l.late ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
