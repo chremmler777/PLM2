@@ -8,6 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search, X } from 'lucide-react';
+import { shortName } from '../../lib/partDisplay';
 import type { Part } from './projectTypes';
 
 export interface EquipmentRelation {
@@ -41,7 +42,7 @@ export function BomRows({ articles, isGauge, editable, busy = false, onOpenPart,
         const text = (
           <>
             <span className="font-mono text-slate-100">{a.other_customer_part_number || a.other_part_number}</span>
-            <span className="text-slate-200"> {a.other_part_name}</span>
+            <span className="text-slate-200"> {shortName(a.other_part_name, null, a.other_customer_part_number)}</span>
             {a.other_customer_part_number && (
               <span className="block font-mono text-xs text-slate-400">{a.other_part_number}</span>
             )}
@@ -207,7 +208,7 @@ export default function EquipmentBom({
                     <div className="min-w-0 flex-1">
                       <p className="truncate">
                         <span className="font-mono text-slate-100">{p.customer_part_number || p.part_number}</span>
-                        <span className="text-slate-200"> {p.name}</span>
+                        <span className="text-slate-200"> {shortName(p.name, null, p.customer_part_number)}</span>
                       </p>
                       {p.customer_part_number && <p className="truncate font-mono text-xs text-slate-400">{p.part_number}</p>}
                     </div>
