@@ -267,6 +267,15 @@ async def tool_engineer(session_factory, seed):
     return await make_tool_engineer(session_factory, seed["engineer_id"])
 
 
+@pytest_asyncio.fixture
+async def item_editor(session_factory, seed):
+    """The seeded engineer may create and change tools, gauges and assembly equipment
+    (Tool Engineer, APQP, Manufacturing Engineer: app/services/tool_rights.py and
+    equipment_rights.py). For tests that only need such an item to exist."""
+    for name in ("Tool Engineer", "APQP", "Manufacturing Engineer"):
+        await make_department_member(session_factory, seed["engineer_id"], name)
+
+
 async def make_development_member(session_factory, user_id: int) -> int:
     """Impact confirmation is Development-only (no admin shortcut), so any
     test confirming through the API needs the confirming user in Development.

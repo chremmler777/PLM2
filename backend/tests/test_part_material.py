@@ -79,6 +79,7 @@ async def test_clear_material(client, eng_auth, seed):
     assert r.json()["material_source"] is None and r.json()["material_new_text"] is None
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_tools_have_no_material(client, eng_auth, seed, materialdb):
     tid = await _part(client, eng_auth, seed, "T-1", "tool")
     r = await client.put(f"/api/v1/parts/{tid}/material", json={"source": "new", "new_text": "PP"}, headers=eng_auth)

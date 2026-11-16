@@ -25,6 +25,7 @@ async def _create(client, eng_auth, seed, part_number, name, item_category="arti
     return res.json()["id"]
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_relation_roundtrip(client, eng_auth, seed):
     article = await _create(client, eng_auth, seed, "A-10", "Housing")
     tool = await _create(client, eng_auth, seed, "T-10", "Injection Mold", "tool")

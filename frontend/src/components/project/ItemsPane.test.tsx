@@ -1,12 +1,13 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ItemsPane, { type ItemsPaneProps } from './ItemsPane'
 import type { Part } from './projectTypes'
 
-const clientMocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
+const clientMocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }))
+vi.mock('sonner', () => ({ toast: toastMocks }))
 vi.mock('../parts/AssemblyTreeList', () => ({ default: () => <div>assemblies</div> }))
 
 const parts: Part[] = [
@@ -131,5 +132,100 @@ describe('ItemsPane', () => {
     mount({ onShowWorksheet })
     fireEvent.click(screen.getByTestId('show-worksheet'))
     expect(onShowWorksheet).toHaveBeenCalled()
+  })
+
+  describe('drag and drop linking', () => {
+    const base = { part_type: 'internal_mfg', active_revision_id: null, parent_part_id: null }
+    const linkParts: Part[] = [
+      { ...base, id: 1, part_number: '3345', name: 'Tool Cover', item_category: 'tool' },
+      { ...base, id: 2, part_number: '1748-0012', name: 'Cover LH', item_category: 'article' },
+      { ...base, id: 3, part_number: '3345-40', name: 'Gauge Cover', item_category: 'gauge' },
+      { ...base, id: 4, part_number: '3345-20', name: 'Degate station', item_category: 'assembly_equipment' },
+      { ...base, id: 5, part_number: '1748-0100', name: 'Cover assy', item_category: 'article', part_type: 'sub_assembly' },
+    ]
+    const ALL = { can_edit_tools: true, can_edit_gauges: true, can_edit_assembly_equipment: true }
+    const withRights = (rights: Record<string, boolean>) =>
+      clientMocks.get.mockImplementation((url: string) => Promise.resolve({ data: url === '/v1/auth/me' ? rights : [] }))
+    const drag = (fromId: number, toId: number) => {
+      const dataTransfer = { effectAllowed: '' }
+      fireEvent.dragStart(screen.getByTestId(`item-row-${fromId}`), { dataTransfer })
+      const target = screen.getByTestId(`item-row-${toId}`)
+      fireEvent.dragOver(target, { dataTransfer })
+      const highlighted = target.className.includes('border-green-500')
+      fireEvent.drop(target, { dataTransfer })
+      return highlighted
+    }
+
+    beforeEach(() => {
+      clientMocks.get.mockReset(); clientMocks.post.mockReset(); clientMocks.put.mockReset()
+      Object.values(toastMocks).forEach((m) => m.mockReset())
+      clientMocks.post.mockResolvedValue({ data: {} })
+      clientMocks.put.mockResolvedValue({ data: {} })
+      withRights(ALL)
+    })
+
+    it('an article dropped on a gauge, tool or equipment links them in plain words', async () => {
+      mount({ parts: linkParts })
+      expect(drag(2, 3)).toBe(true)
+      await waitFor(() => expect(toastMocks.success).toHaveBeenCalledWith('Linked: gauge 3345-40 checks 1748-0012'))
+      expect(clientMocks.post).toHaveBeenLastCalledWith('/v1/parts/3/relations', { to_part_id: 2, relation_type: 'checks' })
+      drag(2, 1)
+      await waitFor(() => expect(toastMocks.success).toHaveBeenCalledWith('Linked: tool 3345 produces 1748-0012'))
+      expect(clientMocks.post).toHaveBeenLastCalledWith('/v1/parts/1/relations', { to_part_id: 2, relation_type: 'produces' })
+      drag(2, 4)
+      await waitFor(() => expect(toastMocks.success).toHaveBeenCalledWith('Linked: equipment 3345-20 assembles 1748-0012'))
+      expect(clientMocks.post).toHaveBeenLastCalledWith('/v1/parts/4/relations', { to_part_id: 2, relation_type: 'assembles' })
+    })
+
+    it('says so and does nothing when the link already exists', () => {
+      mount({ parts: linkParts, structure: { articles: [{
+        part_id: 2, part_number: '1748-0012', customer_part_number: null, name: 'Cover LH', lifecycle_phase: 'series',
+        active_revision_id: null, revisions: [], mirror_of: null, mirrored_by: [],
+        related: [{ relation_type: 'checks', direction: 'incoming', label: 'checked by', part_id: 3, part_number: '3345-40', name: 'Gauge Cover', item_category: 'gauge' }],
+      }] } })
+      drag(2, 3)
+      expect(toastMocks.info).toHaveBeenCalledWith('Already linked: gauge 3345-40 checks 1748-0012')
+      expect(clientMocks.post).not.toHaveBeenCalled()
+    })
+
+    it('only an article links: a gauge dragged onto a tool is not accepted', () => {
+      mount({ parts: linkParts })
+      expect(drag(3, 1)).toBe(false)
+      expect(clientMocks.post).not.toHaveBeenCalled()
+    })
+
+    it('a row is no drop target without the right for its category', async () => {
+      withRights({ can_edit_tools: false, can_edit_gauges: true, can_edit_assembly_equipment: false })
+      mount({ parts: linkParts })
+      await waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/auth/me'))
+      await waitFor(() => expect(drag(2, 1)).toBe(false))
+      expect(drag(2, 4)).toBe(false)
+      expect(clientMocks.post).not.toHaveBeenCalled()
+      expect(drag(2, 3)).toBe(true)
+      await waitFor(() => expect(clientMocks.post).toHaveBeenCalledTimes(1))
+    })
+
+    it("shows the server's 403 text when it refuses", async () => {
+      clientMocks.post.mockRejectedValue({ response: { status: 403, data: { detail: 'Only APQP, the Project Manager or an admin can change gauges; you can view them.' } } })
+      mount({ parts: linkParts })
+      drag(2, 3)
+      await waitFor(() => expect(toastMocks.error).toHaveBeenCalledWith('Only APQP, the Project Manager or an admin can change gauges; you can view them.'))
+    })
+
+    it('dropping on a sub-assembly still re-parents', async () => {
+      mount({ parts: linkParts })
+      expect(drag(2, 5)).toBe(true)
+      await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/2', { parent_part_id: 5 }))
+      expect(clientMocks.post).not.toHaveBeenCalled()
+    })
+
+    it('shows the hint only to people who may link', async () => {
+      mount({ parts: linkParts })
+      expect(screen.getByTestId('link-hint').textContent).toBe('Drag an article onto a tool, gauge or equipment to link it.')
+      cleanup()
+      withRights({ can_edit_tools: false, can_edit_gauges: false, can_edit_assembly_equipment: false })
+      mount({ parts: linkParts })
+      await waitFor(() => expect(screen.queryByTestId('link-hint')).toBeNull())
+    })
   })
 })

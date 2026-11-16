@@ -62,6 +62,7 @@ async def test_every_change_is_logged_and_same_value_is_not(client, eng_auth, se
 
 
 @pytest.mark.parametrize("category", ["tool", "gauge"])
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_only_articles_take_colour_code_and_grain(client, eng_auth, seed, category):
     pid = await _part(client, eng_auth, seed, "T-1", category)
     for field in ("colour_code", "grain"):

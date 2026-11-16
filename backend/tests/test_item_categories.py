@@ -1,4 +1,5 @@
 """Controlled item categories (tools, assembly equipment, gauges) tests."""
+import pytest
 from tests.conftest import post_active
 
 
@@ -14,6 +15,7 @@ async def _create_item(client, eng_auth, seed, **overrides):
     return await client.post("/api/v1/parts", json=payload, headers=eng_auth)
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_create_gauge_with_calibration_interval(client, eng_auth, seed):
     res = await _create_item(
         client, eng_auth, seed,
@@ -40,6 +42,7 @@ async def test_invalid_category_rejected(client, eng_auth, seed):
     assert res.status_code == 400
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_mark_calibrated_updates_due_date(client, eng_auth, seed):
     res = await _create_item(
         client, eng_auth, seed,
@@ -58,6 +61,7 @@ async def test_mark_calibrated_updates_due_date(client, eng_auth, seed):
     assert res.json()["next_calibration_due"] is not None
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_tool_inherits_revision_machinery(client, eng_auth, seed):
     """Tools are controlled items: they get revisions like articles."""
     res = await _create_item(client, eng_auth, seed, part_number="T-001", name="Die", item_category="tool")
