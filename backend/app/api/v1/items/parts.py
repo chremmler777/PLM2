@@ -13,7 +13,7 @@ from app.models import get_db
 from app.models import User
 from app.models.part import Part, PartFile
 from app.services.part_service import PartService, RevisionService, ChangelogService
-from app.services.tool_rights import require_tool_editor
+from app.services.equipment_rights import require_category_editor
 from app.services.project_structure_service import project_structure
 from app.services.thumbnail_service import (
     set_thumbnail, clear_thumbnail, media_type_for, InvalidThumbnail, ThumbnailTooLarge,
@@ -41,7 +41,9 @@ async def create_part(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new part in a project."""
+    """Create a new part in a project. Tools, gauges and assembly equipment need the
+    right of their category (tool_rights / equipment_rights); articles do not."""
+    await require_category_editor(db, current_user, body.item_category)
     try:
         part = await PartService.create_part(
             session=db,
@@ -119,10 +121,13 @@ async def update_part(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update part information. A tool's data is Tool Engineer or admin only (tool_rights)."""
+    """Update part information. A tool, gauge or assembly equipment needs the right of its
+    category (tool_rights / equipment_rights), and so does turning an item into one."""
     target = await db.get(Part, part_id)
-    if target is not None and target.item_category == "tool":
-        await require_tool_editor(db, current_user)
+    if target is not None:
+        await require_category_editor(db, current_user, target.item_category)
+        if body.item_category and body.item_category != target.item_category:
+            await require_category_editor(db, current_user, body.item_category)
     try:
         part = await PartService.update_part(
             session=db,

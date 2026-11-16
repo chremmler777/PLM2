@@ -10,6 +10,7 @@ from app.models.entities import User
 from app.models.workflow import Department
 from app.services.cost_sheet_service import can_read as cost_sheet_can_read
 from app.services.tool_rights import can_edit_tools
+from app.services.equipment_rights import can_edit_assembly_equipment, can_edit_gauges
 from app.version import SOFTWARE_VERSION
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -74,6 +75,10 @@ async def me(request: Request, user=Depends(get_current_user), db: AsyncSession 
         "effective_role": user.effective_role,
         # Tool data (tool fields, produces links, shrinkage, DFM): Tool Engineer or admin
         "can_edit_tools": await can_edit_tools(db, user),
+        # Gauges: APQP or Project Manager; assembly equipment and EOATs: Manufacturing
+        # Engineer or Project Manager; an admin both (app/services/equipment_rights.py)
+        "can_edit_gauges": await can_edit_gauges(db, user),
+        "can_edit_assembly_equipment": await can_edit_assembly_equipment(db, user),
         # Which prices the viewer reads (R23): "all" (admin, PM, Sales,
         # Management), "led" (only the changes they lead), "none". The P&L
         # link and page go by it instead of showing someone zeros.

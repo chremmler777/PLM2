@@ -1,7 +1,9 @@
 /**
  * ItemsPane - the project's items: search, category filter, collapsible
- * groups of slim rows, and drag-to-restructure onto sub-assemblies. Only the
- * list below the controls scrolls.
+ * groups of slim rows, and drag-to-restructure onto sub-assemblies. Dragging
+ * an article onto a tool, gauge or equipment row links them (tool produces,
+ * gauge checks, equipment assembles) for viewers with the right of that
+ * category. Only the list below the controls scrolls.
  */
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +12,7 @@ import client from '../../api/client';
 import AssemblyTreeList from '../parts/AssemblyTreeList';
 import { apiErrorMessage } from '../../lib/apiError';
 import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
+import { useCanEditAssemblyEquipment, useCanEditGauges, useCanEditTools } from '../../hooks/queries/useToolRights';
 import type { PartPaintLayer } from '../../types/paint';
 import { comparePartNumbers } from '../../lib/partDisplay';
 import ItemRow from './ItemRow';
@@ -41,6 +44,13 @@ export interface ItemsPaneProps {
   onShowWorksheet?: () => void;
 }
 
+/** What dropping an article on an item of this category means, in the words of the toast. */
+const LINK_BY_CATEGORY: Record<string, { relationType: string; noun: string; verb: string }> = {
+  tool: { relationType: 'produces', noun: 'tool', verb: 'produces' },
+  gauge: { relationType: 'checks', noun: 'gauge', verb: 'checks' },
+  assembly_equipment: { relationType: 'assembles', noun: 'equipment', verb: 'assembles' },
+};
+
 export default function ItemsPane({
   projectId, projectCode, parts, partsLoading, structure, paintByPartId, paintedIds, paintedCount,
   selectedPartId, onSelect, onOpenPart, onPickRevision, onContextMenu, mode = 'list', onShowWorksheet,
@@ -68,6 +78,55 @@ export default function ItemsPane({
       toast.error(apiErrorMessage(error, 'Failed to move part'));
     },
   });
+
+  const canEditTools = useCanEditTools();
+  const canEditGauges = useCanEditGauges();
+  const canEditAssemblyEquipment = useCanEditAssemblyEquipment();
+  const canLinkAny = canEditTools || canEditGauges || canEditAssemblyEquipment;
+  const draggingIsArticle = draggingPartId !== null
+    && parts?.find((p) => p.id === draggingPartId)?.item_category === 'article';
+  // Only an article is linked by dropping, and only onto categories the viewer may change.
+  const linkDropCategories = useMemo(() => new Set<string>(!draggingIsArticle ? [] : [
+    ...(canEditTools ? ['tool'] : []),
+    ...(canEditGauges ? ['gauge'] : []),
+    ...(canEditAssemblyEquipment ? ['assembly_equipment'] : []),
+  ]), [draggingIsArticle, canEditTools, canEditGauges, canEditAssemblyEquipment]);
+
+  const linkMutation = useMutation({
+    mutationFn: async ({ equipmentId, articleId, relationType }: { equipmentId: number; articleId: number; relationType: string; sentence: string }) => {
+      await client.post(`/v1/parts/${equipmentId}/relations`, { to_part_id: articleId, relation_type: relationType });
+    },
+    onSuccess: (_data, { sentence }) => {
+      toast.success(`Linked: ${sentence}`);
+      queryClient.invalidateQueries({ queryKey: ['project-structure', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['part-relations'] });
+      queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
+    },
+    onError: (error: unknown, { sentence }) => {
+      if ((error as { response?: { status?: number } })?.response?.status === 409) {
+        toast.info(`Already linked: ${sentence}`);
+        queryClient.invalidateQueries({ queryKey: ['project-structure', projectId] });
+        return;
+      }
+      toast.error(apiErrorMessage(error, 'Failed to link the items'));
+    },
+  });
+
+  const handleLinkDrop = (targetId: number) => {
+    const article = parts?.find((p) => p.id === draggingPartId);
+    const target = parts?.find((p) => p.id === targetId);
+    setDraggingPartId(null);
+    const link = target ? LINK_BY_CATEGORY[target.item_category] : undefined;
+    if (!article || !target || !link || article.item_category !== 'article') return;
+    const sentence = `${link.noun} ${target.part_number} ${link.verb} ${article.part_number}`;
+    const exists = articleOf(structure, article.id)?.related
+      .some((r) => r.part_id === target.id && r.relation_type === link.relationType && r.direction === 'incoming');
+    if (exists) {
+      toast.info(`Already linked: ${sentence}`);
+      return;
+    }
+    linkMutation.mutate({ equipmentId: target.id, articleId: article.id, relationType: link.relationType, sentence });
+  };
 
   const handleDropOnPart = (targetId: number) => {
     if (draggingPartId === null) return;
@@ -203,6 +262,11 @@ export default function ItemsPane({
             )
           )}
         </div>
+        {canLinkAny && !isTable && categoryFilter !== 'assemblies' && (
+          <p data-testid="link-hint" className="text-[11px] text-slate-500">
+            Drag an article onto a tool, gauge or equipment to link it.
+          </p>
+        )}
       </div>
 
       <div
@@ -296,6 +360,8 @@ export default function ItemsPane({
                           onDragStartPart={setDraggingPartId}
                           onDragEndPart={() => setDraggingPartId(null)}
                           onDropOnPart={handleDropOnPart}
+                          linkDropCategories={linkDropCategories}
+                          onLinkDrop={handleLinkDrop}
                           mirrorConnectors={connectors}
                           mirrorGutterWidth={gutterWidth}
                           hoveredMirrorPairIds={hoveredMirrorPairIds}

@@ -31,6 +31,7 @@ async def test_thread_is_empty_until_the_first_comment(client, eng_auth, seed):
     assert "comments" not in r.json()[0]
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_flag_set_and_clear_over_http_with_changelog(client, eng_auth, seed):
     tid = await _part(client, eng_auth, seed, "T-1", "tool")
     r = await client.put(f"/api/v1/parts/{tid}/field-notes/tool.cavities/flag",
@@ -73,6 +74,7 @@ async def test_empty_and_blank_comments(client, eng_auth, seed):
     assert r.status_code == 400
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_project_listing_includes_tools_and_stays_in_the_project(client, eng_auth, seed, session_factory):
     from app.models.entities import Project
     from app.models.part import Part

@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
-import { useCanEditTools } from '../hooks/queries/useToolRights';
+import { useCanEditAssemblyEquipment, useCanEditGauges, useCanEditTools } from '../hooks/queries/useToolRights';
 
 interface Relation {
   id: number;
@@ -49,8 +49,28 @@ const DEFAULT_TYPE_BY_CATEGORY: Record<string, string> = {
 };
 
 export default function PartRelationsSection({ partId, itemCategory, projectParts, onSelectPart }: Props) {
-  // "produces" links are tool data: Tool Engineer or admin (others view them)
+  // "produces" links are tool data: Tool Engineer or admin (others view them).
+  // "checks" links are gauge data (APQP, Project Manager), "assembles" links equipment
+  // data (Manufacturing Engineer, Project Manager), and "serves" belongs to the item
+  // that serves the tool. Same rule as the backend (equipment_rights.py).
   const canEditTools = useCanEditTools();
+  const canEditGauges = useCanEditGauges();
+  const canEditAssemblyEquipment = useCanEditAssemblyEquipment();
+  const canEditCategory = (category: string) =>
+    category === 'tool' ? canEditTools
+      : category === 'gauge' ? canEditGauges
+        : category === 'assembly_equipment' ? canEditAssemblyEquipment
+          : true;
+  const canEditRelation = (rel: Relation) => {
+    if (rel.relation_type === 'produces') return canEditTools;
+    if (rel.relation_type === 'checks') return canEditGauges;
+    if (rel.relation_type === 'assembles') return canEditAssemblyEquipment;
+    if (rel.relation_type === 'serves') {
+      return canEditCategory(rel.direction === 'outgoing' ? itemCategory : rel.other_item_category);
+    }
+    return true;
+  };
+  const servesOffered = (itemCategory === 'gauge' || itemCategory === 'assembly_equipment') && canEditCategory(itemCategory);
   const queryClient = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
@@ -74,6 +94,7 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
     onSuccess: () => {
       toast.success('Relation added');
       queryClient.invalidateQueries({ queryKey: ['part-relations'] });
+      queryClient.invalidateQueries({ queryKey: ['project-structure'] });
       setShowAdd(false);
       setForm({ ...form, to_part_id: '' });
     },
@@ -101,7 +122,7 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-slate-200">Relations</h3>
-        {!showAdd && (itemCategory !== 'tool' || canEditTools) && (
+        {!showAdd && canEditCategory(itemCategory) && (
           <button
             onClick={() => setShowAdd(true)}
             className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium"
@@ -132,12 +153,13 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
                 </span>
                 <span className="text-slate-500 text-xs font-mono ml-1">{rel.other_part_number}</span>
               </button>
-              {(rel.relation_type !== 'produces' || canEditTools) && (
+              {canEditRelation(rel) && (
                 <button
                   onClick={() => deleteMutation.mutate(rel.id)}
                   disabled={deleteMutation.isPending}
                   className="text-red-400 hover:text-red-300 text-xs ml-2 flex-shrink-0"
                   title="Remove relation"
+                  aria-label={`Remove link to ${rel.other_part_number}`}
                 >
                   ✕
                 </button>
@@ -151,17 +173,20 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
         <div className="mt-3 p-3 bg-slate-700/50 rounded border border-slate-600 space-y-2">
           <div className="flex gap-2">
             <select
+              aria-label="Kind of link"
               value={form.relation_type}
               onChange={(e) => setForm({ ...form, relation_type: e.target.value })}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-slate-100 text-xs"
             >
               {canEditTools && <option value="produces">produces</option>}
-              <option value="checks">checks</option>
-              <option value="assembles">assembles</option>
+              {canEditGauges && <option value="checks">checks</option>}
+              {canEditAssemblyEquipment && <option value="assembles">assembles</option>}
+              {servesOffered && <option value="serves">serves (tool)</option>}
               <option value="related">related to</option>
               {itemCategory === 'article' && <option value="mirror_of">mirror of</option>}
             </select>
             <select
+              aria-label="Item to link"
               value={form.to_part_id}
               onChange={(e) => setForm({ ...form, to_part_id: e.target.value })}
               className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-slate-100 text-xs"

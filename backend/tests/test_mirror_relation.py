@@ -37,6 +37,7 @@ async def test_one_mirror_per_part(client, eng_auth, seed):
     assert "already a mirror" in r.json()["detail"]
 
 
+@pytest.mark.usefixtures("item_editor")  # sets up a tool / gauge as the engineer
 async def test_mirror_must_be_articles(client, eng_auth, seed):
     a = await _create(client, eng_auth, seed, "20-1", "A")
     tool = await _create(client, eng_auth, seed, "T-1", "Tool", item_category="tool")

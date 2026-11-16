@@ -1,10 +1,42 @@
-/** "+ Add Part" dialog: any controlled item category, optional parent sub-assembly. */
+/**
+ * "+ Add Part" dialog: any controlled item category, optional parent sub-assembly.
+ * It offers only the kinds the viewer may create (tools: Tool Engineer; gauges: APQP or
+ * Project Manager; assembly equipment and EOATs: Manufacturing Engineer or Project
+ * Manager; an admin all). A gauge, EOAT or station can name the tool it serves: the
+ * dialog then suggests the next free number of that tool and links the two.
+ */
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import client from '../../api/client';
+import { apiErrorMessage } from '../../lib/apiError';
+import { comparePartNumbers } from '../../lib/partDisplay';
+import { useCanEditAssemblyEquipment, useCanEditGauges, useCanEditTools } from '../../hooks/queries/useToolRights';
+import {
+  EQUIPMENT_KINDS, categoryOfKind, familyOfKind, suggestEquipmentNumber, type ItemKind,
+} from './equipmentNumbers';
 import { useCatalogParts } from '../../hooks/queries/useProjectDetail';
 import { useSuppliers } from '../../hooks/queries/useSuppliers';
 import type { Part } from './projectTypes';
+
+const EMPTY_FORM = {
+  part_number: '',
+  customer_part_number: '',
+  tier1_part_number: '',
+  name: '',
+  part_type: 'purchased',
+  supplier: '',
+  supplier_id: '',
+  description: '',
+  parent_part_id: '',
+  catalog_part_id: '',
+  kind: 'article' as ItemKind,
+  /** The tool a gauge, EOAT or station serves; empty = free number, no link. */
+  serves_tool_id: '',
+  /** Assembly equipment only: in-cell station (-2x) or secondary station (-3x). */
+  station: '2' as '2' | '3',
+  calibration_interval_months: '',
+};
 
 export default function AddPartModal({
   projectId,
@@ -20,20 +52,23 @@ export default function AddPartModal({
   const queryClient = useQueryClient();
   const { data: catalogParts } = useCatalogParts();
   const { data: suppliers } = useSuppliers();
-  const [formData, setFormData] = useState({
-    part_number: '',
-    customer_part_number: '',
-    tier1_part_number: '',
-    name: '',
-    part_type: 'purchased',
-    supplier: '',
-    supplier_id: '',
-    description: '',
-    parent_part_id: '',
-    catalog_part_id: '',
-    item_category: 'article',
-    calibration_interval_months: '',
-  });
+  const canEditTools = useCanEditTools();
+  const canEditGauges = useCanEditGauges();
+  const canEditAssemblyEquipment = useCanEditAssemblyEquipment();
+  const [formData, setFormData] = useState(EMPTY_FORM);
+  const tools = (parts ?? []).filter((p) => p.item_category === 'tool')
+    .sort((a, b) => comparePartNumbers(a.part_number, b.part_number));
+  const servedTool = (data: typeof formData) =>
+    EQUIPMENT_KINDS.has(data.kind) ? tools.find((t) => String(t.id) === data.serves_tool_id) : undefined;
+
+  /** After the kind, the tool or the station type changed: put the next free number in (it stays editable). */
+  const withSuggestedNumber = (next: typeof formData): typeof formData => {
+    const tool = servedTool(next);
+    const family = familyOfKind(next.kind, next.station);
+    if (!tool || family === null) return next;
+    const suggestion = suggestEquipmentNumber(tool.part_number, family, (parts ?? []).map((p) => p.part_number));
+    return suggestion ? { ...next, part_number: suggestion } : next;
+  };
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
@@ -47,7 +82,7 @@ export default function AddPartModal({
         supplier: data.supplier || null,
         description: data.description || null,
         data_classification: 'confidential',
-        item_category: data.item_category,
+        item_category: categoryOfKind(data.kind),
       };
       if (data.supplier_id) {
         payload.supplier_id = parseInt(data.supplier_id, 10);
@@ -55,29 +90,30 @@ export default function AddPartModal({
       if (data.parent_part_id) {
         payload.parent_part_id = parseInt(data.parent_part_id, 10);
       }
-      if (data.item_category === 'gauge' && data.calibration_interval_months) {
+      if (data.kind === 'gauge' && data.calibration_interval_months) {
         payload.calibration_interval_months = parseInt(data.calibration_interval_months, 10);
       }
       const res = await client.post('/v1/parts', payload);
+      const tool = servedTool(data);
+      if (tool) {
+        // The part exists now; a refused link must not look like a failed create.
+        try {
+          await client.post(`/v1/parts/${res.data.id}/relations`, { to_part_id: tool.id, relation_type: 'serves' });
+        } catch (error) {
+          toast.error(`${data.part_number} was created, but the link to tool ${tool.part_number} failed: ${apiErrorMessage(error, 'please link it on the item')}`);
+        }
+      }
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
-      setFormData({
-        part_number: '',
-        customer_part_number: '',
-        tier1_part_number: '',
-        name: '',
-        part_type: 'purchased',
-        supplier: '',
-        supplier_id: '',
-        description: '',
-        parent_part_id: '',
-        catalog_part_id: '',
-        item_category: 'article',
-        calibration_interval_months: '',
-      });
+      queryClient.invalidateQueries({ queryKey: ['project-structure', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['part-relations'] });
+      setFormData(EMPTY_FORM);
       onClose();
+    },
+    onError: (error: unknown) => {
+      toast.error(apiErrorMessage(error, 'Failed to create the item'));
     },
   });
 
@@ -92,20 +128,68 @@ export default function AddPartModal({
 
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Item Category *</label>
+            <label htmlFor="add-part-kind" className="block text-sm font-medium text-slate-300 mb-1">Item Category *</label>
             <select
-              value={formData.item_category}
-              onChange={(e) => setFormData({ ...formData, item_category: e.target.value })}
+              id="add-part-kind"
+              value={formData.kind}
+              onChange={(e) => {
+                const kind = e.target.value as ItemKind;
+                setFormData(withSuggestedNumber({
+                  ...formData, kind, serves_tool_id: EQUIPMENT_KINDS.has(kind) ? formData.serves_tool_id : '',
+                }));
+              }}
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
             >
               <option value="article">📄 Article (product part)</option>
-              <option value="tool">🔧 Tool (die, mold, fixture)</option>
-              <option value="assembly_equipment">🏗️ Assembly Equipment</option>
-              <option value="gauge">📏 Gauge (calibration controlled)</option>
+              {canEditTools && <option value="tool">🔧 Tool (die, mold, fixture)</option>}
+              {canEditAssemblyEquipment && <option value="assembly_equipment">🏗️ Assembly Equipment</option>}
+              {canEditAssemblyEquipment && <option value="eoat">🦾 EOAT (end of arm tool)</option>}
+              {canEditGauges && <option value="gauge">📏 Gauge (calibration controlled)</option>}
             </select>
           </div>
 
-          {formData.item_category === 'gauge' && (
+          {EQUIPMENT_KINDS.has(formData.kind) && (
+            <div>
+              <label htmlFor="add-part-serves-tool" className="block text-sm font-medium text-slate-300 mb-1">Serves tool</label>
+              <select
+                id="add-part-serves-tool"
+                value={formData.serves_tool_id}
+                onChange={(e) => setFormData(withSuggestedNumber({ ...formData, serves_tool_id: e.target.value }))}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
+              >
+                <option value="">No tool (type the number yourself)</option>
+                {tools.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.part_number} - {t.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">
+                {formData.serves_tool_id
+                  ? 'The next free number of this tool is filled in below and the item is linked to the tool.'
+                  : tools.length === 0
+                    ? 'This project has no tool yet.'
+                    : 'Pick the tool to get the next free number and the link to it.'}
+              </p>
+            </div>
+          )}
+
+          {formData.kind === 'assembly_equipment' && (
+            <div>
+              <label htmlFor="add-part-station" className="block text-sm font-medium text-slate-300 mb-1">Station type</label>
+              <select
+                id="add-part-station"
+                value={formData.station}
+                onChange={(e) => setFormData(withSuggestedNumber({ ...formData, station: e.target.value as '2' | '3' }))}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
+              >
+                <option value="2">In-cell station (-20, -21, ...)</option>
+                <option value="3">Secondary station (-30, -31, ...)</option>
+              </select>
+            </div>
+          )}
+
+          {formData.kind === 'gauge' && (
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">Calibration Interval (months)</label>
               <input
@@ -120,8 +204,9 @@ export default function AddPartModal({
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Part Number *</label>
+            <label htmlFor="add-part-number" className="block text-sm font-medium text-slate-300 mb-1">Part Number *</label>
             <input
+              id="add-part-number"
               type="text"
               value={formData.part_number}
               onChange={(e) => setFormData({ ...formData, part_number: e.target.value })}
@@ -155,8 +240,9 @@ export default function AddPartModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Name *</label>
+            <label htmlFor="add-part-name" className="block text-sm font-medium text-slate-300 mb-1">Name *</label>
             <input
+              id="add-part-name"
               type="text"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
