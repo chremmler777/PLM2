@@ -3,7 +3,7 @@
  */
 import client, { API_BASE_URL } from './client'
 import type {
-  LinePatch, LineCreate, LopFile, LopHistoryItem, LopLine, LopLineInProject, LopLinesQuery,
+  LinePatch, LineCreate, LopEquipment, LopFile, LopHistoryItem, LopLine, LopLineInProject, LopLinesQuery,
   LopMeetingDetail, LopOverview, LopProjectResponse, LopView, MeetingMark, PdbResponse, PinBody, SepCandidateGate, LopMyEscalation, SamplingRequestBody
 } from '../types/lop'
 
@@ -18,6 +18,7 @@ export const lopKeys = {
   meeting: (projectId: number, meetingId: number) => ['lop', projectId, 'meeting', meetingId] as const,
   history: (projectId: number, lineId: number) => ['lop', projectId, 'history', lineId] as const,
   files: (projectId: number, lineId: number) => ['lop', projectId, 'files', lineId] as const,
+  equipment: (projectId: number) => ['lop', projectId, 'equipment'] as const,
 }
 
 const isNotFound = (e: unknown) => (e as { response?: { status?: number } })?.response?.status === 404
@@ -59,6 +60,8 @@ export const lopApi = {
     (await client.post(`/v1/lop/lines/${lineId}/comments`, { text })).data,
   history: async (lineId: number): Promise<LopHistoryItem[]> =>
     (await client.get(`/v1/lop/lines/${lineId}/history`)).data,
+  equipment: async (projectId: number): Promise<LopEquipment[]> =>
+    (await client.get(`/v1/lop/projects/${projectId}/equipment`)).data,
   files: async (lineId: number): Promise<LopFile[]> =>
     (await client.get(`/v1/lop/lines/${lineId}/files`)).data,
   /** One multipart request carries the whole drop. The shared client sets a JSON

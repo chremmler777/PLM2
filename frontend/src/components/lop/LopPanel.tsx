@@ -84,11 +84,14 @@ export default function LopPanel({ projectId }: { projectId: number }) {
   if (!data) return <p className="text-xs text-slate-400">This project has no LOP.</p>
 
   const departments = [...new Set(all.map((l) => l.department_name ?? l.pdb_department).filter((d): d is string => !!d))].sort()
-  const tools = [...new Set(all.map((l) => l.tool_number).filter((t): t is string => !!t))].sort()
+  // one filter for PDB topics (their tool) and linked equipment: a tool number
+  // also finds its gauges, EOATs and stations (numbered <tool>-xx)
+  const equipmentNumbers = (l: LopLine) => (l.equipment ?? []).flatMap((e) => [e.part_number, e.tool_number])
+  const tools = [...new Set(all.flatMap((l) => [l.tool_number, ...equipmentNumbers(l)]).filter((t): t is string => !!t))].sort()
   const shown = all.filter((l) =>
     (!dept || (l.department_name ?? l.pdb_department) === dept)
     && (!source || l.kind === source)
-    && (!tool || l.tool_number === tool))
+    && (!tool || l.tool_number === tool || equipmentNumbers(l).includes(tool)))
   const openMeeting = data.meeting?.open ? data.meeting : null
   const teamIds = new Set(people.map((p) => p.id))
   const canComment = (line: LopLine) =>
@@ -137,8 +140,8 @@ export default function LopPanel({ projectId }: { projectId: number }) {
           {SOURCES.map((s) => <option key={s.kind} value={s.kind}>{s.label}</option>)}
         </select>
         {tools.length > 0 && (
-          <select aria-label="Tool" className={inputCls} value={tool} onChange={(e) => setTool(e.target.value)}>
-            <option value="">Tool: all</option>
+          <select aria-label="Equipment" className={inputCls} value={tool} onChange={(e) => setTool(e.target.value)}>
+            <option value="">Equipment: all</option>
             {tools.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         )}

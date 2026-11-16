@@ -9,6 +9,7 @@ import { lopApi, type TeamRow } from '../../api/lop'
 import { formatBytes } from '../../api/sepFiles'
 import { LOP_DETAILS_MAX, LOP_TITLE_MAX, type LineCreate } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
+import { EquipmentPicker } from './LopEquipment'
 import { FileDrop } from './LopFiles'
 import { InlineError, OwnersPicker, PersonOptions, inputCls, labelCls } from './lopUi'
 import type { TeamPerson } from './lopTeam'
@@ -23,6 +24,7 @@ export default function NewTaskForm({ projectId, team, people, teamError = null,
   const [resp, setResp] = useState('')
   const [due, setDue] = useState('')
   const [owners, setOwners] = useState<number[]>([])
+  const [equipment, setEquipment] = useState<number[]>([])
   const [files, setFiles] = useState<File[]>([])
   const [fileError, setFileError] = useState<string | null>(null)
   const create = useLopWrite(projectId, async (body: LineCreate) => {
@@ -51,6 +53,7 @@ export default function NewTaskForm({ projectId, team, people, teamError = null,
     if (due) body.due_date = due
     const more = owners.filter((id) => String(id) !== resp)
     if (more.length > 0) body.additional_owner_ids = more
+    if (equipment.length > 0) body.equipment_ids = equipment
     create.run(body)
   }
   const blocked = !title.trim() || tooLong || detailsTooLong || create.pending || added
@@ -96,6 +99,9 @@ export default function NewTaskForm({ projectId, team, people, teamError = null,
           The details are too long: {details.trim().length} of {LOP_DETAILS_MAX} characters. Attach the rest as a file.
         </InlineError>
       )}
+      <div className="mt-2">
+        <EquipmentPicker testId="lop-new-task-equipment" projectId={projectId} value={equipment} onChange={setEquipment} />
+      </div>
       <div className="mt-2">
         <FileDrop testId="lop-new-task-drop" busy={create.pending}
           onFiles={(picked) => setFiles((old) => [...old, ...picked])} />

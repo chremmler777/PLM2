@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.entities import Plant, Project, User
 from app.models.lop import (
-    DETAILS_MAX, LOP_STATUSES, TITLE_MAX, LopComment, LopEvent, LopFile, LopLine, LopLineOwner,
+    DETAILS_MAX, LOP_STATUSES, TITLE_MAX, LopComment, LopEvent, LopFile, LopLine,
+    LopLineEquipment, LopLineOwner,
 )
 from app.models.workflow import Department, ProjectResponsible
 from app.services import lop_rules as rules
@@ -130,8 +131,29 @@ class LineContext:
     marks: dict[int, str] = field(default_factory=dict)
     # line id -> user ids of its additional owners, in the order they were added
     owners: dict[int, list[int]] = field(default_factory=dict)
+    # line id -> its linked equipment (equipment_dict rows), by number
+    equipment: dict[int, list[dict]] = field(default_factory=dict)
     # line id -> number of attached files
     file_counts: dict[int, int] = field(default_factory=dict)
+
+
+EQUIPMENT_CATEGORIES = ("tool", "gauge", "assembly_equipment")
+
+
+def equipment_dict(part) -> dict:
+    """A tool, gauge, station or EOAT as the LOP shows it. kind: tool, gauge,
+    eoat (assembly equipment numbered <tool>-1x) or assembly_equipment;
+    tool_number: the tool it belongs to by its number (a tool: itself)."""
+    from app.services.equipment_numbering import classify, parse_equipment_number
+    kind, tool_number = part.item_category, None
+    try:
+        tool_number, op_code = parse_equipment_number(part.part_number)
+        if part.item_category == "assembly_equipment" and op_code and classify(op_code) == "eoat":
+            kind = "eoat"
+    except ValueError:
+        pass                                    # a number outside the scheme: no tool, plain kind
+    return {"id": part.id, "part_number": part.part_number, "name": part.name,
+            "kind": kind, "tool_number": tool_number}
 
 
 def clean_title(raw: Optional[str]) -> str:
@@ -276,6 +298,54 @@ class LopService:
                                     "you are an additional owner of a line", text)
         return True
 
+    # ------------------------------------------------------------- equipment
+    @staticmethod
+    async def project_equipment(session: AsyncSession, project_id: int) -> list[dict]:
+        """The project's tools, gauges and assembly equipment in PLM, by number:
+        what a line can be linked to."""
+        from app.models.part import Part
+        rows = (await session.execute(
+            select(Part).where(Part.project_id == project_id,
+                               Part.item_category.in_(EQUIPMENT_CATEGORIES))
+            .order_by(Part.part_number, Part.id))).scalars().all()
+        return [equipment_dict(p) for p in rows]
+
+    @staticmethod
+    async def set_equipment(session: AsyncSession, line: LopLine, user: User,
+                            ids: Optional[list[int]], reason: Optional[str] = None) -> bool:
+        """Replace the line's linked equipment with `ids` (tools, gauges and
+        assembly equipment of the line's project; repeats dropped). Each add
+        and remove is an event. True when the list changed. The caller commits."""
+        from app.models.part import Part
+        wanted = list(dict.fromkeys(ids or []))
+        parts = {p.id: p for p in (await session.execute(
+            select(Part).where(Part.id.in_(wanted)))).scalars().all()} if wanted else {}
+        if any(i not in parts or parts[i].project_id != line.project_id
+               or parts[i].item_category not in EQUIPMENT_CATEGORIES for i in wanted):
+            raise LopError("A line can only be linked to tools, gauges and assembly equipment "
+                           "of this project in PLM")
+        rows = list((await session.execute(
+            select(LopLineEquipment).where(LopLineEquipment.line_id == line.id))).scalars().all())
+        have = {r.part_id for r in rows}
+        gone = [r for r in rows if r.part_id not in wanted]
+        new = [i for i in wanted if i not in have]
+        if not gone and not new:
+            return False
+        if gone:
+            parts.update({p.id: p for p in (await session.execute(select(Part).where(
+                Part.id.in_([r.part_id for r in gone])))).scalars().all()})
+
+        def words(part_id: int) -> str:
+            p = parts.get(part_id)
+            return f"{p.part_number} {p.name}" if p is not None else f"item {part_id}"
+        for r in gone:
+            LopService._event(session, line, user, "equipment", words(r.part_id), None, reason)
+            await session.delete(r)
+        for i in new:
+            session.add(LopLineEquipment(line_id=line.id, part_id=i, added_by=user.id))
+            LopService._event(session, line, user, "equipment", None, words(i), reason)
+        return True
+
     # ---------------------------------------------------------------- badges
     @staticmethod
     async def _line_text(session: AsyncSession, line: LopLine) -> str:
@@ -350,7 +420,8 @@ class LopService:
                           due_date: Optional[date] = None,
                           next_check_date: Optional[date] = None,
                           responsible_id: Optional[int] = None,
-                          additional_owner_ids: Optional[list[int]] = None) -> LopLine:
+                          additional_owner_ids: Optional[list[int]] = None,
+                          equipment_ids: Optional[list[int]] = None) -> LopLine:
         await LopService.get_project(session, project_id, user)
         if not await LopService.can_manage(session, user, project_id):
             raise LopForbidden("Only the Project Manager creates lines")
@@ -379,6 +450,8 @@ class LopService:
         LopService._event(session, line, user, "created", None, title)
         if additional_owner_ids:
             await LopService.set_additional_owners(session, line, user, additional_owner_ids)
+        if equipment_ids:
+            await LopService.set_equipment(session, line, user, equipment_ids)
         await LopService.mark_in_meeting(session, line)
         await LopService.notify_assigned(session, user, [line])
         await session.commit()
@@ -454,6 +527,9 @@ class LopService:
             changed |= await LopService._set_responsible(
                 session, line, user, body["responsible_id"], False, reason)
 
+        if "equipment_ids" in body:
+            changed |= await LopService.set_equipment(
+                session, line, user, body["equipment_ids"], reason)
         if "additional_owner_ids" in body:
             changed |= await LopService.set_additional_owners(
                 session, line, user, body["additional_owner_ids"], reason)
@@ -722,6 +798,13 @@ class LopService:
         if dept_ids:
             ctx.departments = dict((await session.execute(
                 select(Department.id, Department.name).where(Department.id.in_(dept_ids)))).all())
+        from app.models.part import Part
+        for line_id, part in (await session.execute(
+                select(LopLineEquipment.line_id, Part)
+                .join(Part, Part.id == LopLineEquipment.part_id)
+                .where(LopLineEquipment.line_id.in_(ids))
+                .order_by(Part.part_number, Part.id))).all():
+            ctx.equipment.setdefault(line_id, []).append(equipment_dict(part))
         ctx.file_counts = dict((await session.execute(
             select(LopFile.line_id, func.count(LopFile.id))
             .where(LopFile.line_id.in_(ids), LopFile.is_deleted.is_(False))
@@ -801,6 +884,7 @@ class LopService:
             "id": line.id, "project_id": line.project_id, "kind": line.kind,
             "ref_key": line.ref_key, "title": line.title, "details": line.details,
             "file_count": ctx.file_counts.get(line.id, 0),
+            "equipment": ctx.equipment.get(line.id, []),
             "department_id": line.department_id, "responsible_id": line.responsible_id,
             "responsible_is_default": line.responsible_is_default,
             "due_date": _iso(line.due_date), "first_due_date": _iso(line.first_due_date),
@@ -846,7 +930,7 @@ class LopService:
         stale_days = get_settings().lop_stale_days
         return {
             "id": None, "project_id": None, "kind": "pdb_topic", "ref_key": str(topic["id"]),
-            "title": None, "details": None, "file_count": 0,
+            "title": None, "details": None, "file_count": 0, "equipment": [],
             "department_id": None, "responsible_id": None,
             "responsible_is_default": False, "due_date": None, "first_due_date": None,
             "due_is_default": False, "next_check_date": None, "status": "open",

@@ -13,6 +13,7 @@ import { lopApi, lopKeys, type TeamRow } from '../../api/lop'
 import { shortDay } from '../../lib/lop'
 import { LOP_DETAILS_MAX, LOP_TITLE_MAX, type LinePatch, type LopHistoryItem, type LopLine } from '../../types/lop'
 import { btnSm } from '../common/buttonStyles'
+import { EquipmentPicker } from './LopEquipment'
 import LopFiles from './LopFiles'
 import { DefaultMarker, InlineError, OwnersPicker, PersonOptions, inputCls, labelCls } from './lopUi'
 import type { TeamPerson } from './lopTeam'
@@ -26,6 +27,9 @@ const FIELD_LABEL: Record<string, string> = {
 function historyText(h: LopHistoryItem): string {
   if (h.type === 'comment') return h.text
   if (h.field === 'file') return h.new_value ? `file attached: ${h.new_value}` : `file removed: ${h.old_value ?? ''}`
+  if (h.field === 'equipment') {
+    return `equipment ${h.new_value ? `linked: ${h.new_value}` : `unlinked: ${h.old_value ?? ''}`}${h.reason ? ` (${h.reason})` : ''}`
+  }
   if (h.field === 'additional_owner') {
     return `additional owner ${h.new_value ? `added: ${h.new_value}` : `removed: ${h.old_value ?? ''}`}${h.reason ? ` (${h.reason})` : ''}`
   }
@@ -42,6 +46,8 @@ function PmForm({ line, projectId, team, people, teamError }: {
   const [details, setDetails] = useState(line.details ?? '')
   const ownersBefore = (line.additional_owners ?? []).map((o) => o.id)
   const [owners, setOwners] = useState<number[]>(ownersBefore)
+  const equipmentBefore = (line.equipment ?? []).map((e) => e.id)
+  const [equipment, setEquipment] = useState<number[]>(equipmentBefore)
   const [dept, setDept] = useState(line.department_id != null ? String(line.department_id) : '')
   const [resp, setResp] = useState(line.responsible_id != null ? String(line.responsible_id) : '')
   const [due, setDue] = useState(line.due_date ?? '')
@@ -59,6 +65,7 @@ function PmForm({ line, projectId, team, people, teamError }: {
   }
   const ownersNow = owners.filter((id) => String(id) !== resp)
   if (ownersNow.join(',') !== ownersBefore.join(',')) body.additional_owner_ids = ownersNow
+  if ([...equipment].sort().join(',') !== [...equipmentBefore].sort().join(',')) body.equipment_ids = equipment
   if (due !== (line.due_date ?? '')) body.due_date = due || null
   if (check !== (line.next_check_date ?? '')) body.next_check_date = check || null
   // the server wants a reason once the line ever had a due date (first_due_date set),
@@ -118,6 +125,7 @@ function PmForm({ line, projectId, team, people, teamError }: {
           The title is too long: {title.trim().length} of {LOP_TITLE_MAX} characters. Keep it to one line and put the rest into Details.
         </InlineError>
       )}
+      <EquipmentPicker testId={`lop-equipment-${line.id}`} projectId={projectId} value={equipment} onChange={setEquipment} />
       <label className={labelCls}>Details
         <textarea rows={Math.min(10, Math.max(3, details.split('\n').length + 1))} className={`${inputCls} h-auto py-1`}
           value={details} aria-invalid={detailsTooLong} placeholder="Goal, steps, when it is done"

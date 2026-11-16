@@ -82,6 +82,22 @@ class LopLineOwner(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class LopLineEquipment(Base):
+    """Equipment of the project in PLM that a line is about: a tool, a gauge,
+    assembly equipment or an EOAT (parts.item_category tool, gauge,
+    assembly_equipment). A link only: the item lives in PLM."""
+    __tablename__ = "lop_line_equipment"
+    __table_args__ = (
+        UniqueConstraint("line_id", "part_id", name="uq_lop_line_equipment"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    line_id: Mapped[int] = mapped_column(ForeignKey("lop_lines.id"), index=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
+    added_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class LopFile(Base):
     """A file attached to a line (drawing, photo, mail, measurement sheet).
 
