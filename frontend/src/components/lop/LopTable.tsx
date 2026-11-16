@@ -1,7 +1,9 @@
 /**
  * The LOP table: lines in groups (GROUP_ORDER), one inline editor open at a
- * time. The PDB topics group always says what it knows: topics, PDB not
- * reachable, no tools yet, or no open topics; "+ N more" when the server
+ * time. The PDB topics group opens small: one line with the number of open
+ * topics and how many are escalated, and a Show button. A PDB that cannot be
+ * reached is said even while the group is small, so a missing PDB never looks
+ * like "no topics". Opened, it lists the topics and "+ N more" when the server
  * left topics out.
  */
 import { Fragment, useState } from 'react'
@@ -27,6 +29,12 @@ const GROUP_TONE: Partial<Record<LopGroup, string>> = {
   stale: 'text-amber-200',
 }
 
+const PDB_OPEN_KEY = 'plm2.lop.pdbTopicsOpen'
+
+function readPdbOpen(): boolean {
+  try { return window.localStorage.getItem(PDB_OPEN_KEY) === '1' } catch { return false }
+}
+
 function pdbMessage(p: PdbGroupState): string | null {
   if (p.error) return `PDB cannot be reached: ${p.error}`
   if (p.loading || !p.data) return 'Reading PDB…'
@@ -45,6 +53,11 @@ export default function LopTable({ lines, ctx, team, people, teamError = null, c
   pdb: PdbGroupState
 }) {
   const [open, setOpen] = useState<number | null>(null)
+  const [pdbOpen, setPdbOpen] = useState(readPdbOpen)
+  const togglePdb = () => setPdbOpen((v) => {
+    try { window.localStorage.setItem(PDB_OPEN_KEY, v ? '0' : '1') } catch { /* private mode: not remembered */ }
+    return !v
+  })
   const groups = groupLines(lines)
   const columns = ctx.meeting ? 11 : 10
   const pdbGroup = groups.find((g) => g.group === 'pdb')
@@ -53,11 +66,19 @@ export default function LopTable({ lines, ctx, team, people, teamError = null, c
   // the PDB group is shown even when empty, so a missing PDB never looks like "no topics"
   const showPdbHeader = pdb.show && !pdbGroup
 
+  const escalated = pdbGroup ? pdbGroup.lines.filter((l) => l.escalated).length : 0
   const header = (g: LopGroup, n: number, extra?: string) => (
     <tr className="border-t border-slate-600">
       <td colSpan={columns} className={`pb-1 pt-3 text-xs font-semibold ${GROUP_TONE[g] ?? 'text-slate-200'}`}>
         {GROUP_LABEL[g]} ({n})
-        {g === 'pdb' && <span className="ml-2 font-normal text-slate-400">live from PDB · escalated first, then oldest</span>}
+        {g === 'pdb' && escalated > 0 && <span data-testid="lop-pdb-escalated" className="ml-2 font-normal text-red-300">{escalated} escalated</span>}
+        {g === 'pdb' && <span className="ml-2 font-normal text-slate-400">live from PDB{pdbOpen ? ' · escalated first, then oldest' : ''}</span>}
+        {g === 'pdb' && n > 0 && (
+          <button type="button" onClick={togglePdb} aria-expanded={pdbOpen} data-testid="lop-pdb-toggle"
+            className="ml-2 rounded border border-slate-600 px-2 py-0.5 text-[11px] font-normal text-slate-200 hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">
+            {pdbOpen ? 'Hide topics' : 'Show topics'}
+          </button>
+        )}
         {extra && <span className="ml-2 font-normal text-slate-400">{extra}</span>}
       </td>
     </tr>
@@ -83,7 +104,7 @@ export default function LopTable({ lines, ctx, team, people, teamError = null, c
       {groups.map(({ group, lines: rows }) => (
         <tbody key={group} data-testid={group === 'pdb' ? 'lop-pdb-group' : `lop-group-${group}`}>
           {header(group, group === 'pdb' ? rows.length + hidden : rows.length)}
-          {rows.map((line) => (
+          {(group === 'pdb' && !pdbOpen ? [] : rows).map((line) => (
             <Fragment key={lineKey(line)}>
               <LopLineRow line={line} ctx={ctx} expanded={open != null && open === line.id}
                 onToggle={() => setOpen((o) => (o === line.id ? null : line.id))} />
@@ -97,7 +118,7 @@ export default function LopTable({ lines, ctx, team, people, teamError = null, c
               )}
             </Fragment>
           ))}
-          {group === 'pdb' && hidden > 0 && (
+          {group === 'pdb' && pdbOpen && hidden > 0 && (
             <tr className="border-t border-slate-700/60">
               <td />
               <td colSpan={columns - 1} className="py-1.5 text-slate-400">

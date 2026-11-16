@@ -25,6 +25,7 @@ function mount() {
     </QueryClientProvider>)
 }
 
+const showPdbTopics = async () => fireEvent.click(await screen.findByTestId('lop-pdb-toggle'))
 const row = async (id: number) => screen.findByTestId(`lop-row-${id}`)
 const openEditor = async (id: number) => {
   fireEvent.click(within(await row(id)).getByRole('button', { name: /edit line/i }))
@@ -35,6 +36,7 @@ describe('LopPanel', () => {
   beforeEach(() => {
     project = lopProject()
     pdb = pdbResponse({ topics: [] })
+    window.localStorage.clear()
     for (const m of Object.values(clientMocks)) m.mockReset()
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/lop/projects/2') return Promise.resolve({ data: project })
@@ -130,6 +132,7 @@ describe('LopPanel', () => {
   it('pin dialog needs a date before it can be saved', async () => {
     pdb = pdbResponse({ topics: [pdbTopic()] })
     mount()
+    await showPdbTopics()
     const topicRow = await screen.findByTestId('lop-row-pdb-501')
     expect(topicRow.textContent).toContain('227701')
     expect(topicRow.textContent).toContain('41 d open')
@@ -185,6 +188,7 @@ describe('LopPanel', () => {
       pdbTopic({ ref_key: '502', text: 'Another topic' }),
     ] })
     mount()
+    await showPdbTopics()
     await screen.findByTestId('lop-row-pdb-502')
     const r = await row(44)
     expect(r.textContent).toContain('Live issue')
@@ -203,9 +207,32 @@ describe('LopPanel', () => {
     expect(screen.queryByTestId('lop-row-pdb-501')).toBeNull()
   })
 
+  it('opens the PDB topics small: count and escalated, rows only after Show topics, and remembers it', async () => {
+    pdb = pdbResponse({ topics: [pdbTopic(), pdbTopic({ ref_key: '502', text: 'Second', escalated: false })], hidden: 3 })
+    mount()
+    await screen.findByTestId('lop-pdb-toggle')
+    const group = screen.getByTestId('lop-pdb-group')
+    expect(within(group).getByText(/PDB topics \(5\)/)).toBeTruthy()
+    expect(within(group).getByTestId('lop-pdb-escalated').textContent).toBe('1 escalated')
+    expect(screen.queryByTestId('lop-row-pdb-501')).toBeNull()
+    expect(within(group).queryByRole('button', { name: /show all/i })).toBeNull()
+    const toggle = within(group).getByTestId('lop-pdb-toggle')
+    expect(toggle.textContent).toBe('Show topics')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(await screen.findByTestId('lop-row-pdb-501')).toBeTruthy()
+    expect(within(group).getByTestId('lop-pdb-toggle').textContent).toBe('Hide topics')
+    cleanup()
+    mount()                                   // the choice is remembered in this browser
+    expect(await screen.findByTestId('lop-row-pdb-501')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('lop-pdb-toggle'))
+    expect(screen.queryByTestId('lop-row-pdb-501')).toBeNull()
+  })
+
   it('shows "+ N more" and refetches all PDB topics on "show all"', async () => {
     pdb = pdbResponse({ topics: [pdbTopic()], hidden: 5 })
     mount()
+    await showPdbTopics()
     expect(await screen.findByText(/\+ 5 more/)).toBeTruthy()
     expect(within(screen.getByTestId('lop-pdb-group')).getByText(/PDB topics \(6\)/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /show all/i }))
