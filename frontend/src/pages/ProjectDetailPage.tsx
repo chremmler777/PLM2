@@ -88,6 +88,8 @@ function ProjectDetailView() {
   const [showStartChange, setShowStartChange] = useState(false);
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>('documents');
+  // The item-list row being dragged: the list rows and the equipment card both take the drop.
+  const [draggingPartId, setDraggingPartId] = useState<number | null>(null);
 
   const { data: paintOverview } = useQuery({
     queryKey: ['project-paint-overview', id],
@@ -231,6 +233,9 @@ function ProjectDetailView() {
                 onContextMenu={handleContextMenu}
                 mode={popoutOpen ? 'table' : 'list'}
                 onShowWorksheet={() => setWorksheet(true)}
+                onAddItem={() => setShowAddModal(true)}
+                draggingPartId={draggingPartId}
+                onDraggingChange={setDraggingPartId}
               />
             }
             right={
@@ -243,6 +248,8 @@ function ProjectDetailView() {
                   sel={sel}
                   tab={detailTab}
                   onTabChange={setDetailTab}
+                  draggingPartId={draggingPartId}
+                  onDropDone={() => setDraggingPartId(null)}
                   onPopOut={selectionChannelSupported() ? openPopout : undefined}
                 />
               </div>
@@ -260,7 +267,8 @@ function ProjectDetailView() {
 
       {changelogPartId && <ChangelogModal partId={changelogPartId} onClose={() => setChangelogPartId(null)} />}
 
-      <AddPartModal projectId={id} parts={parts} isOpen={showAddModal} onClose={() => setShowAddModal(false)} />
+      <AddPartModal projectId={id} projectCode={project?.code} parts={parts} isOpen={showAddModal} onClose={() => setShowAddModal(false)}
+        onCreated={(partId) => selectPart(partId)} />
     </div>
   );
 }

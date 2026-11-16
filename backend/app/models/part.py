@@ -124,6 +124,10 @@ class Part(Base):
     # Controlled item category (automotive PLM): article, tool, assembly_equipment, gauge
     item_category: Mapped[str] = mapped_column(String(30), default="article", index=True)
 
+    # Gauges and assembly equipment: obsolete items stay in PLM but take no new links
+    obsolete_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    obsolete_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
     # Gauge calibration control (gauges only)
     calibration_interval_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_calibrated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -367,6 +371,8 @@ class RevisionChangelog(Base):
 
     # Context
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)  # Additional context/reason
+    # Gauges and assembly equipment: correction | change | obsolete | reactivated
+    change_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
 
     # Hash chaining for tamper detection (Phase 6)
@@ -421,6 +427,8 @@ class PartRelation(Base):
     # (serves/feeds link equipment and tools — see app/services/equipment_numbering.py)
     relation_type: Mapped[str] = mapped_column(String(30))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # assembles only: how many of the article the station or EOAT takes in per cycle
+    quantity: Mapped[float | None] = mapped_column(Numeric(10, 3, asdecimal=False), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))

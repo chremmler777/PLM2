@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { categoryOfKind, familyOfKind, suggestEquipmentNumber } from './equipmentNumbers'
+import { categoryOfKind, familyOfKind, noToolFamilyOfKind, suggestEquipmentNumber } from './equipmentNumbers'
 
 describe('equipment numbers', () => {
   it('starts each family at slot 0', () => {
@@ -32,5 +32,14 @@ describe('equipment numbers', () => {
     expect(familyOfKind('tool')).toBeNull()
     expect(categoryOfKind('eoat')).toBe('assembly_equipment')
     expect(categoryOfKind('gauge')).toBe('gauge')
+  })
+
+  it('numbers equipment without a tool on the project code: -6x stations and EOATs, -7x gauges', () => {
+    expect(noToolFamilyOfKind('assembly_equipment')).toBe(6)
+    expect(noToolFamilyOfKind('eoat')).toBe(6)
+    expect(noToolFamilyOfKind('gauge')).toBe(7)
+    expect(suggestEquipmentNumber('1748', 6, [])).toBe('1748-60')
+    expect(suggestEquipmentNumber('1748', 6, ['1748-60'])).toBe('1748-61')
+    expect(suggestEquipmentNumber('1748', 7, ['1748-60'])).toBe('1748-70')
   })
 })

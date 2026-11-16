@@ -46,20 +46,20 @@ describe('ProjectHeaderBar', () => {
 
   it('keeps the project actions in the ⋯ menu', async () => {
     const props = mount()
-    expect(screen.queryByText('+ Add Part')).toBeNull()
+    expect(screen.queryByText('+ Add item (article, tool, gauge, equipment)')).toBeNull()
     fireEvent.click(screen.getByLabelText('Project actions'))
     expect(screen.getByText('Start change request')).toBeTruthy()
     expect(screen.getByLabelText('Customer file naming')).toBeTruthy()
     expect(screen.getByText('milestones')).toBeTruthy()
-    fireEvent.click(screen.getByText('+ Add Part'))
+    fireEvent.click(screen.getByText('+ Add item (article, tool, gauge, equipment)'))
     expect(props.onAddPart).toHaveBeenCalled()
-    expect(screen.queryByText('+ Add Part')).toBeNull()
+    expect(screen.queryByText('+ Add item (article, tool, gauge, equipment)')).toBeNull()
   })
 
   it('closes the menu on Escape', () => {
     mount()
     fireEvent.click(screen.getByLabelText('Project actions'))
     fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.queryByText('+ Add Part')).toBeNull()
+    expect(screen.queryByText('+ Add item (article, tool, gauge, equipment)')).toBeNull()
   })
 })

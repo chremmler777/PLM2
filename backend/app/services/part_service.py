@@ -656,6 +656,7 @@ class ChangelogService:
         file_id: Optional[int] = None,
         notes: Optional[str] = None,
         ip_address: Optional[str] = None,
+        change_kind: Optional[str] = None,
     ) -> RevisionChangelog:
         """Log an action to the changelog."""
         entry = RevisionChangelog(
@@ -670,6 +671,7 @@ class ChangelogService:
             performed_by=performed_by,
             notes=notes,
             ip_address=ip_address,
+            change_kind=change_kind,
         )
 
         # TODO: Implement hash chaining in Phase 6

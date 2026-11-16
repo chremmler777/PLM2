@@ -2,6 +2,7 @@
  * Equipment numbers hang on the tool they serve: <tool number>-<family><index>
  * (backend app/services/equipment_numbering.py). Family 1 is an EOAT, 2 an in-cell
  * station, 3 a secondary station, 4 a gauge; each family has ten slots (0 to 9).
+ * The same function numbers equipment without a tool on the project code.
  * The create dialog suggests the next free slot so nobody has to look it up.
  */
 
@@ -21,6 +22,18 @@ export function familyOfKind(kind: ItemKind, station: '2' | '3' = '2'): number |
   if (kind === 'assembly_equipment') return Number(station);
   if (kind === 'gauge') return 4;
   return null;
+}
+
+/**
+ * Equipment that serves no tool hangs on the project code instead: <code>-6x for an
+ * assembly operation (assembly equipment or EOAT), <code>-7x for an assembly gauge.
+ * Same two families as the backend (equipment_numbering.py).
+ */
+export const NO_TOOL_STATION_FAMILY = 6;
+export const NO_TOOL_GAUGE_FAMILY = 7;
+
+export function noToolFamilyOfKind(kind: ItemKind): number {
+  return kind === 'gauge' ? NO_TOOL_GAUGE_FAMILY : NO_TOOL_STATION_FAMILY;
 }
 
 /**

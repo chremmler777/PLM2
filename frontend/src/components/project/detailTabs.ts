@@ -1,5 +1,5 @@
 /** The detail pane's tabs, in display order. */
-export type DetailTab = 'documents' | 'links' | 'bom' | 'workflow' | 'changelog' | 'dfm' | 'tool';
+export type DetailTab = 'documents' | 'links' | 'bom' | 'workflow' | 'changelog' | 'dfm' | 'tool' | 'equipment';
 
 export const ARTICLE_DETAIL_TABS: { key: DetailTab; label: string }[] = [
   { key: 'documents', label: 'Documents' },
@@ -16,11 +16,22 @@ export const TOOL_DETAIL_TABS: { key: DetailTab; label: string }[] = [
   { key: 'changelog', label: 'Changelog' },
 ];
 
+/** Gauges, assembly equipment and EOATs: their card first, then what every item has. */
+export const EQUIPMENT_DETAIL_TABS: { key: DetailTab; label: string }[] = [
+  { key: 'equipment', label: 'Equipment' },
+  ...ARTICLE_DETAIL_TABS,
+];
+
+export function isEquipmentCategory(itemCategory: string): boolean {
+  return itemCategory === 'gauge' || itemCategory === 'assembly_equipment';
+}
+
 /** Kept for anything still importing the plain article tab list. */
 export const DETAIL_TABS = ARTICLE_DETAIL_TABS;
 
 /** The tabs to show for a given item category, article tabs by default. */
 export function detailTabsFor(itemCategory: string): { key: DetailTab; label: string }[] {
+  if (isEquipmentCategory(itemCategory)) return EQUIPMENT_DETAIL_TABS;
   return itemCategory === 'tool' ? TOOL_DETAIL_TABS : ARTICLE_DETAIL_TABS;
 }
 

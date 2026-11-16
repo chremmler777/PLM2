@@ -62,6 +62,11 @@ class PartUpdate(BaseModel):
     """Update part information. parent_part_id only applies when explicitly
     provided (send null to move the part to top level)."""
     name: Optional[str] = None
+    # Gauges and assembly equipment only (equipment_service): the number can be corrected,
+    # and every edit says what it is. Ignored for articles and tools.
+    part_number: Optional[str] = Field(None, min_length=1, max_length=100)
+    change_kind: Optional[str] = Field(None, description="correction | change (gauges and assembly equipment)")
+    change_note: Optional[str] = None
     customer_part_number: Optional[str] = Field(None, max_length=100)
     tier1_part_number: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = None
@@ -100,6 +105,8 @@ class PartResponse(PartBase):
     lifecycle_phase: str = "rfq"
     nominated_at: Optional[date] = None
     sop_at: Optional[date] = None
+    # Gauges and assembly equipment: set while the item is obsolete
+    obsolete_at: Optional[datetime] = None
     thumbnail_url: Optional[str] = None
     material_source: Optional[str] = None
     materialdb_id: Optional[int] = None

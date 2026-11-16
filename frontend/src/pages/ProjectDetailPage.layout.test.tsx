@@ -124,7 +124,7 @@ describe('project header and status nav bar', () => {
   it('the ⋯ menu still reaches the add-part dialog', async () => {
     mount()
     fireEvent.click(await screen.findByLabelText('Project actions'))
-    fireEvent.click(screen.getByText('+ Add Part'))
+    fireEvent.click(screen.getByText('+ Add item (article, tool, gauge, equipment)'))
     expect(screen.getByText('Add New Item')).toBeTruthy()
   })
 })

@@ -4,7 +4,8 @@ import pytest
 
 from app.services.equipment_numbering import (
     normalise_tool_ref, classify, parse_equipment_number, equipment_number,
-    item_category_for,
+    item_category_for, is_project_op_code, tool_number_of,
+    NO_TOOL_GAUGE_FAMILY, NO_TOOL_STATION_FAMILY,
 )
 
 
@@ -94,3 +95,36 @@ def test_normalise_keeps_project_coded_six_digit_tools():
     assert normalise_tool_ref("199401") == ["199401"]
     assert normalise_tool_ref("199401/199402") == ["199401", "199402"]
     assert normalise_tool_ref("199401-001") == ["199401"]
+
+
+# ---- equipment without a tool: <project code>-6x / -7x (2026-11-16) --------
+
+def test_no_tool_families_are_six_and_seven():
+    assert (NO_TOOL_STATION_FAMILY, NO_TOOL_GAUGE_FAMILY) == (6, 7)
+
+
+def test_classify_and_category_of_the_project_families():
+    assert classify("60") == "assembly_operation"
+    assert classify("69") == "assembly_operation"
+    assert classify("70") == "assembly_gauge"
+    assert item_category_for("60") == "assembly_equipment"
+    assert item_category_for("70") == "gauge"
+    with pytest.raises(ValueError):
+        classify("80")
+
+
+def test_parse_reads_a_project_number_and_composes_one():
+    assert parse_equipment_number("1748-60") == ("1748", "60")
+    assert equipment_number("1748", 6, 0) == "1748-60"
+    assert equipment_number("1748", 7, 9) == "1748-79"
+
+
+def test_a_project_number_names_no_tool():
+    assert is_project_op_code("60") and is_project_op_code("71")
+    assert not is_project_op_code("40") and not is_project_op_code(None)
+    assert tool_number_of("1748-60") is None
+    assert tool_number_of("1748-70") is None
+    assert tool_number_of("3454-40") == "3454"
+    assert tool_number_of("3454") == "3454"
+    assert tool_number_of("0674-2-10") == "0674-2"
+    assert tool_number_of("3454-50") is None      # outside the scheme

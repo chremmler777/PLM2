@@ -86,7 +86,7 @@ describe('ProjectDetailPage add part form', () => {
       </QueryClientProvider>)
 
     fireEvent.click(await screen.findByLabelText('Project actions'))
-    fireEvent.click(screen.getByText('+ Add Part'))
+    fireEvent.click(screen.getByText('+ Add item (article, tool, gauge, equipment)'))
     fireEvent.change(screen.getByPlaceholderText('e.g., P-001'), { target: { value: '1994-100' } })
     fireEvent.change(screen.getByPlaceholderText('e.g., Housing'), { target: { value: 'Top' } })
     fireEvent.change(screen.getByTestId('add-part-customer-number'), { target: { value: '3CR.807.425' } })
@@ -108,7 +108,7 @@ describe('ProjectDetailPage add part form', () => {
       </QueryClientProvider>)
 
     fireEvent.click(await screen.findByLabelText('Project actions'))
-    fireEvent.click(screen.getByText('+ Add Part'))
+    fireEvent.click(screen.getByText('+ Add item (article, tool, gauge, equipment)'))
     fireEvent.change(screen.getByPlaceholderText('e.g., P-001'), { target: { value: '1994-110' } })
     fireEvent.change(screen.getByPlaceholderText('e.g., Housing'), { target: { value: 'Sub' } })
     fireEvent.click(screen.getByText('Add Part'))

@@ -55,10 +55,12 @@ async def project_structure(session: AsyncSession, project_id: int) -> dict:
         fwd, back = RELATION_LABELS.get(r.relation_type, (r.relation_type, r.relation_type))
         related[src.id].append({"relation_type": r.relation_type, "direction": "outgoing", "label": fwd,
                                 "part_id": dst.id, "part_number": dst.part_number, "name": dst.name,
-                                "item_category": dst.item_category})
+                                "item_category": dst.item_category, "quantity": r.quantity,
+                                "obsolete_at": dst.obsolete_at})
         related[dst.id].append({"relation_type": r.relation_type, "direction": "incoming", "label": back,
                                 "part_id": src.id, "part_number": src.part_number, "name": src.name,
-                                "item_category": src.item_category})
+                                "item_category": src.item_category, "quantity": r.quantity,
+                                "obsolete_at": src.obsolete_at})
 
     articles = []
     for p in parts:
@@ -66,6 +68,7 @@ async def project_structure(session: AsyncSession, project_id: int) -> dict:
             continue
         articles.append({
             **_brief(p), "lifecycle_phase": p.lifecycle_phase, "active_revision_id": p.active_revision_id,
+            "obsolete_at": p.obsolete_at,
             "revisions": [{
                 "id": r.id, "revision_name": r.revision_name, "customer_index": r.customer_index,
                 "status": r.status.value if hasattr(r.status, "value") else r.status,

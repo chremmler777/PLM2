@@ -42,6 +42,14 @@ export interface ItemsPaneProps {
   mode?: 'list' | 'table';
   /** Opens the project worksheet (full width). */
   onShowWorksheet?: () => void;
+  /** Opens the create dialog; shows the "+ Add" button above the list. */
+  onAddItem?: () => void;
+  /**
+   * The row being dragged, when the page holds it so the equipment card in the detail
+   * pane can take the drop too. Left out, the pane keeps it itself.
+   */
+  draggingPartId?: number | null;
+  onDraggingChange?(partId: number | null): void;
 }
 
 /** What dropping an article on an item of this category means, in the words of the toast. */
@@ -52,8 +60,9 @@ const LINK_BY_CATEGORY: Record<string, { relationType: string; noun: string; ver
 };
 
 export default function ItemsPane({
-  projectId, projectCode, parts, partsLoading, structure, paintByPartId, paintedIds, paintedCount,
+  projectId, projectCode, parts: allParts, partsLoading, structure, paintByPartId, paintedIds, paintedCount,
   selectedPartId, onSelect, onOpenPart, onPickRevision, onContextMenu, mode = 'list', onShowWorksheet,
+  onAddItem, draggingPartId: draggingFromPage, onDraggingChange,
 }: ItemsPaneProps) {
   const queryClient = useQueryClient();
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -61,7 +70,16 @@ export default function ItemsPane({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<GroupKey>>(() => new Set());
   // Rows with children start expanded, everything else collapsed; a click overrides.
   const [expandOverride, setExpandOverride] = useState<Record<number, boolean>>({});
-  const [draggingPartId, setDraggingPartId] = useState<number | null>(null);
+  const [ownDraggingPartId, setOwnDraggingPartId] = useState<number | null>(null);
+  const draggingPartId = onDraggingChange ? draggingFromPage ?? null : ownDraggingPartId;
+  const setDraggingPartId = onDraggingChange ?? setOwnDraggingPartId;
+  // Obsolete gauges and equipment stay in PLM but out of the way until asked for.
+  const [showObsolete, setShowObsolete] = useState(false);
+  const obsoleteCount = useMemo(() => (allParts ?? []).filter((p) => p.obsolete_at).length, [allParts]);
+  const parts = useMemo(
+    () => (showObsolete ? allParts : allParts?.filter((p) => !p.obsolete_at)),
+    [allParts, showObsolete],
+  );
   const [topLevelDragOver, setTopLevelDragOver] = useState(false);
   const [hoveredMirrorRowId, setHoveredMirrorRowId] = useState<number | null>(null);
 
@@ -228,6 +246,13 @@ export default function ItemsPane({
           </h2>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-slate-500">Drag onto a ★ sub-assembly to restructure</span>
+            {onAddItem && (
+              <button type="button" data-testid="add-item" onClick={onAddItem}
+                aria-label="Add item (article, tool, gauge, equipment)"
+                className="px-2 py-0.5 rounded text-[11px] font-medium bg-blue-600 hover:bg-blue-500 text-white">
+                + Add
+              </button>
+            )}
             {onShowWorksheet && (
               <button type="button" data-testid="show-worksheet" onClick={onShowWorksheet}
                 className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-700 hover:bg-slate-600 text-slate-100">
@@ -262,6 +287,13 @@ export default function ItemsPane({
             )
           )}
         </div>
+        {obsoleteCount > 0 && (
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <input type="checkbox" data-testid="show-obsolete" checked={showObsolete}
+              onChange={(e) => setShowObsolete(e.target.checked)} className="accent-sky-500" />
+            Show obsolete ({obsoleteCount})
+          </label>
+        )}
         {canLinkAny && !isTable && categoryFilter !== 'assemblies' && (
           <p data-testid="link-hint" className="text-[11px] text-slate-500">
             Drag an article onto a tool, gauge or equipment to link it.
@@ -299,7 +331,7 @@ export default function ItemsPane({
                     aria-selected={selected}
                     onClick={() => onSelect(p.id)}
                     onContextMenu={(e) => onContextMenu(e, p.id)}
-                    className={`cursor-pointer border-t border-slate-800 ${selected ? 'bg-blue-900/40' : 'hover:bg-slate-800'}`}
+                    className={`cursor-pointer border-t border-slate-800 ${selected ? 'bg-blue-900/40' : 'hover:bg-slate-800'} ${p.obsolete_at ? 'opacity-50' : ''}`}
                   >
                     <td className="px-2 py-1"><PartThumbnail url={row.thumbnailUrl} name={row.name} testId={`table-thumb-${p.id}`} /></td>
                     <td className="px-2 py-1 font-mono text-slate-200">{row.ktxNumber}</td>

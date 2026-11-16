@@ -11,6 +11,8 @@ from sqlalchemy.orm import joinedload
 from app.dependencies import get_current_user
 from app.models import get_db, User, PartRelation
 from app.services.equipment_rights import require_relation_editor
+from app.services import equipment_service
+from app.services.equipment_service import EquipmentError
 from app.services.part_service import PartService, ChangelogService
 from app.services.relation_labels import RELATION_LABELS, VALID_RELATION_TYPES
 
@@ -23,6 +25,12 @@ class RelationCreate(BaseModel):
     to_part_id: int
     relation_type: str = Field(..., description="produces, checks, assembles, related")
     notes: Optional[str] = None
+    # assembles only: how many of the article the equipment takes in per cycle (default 1)
+    quantity: Optional[float] = None
+
+
+class RelationUpdate(BaseModel):
+    quantity: float
 
 
 def _relation_dict(rel: PartRelation, direction: str) -> dict:
@@ -38,6 +46,9 @@ def _relation_dict(rel: PartRelation, direction: str) -> dict:
         "other_part_number": other.part_number,
         "other_part_name": other.name,
         "other_item_category": other.item_category,
+        "other_customer_part_number": other.customer_part_number,
+        "other_obsolete_at": other.obsolete_at,
+        "quantity": rel.quantity,
         "other_active_revision_name": active.revision_name if active else None,
         "other_active_customer_index": active.customer_index if active else None,
         "notes": rel.notes,
@@ -75,6 +86,16 @@ async def create_relation(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Related parts must be in the same project",
             )
+        # Obsolete gauges and equipment take no new links; an amount belongs to assembles only
+        quantity = None
+        try:
+            equipment_service.require_active(from_part, to_part)
+            if body.relation_type == "assembles":
+                quantity = 1 if body.quantity is None else body.quantity
+                if quantity <= 0:
+                    raise EquipmentError(equipment_service.QUANTITY_INVALID)
+        except EquipmentError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
         if body.relation_type == "mirror_of":
             if from_part.item_category != "article" or to_part.item_category != "article":
@@ -110,10 +131,14 @@ async def create_relation(
             to_part_id=body.to_part_id,
             relation_type=body.relation_type,
             notes=body.notes,
+            quantity=quantity,
             created_by=current_user.id,
         )
         db.add(rel)
         await db.flush()
+        if equipment_service.is_equipment(from_part) and body.relation_type in equipment_service.EQUIPMENT_RELATIONS:
+            # the equipment's own history: "Article 50-2277-001-0 added, quantity 2"
+            await equipment_service.log_link_added(db, from_part, to_part, current_user.id, quantity)
 
         await ChangelogService.log_action(
             db,
@@ -159,6 +184,38 @@ async def list_relations(
     ]
 
 
+@router.patch("/relations/{relation_id}", response_model=dict)
+async def update_relation(
+    relation_id: int,
+    body: RelationUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change the amount of an assembles link (how many of the article the equipment takes
+    in). Logged in the equipment's history."""
+    rel = (await db.execute(
+        select(PartRelation).where(PartRelation.id == relation_id)
+        .options(joinedload(PartRelation.from_part), joinedload(PartRelation.to_part))
+    )).unique().scalar_one_or_none()
+    if not rel:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relation not found")
+    await require_relation_editor(db, current_user, rel.relation_type, rel.from_part.item_category)
+    try:
+        if rel.relation_type != "assembles":
+            raise EquipmentError(equipment_service.QUANTITY_ONLY_ASSEMBLES)
+        if body.quantity <= 0:
+            raise EquipmentError(equipment_service.QUANTITY_INVALID)
+        equipment_service.require_active(rel.from_part)
+    except EquipmentError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    old = rel.quantity
+    if old is None or float(old) != float(body.quantity):
+        rel.quantity = body.quantity
+        await equipment_service.log_quantity_changed(db, rel.from_part, rel.to_part, current_user.id, old, body.quantity)
+        await db.commit()
+    return _relation_dict(rel, "outgoing")
+
+
 @router.delete("/relations/{relation_id}")
 async def delete_relation(
     relation_id: int,
@@ -170,12 +227,19 @@ async def delete_relation(
         result = await db.execute(
             select(PartRelation)
             .where(PartRelation.id == relation_id)
-            .options(joinedload(PartRelation.from_part))
+            .options(joinedload(PartRelation.from_part), joinedload(PartRelation.to_part))
         )
         rel = result.unique().scalar_one_or_none()
         if not rel:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relation not found")
         await require_relation_editor(db, current_user, rel.relation_type, rel.from_part.item_category)
+        owned = equipment_service.is_equipment(rel.from_part) and rel.relation_type in equipment_service.EQUIPMENT_RELATIONS
+        if owned:
+            try:
+                equipment_service.require_active(rel.from_part)
+            except EquipmentError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+            await equipment_service.log_link_removed(db, rel.from_part, rel.to_part, current_user.id)
 
         await ChangelogService.log_action(
             db,

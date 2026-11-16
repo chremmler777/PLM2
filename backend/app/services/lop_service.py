@@ -145,8 +145,9 @@ EQUIPMENT_CATEGORIES = ("tool", "gauge", "assembly_equipment", "article")
 def equipment_dict(part) -> dict:
     """A tool, gauge, station or EOAT as the LOP shows it. kind: tool, gauge,
     eoat (assembly equipment numbered <tool>-1x) or assembly_equipment;
-    tool_number: the tool it belongs to by its number (a tool: itself)."""
-    from app.services.equipment_numbering import classify, parse_equipment_number
+    tool_number: the tool it belongs to by its number (a tool: itself). An item
+    numbered on the project code (1748-60, no tool) has no tool_number."""
+    from app.services.equipment_numbering import classify, is_project_op_code, parse_equipment_number
     kind, tool_number = part.item_category, None
     if kind == "article":                       # an article number is not <tool>-<op code>
         return {"id": part.id, "part_number": part.part_number, "name": part.name,
@@ -156,6 +157,8 @@ def equipment_dict(part) -> dict:
         tool_number, op_code = parse_equipment_number(part.part_number)
         if part.item_category == "assembly_equipment" and op_code and classify(op_code) == "eoat":
             kind = "eoat"
+        if is_project_op_code(op_code):
+            tool_number = None                  # the head is the project code, not a tool
     except ValueError:
         pass                                    # a number outside the scheme: no tool, plain kind
     return {"id": part.id, "part_number": part.part_number, "name": part.name,
@@ -312,7 +315,8 @@ class LopService:
         from app.models.part import Part
         rows = (await session.execute(
             select(Part).where(Part.project_id == project_id,
-                               Part.item_category.in_(EQUIPMENT_CATEGORIES))
+                               Part.item_category.in_(EQUIPMENT_CATEGORIES),
+                               Part.obsolete_at.is_(None))   # obsolete items take no new links
             .order_by(Part.part_number, Part.id))).scalars().all()
         return [equipment_dict(p) for p in rows]
 
