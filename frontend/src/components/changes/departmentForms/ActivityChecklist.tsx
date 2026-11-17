@@ -22,6 +22,7 @@ import type {
   Attachment, ChangeConcern, ChecklistChoice, ChecklistItemDef, ChecklistRequiredDocument,
 } from '../../../types/change'
 import AttachmentDropzone from '../AttachmentDropzone'
+import ReuseDocumentPicker from '../ReuseDocumentPicker'
 import ChecklistRiskForm from './ChecklistRiskForm'
 import type { DepartmentFieldsProps } from './types'
 
@@ -94,7 +95,7 @@ export interface MissingDocument {
  *  so the wrong file is turned away before the upload, not by a server 400. */
 export const DOCUMENT_EXTENSIONS: Record<'change_ppt' | 'rfq', string[]> = {
   change_ppt: ['.ppt', '.pptx', '.pdf'],
-  rfq: ['.pdf', '.xlsx', '.xls', '.doc', '.docx', '.msg', '.eml'],
+  rfq: ['.pdf', '.ppt', '.pptx', '.xlsx', '.xls', '.doc', '.docx', '.msg', '.eml'],
 }
 
 /** A slot's file types: from the served definitions when an item declares
@@ -533,6 +534,10 @@ export default function ActivityChecklist({
                                   .replace('{x}', doc.extensions.join(', '))}
                                 onUploaded={() => onUploaded?.()} />
                             )}
+                            {doc.kind === 'change_ppt' && changeId != null && assessmentId != null && (
+                              <ReuseDocumentPicker changeId={changeId} assessmentId={assessmentId}
+                                caseRef={c.id} lang={lang} onPicked={() => onUploaded?.()} />
+                            )}
                           </div>
                         )
                       })}
@@ -590,6 +595,10 @@ export default function ActivityChecklist({
                       label={t('check.docSlot', lang).replace('{d}', inSentence)
                         .replace('{x}', doc.extensions.join(', '))}
                       onUploaded={() => onUploaded?.()} />
+                  )}
+                  {doc.kind === 'change_ppt' && changeId != null && assessmentId != null && (
+                    <ReuseDocumentPicker changeId={changeId} assessmentId={assessmentId}
+                      lang={lang} onPicked={() => onUploaded?.()} />
                   )}
                 </div>
               )

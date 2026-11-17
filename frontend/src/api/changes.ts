@@ -208,6 +208,17 @@ export const changesApi = {
   markRejectionSent: (id: number) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/rejection-sent`).then((r) => r.data),
 
+  // 2026-11-17: documents already on the change that can stand as the change
+  // presentation of one slot (the customer's request, a deck another
+  // department made), and filing one of them into the slot.
+  reusableAttachments: (id: number, assessmentId: number, caseRef?: string | null) =>
+    client.get<ReusableAttachment[]>(`/v1/changes/${id}/attachments/reusable`, {
+      params: { assessment_id: assessmentId, ...(caseRef ? { case_ref: caseRef } : {}) },
+    }).then((r) => r.data),
+  reuseAttachment: (id: number, attachmentId: number, assessmentId: number, caseRef?: string | null) =>
+    client.post(`/v1/changes/${id}/attachments/${attachmentId}/reuse`,
+      { assessment_id: assessmentId, case_ref: caseRef ?? null }).then((r) => r.data),
+
   deleteAttachment: (id: number, attachmentId: number) =>
     client.delete(`/v1/changes/${id}/attachments/${attachmentId}`).then((r) => r.data),
 
@@ -636,3 +647,17 @@ export const changesApi = {
     client.post(`/v1/changes/${id}/validation/weight-ack`,
       note && note.trim() !== '' ? { note: note.trim() } : {}).then((r) => r.data),
 };
+
+export interface ReusableAttachment {
+  id: number;
+  filename: string;
+  kind: string;
+  phase: string;
+  size_bytes: number;
+  /** initial = the customer's request (baseline); change_ppt = a deck a
+   *  department already filed; other = any other document on the change. */
+  source: 'initial' | 'change_ppt' | 'other';
+  department_name: string | null;
+  uploaded_by_name: string | null;
+  created_at: string | null;
+}

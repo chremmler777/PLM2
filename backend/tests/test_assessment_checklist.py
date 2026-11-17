@@ -379,7 +379,8 @@ async def test_the_stored_answer_is_judged_when_the_submit_sends_none(
     ("rfq", "rfq.pdf", True), ("rfq", "rfq.xls", True), ("rfq", "rfq.xlsx", True),
     ("rfq", "rfq.doc", True), ("rfq", "rfq.docx", True), ("rfq", "rfq.msg", True),
     ("rfq", "rfq.eml", True),
-    ("rfq", "rfq.pptx", False), ("general", "anything.zip", True),
+    ("rfq", "rfq.pptx", True), ("rfq", "rfq.zip", False),
+    ("general", "anything.zip", True),
 ])
 async def test_the_document_slots_take_their_file_types(
         client, admin_auth, tab, kind, name, ok):
@@ -613,3 +614,61 @@ async def test_submit_needs_the_assessment_hours(client, admin_auth, tab, sessio
             CostingPosition.change_id == tab["change_id"],
             CostingPosition.kind == "internal_effort"))).scalars().all()
         assert [r.hours for r in rows] == [2.5]
+
+
+async def test_a_document_on_the_change_can_be_picked_as_the_change_presentation(
+        client, admin_auth, tab):
+    """Christoph 2026-11-17: the change presentation stays owed, but it may be
+    a document already on the change (the customer's request, here a mail) or
+    the deck another slot already holds; the RFQ slot takes a PPT."""
+    cid, aid = tab["change_id"], tab["assessment_id"]
+    impacts = answered("Tool Engineer", yes={"modification_external"},
+                       remarks={"modification_external": "Insert LH; insert RH"})
+    for i in impacts:
+        if i.get("key") == "modification_external":
+            i["cases"] = [{"id": "cA", "text": "Insert LH"}, {"id": "cB", "text": "Insert RH"}]
+    req = await client.post(
+        f"/api/v1/changes/{cid}/attachments",
+        files={"file": ("request.msg", b"the customer asks", "application/octet-stream")},
+        headers=admin_auth)
+    assert req.status_code in (200, 201), req.text
+    for case in ("cA", "cB"):
+        up = await client.post(
+            f"/api/v1/changes/{cid}/attachments",
+            files={"file": (f"quote-{case}.pptx", b"q" + case.encode(), "application/octet-stream")},
+            data={"assessment_id": str(aid), "kind": "rfq", "case_ref": case},
+            headers=admin_auth)
+        assert up.status_code in (200, 201), up.text
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 400 and "change presentation" in res.json()["detail"]
+    lst = await client.get(
+        f"/api/v1/changes/{cid}/attachments/reusable?assessment_id={aid}&case_ref=cA",
+        headers=admin_auth)
+    assert lst.status_code == 200, lst.text
+    assert [r["filename"] for r in lst.json()] == ["request.msg"]   # the quotes are not offered
+    use = await client.post(
+        f"/api/v1/changes/{cid}/attachments/{req.json()['id']}/reuse",
+        json={"assessment_id": aid, "case_ref": "cA"}, headers=admin_auth)
+    assert use.status_code == 201, use.text
+    assert use.json()["kind"] == "change_ppt" and use.json()["case_ref"] == "cA"
+    # case A no longer lists what it holds; case B is offered it once (same file)
+    lst_a = await client.get(
+        f"/api/v1/changes/{cid}/attachments/reusable?assessment_id={aid}&case_ref=cA",
+        headers=admin_auth)
+    assert lst_a.json() == []
+    lst_b = await client.get(
+        f"/api/v1/changes/{cid}/attachments/reusable?assessment_id={aid}&case_ref=cB",
+        headers=admin_auth)
+    assert [r["filename"] for r in lst_b.json()] == ["request.msg"]
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 400 and "case 2" in res.json()["detail"]
+    use = await client.post(
+        f"/api/v1/changes/{cid}/attachments/{lst_b.json()[0]['id']}/reuse",
+        json={"assessment_id": aid, "case_ref": "cB"}, headers=admin_auth)
+    assert use.status_code == 201, use.text
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 200, res.text
+    # the copy is its own file: it downloads, and the original is untouched
+    dl = await client.get(
+        f"/api/v1/changes/{cid}/attachments/{use.json()['id']}/download", headers=admin_auth)
+    assert dl.status_code == 200 and dl.content == b"the customer asks"
