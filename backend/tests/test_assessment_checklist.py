@@ -630,6 +630,7 @@ async def test_a_document_on_the_change_can_be_picked_as_the_change_presentation
     req = await client.post(
         f"/api/v1/changes/{cid}/attachments",
         files={"file": ("request.msg", b"the customer asks", "application/octet-stream")},
+        data={"kind": "customer_file"},     # how the intake files the request
         headers=admin_auth)
     assert req.status_code in (200, 201), req.text
     for case in ("cA", "cB"):

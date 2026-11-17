@@ -2682,7 +2682,8 @@ async def upload_attachment(
 # another department already filed (the first one made is shared with all).
 # Picking one files a copy into the picker's own slot; the slot stays owed
 # until one is picked or a new deck is uploaded.
-REUSABLE_KINDS = ("general", "customer_email", "change_ppt")
+# customer_file = what the intake / capture files (the request, often a mail)
+REUSABLE_KINDS = ("general", "customer_file", "customer_email", "change_ppt")
 
 
 async def _reusable_attachments(db, change, user) -> list:
