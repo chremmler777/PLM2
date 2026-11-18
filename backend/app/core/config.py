@@ -125,6 +125,9 @@ class Settings(BaseSettings):
     # a project with open lines and no closed LOP meeting for more than this many
     # days escalates its PM
     lop_meeting_gap_days: int = 10
+    # LOP overview: these project numbers lead the list (the four the LOP started
+    # with, Christoph 2026-11-18); the others follow in project-number order.
+    lop_top_projects: str = "1748,1864,1994,2277"
     # LOP mail (lop_digest, lop_escalation, lop_minutes) stays a badge until this
     # is on (env LOP_MAIL_ENABLED); it does not touch the ECR mails.
     lop_mail_enabled: bool = False

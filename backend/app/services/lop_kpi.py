@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.models.entities import Plant, Project, User
 from app.models.lop import LopEvent, LopLine, LopMeeting, LopMeetingMark
 from app.models.sep import SepGate
@@ -301,9 +302,10 @@ async def overview(db: AsyncSession, user: User) -> dict:
             logger.exception("PDB block failed for project %s", p.id)
             row["pdb"] = _pdb_block(None, items)
         rows.append(row)
-    # Christoph 2026-11-18 (LOP on for every project): the projects with open
-    # tasks on top, most first; the rest stay in project-number order.
-    rows.sort(key=lambda r: -r["open"])
+    # Christoph 2026-11-18 (LOP on for every project): the projects named in
+    # settings.lop_top_projects on top, the others below, both by number.
+    top = {c.strip() for c in get_settings().lop_top_projects.split(",") if c.strip()}
+    rows.sort(key=lambda r: r["code"] not in top)
     totals = kpi(all_items, scope.today)
     totals["pdb_without_name_and_date"] = sum(
         r["pdb"]["pdb_without_name_and_date"] or 0 for r in rows)
