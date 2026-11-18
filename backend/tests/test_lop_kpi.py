@@ -441,3 +441,21 @@ async def test_closed_line_with_a_date_but_no_closing_time_is_not_measured(
     await _db_line(session_factory, lop_project.id, status="closed", closed_at=None,
                    first_due_date=_today() + timedelta(days=3))
     assert _row(await _overview(client, pm_auth), lop_project)["on_time_pct_4w"] is None
+
+
+async def test_overview_puts_projects_with_open_tasks_on_top(client, pm_auth, lop_project, session_factory):
+    """Christoph 2026-11-18: with the LOP on for every project the active ones lead."""
+    from app.models.entities import Plant, Project
+    async with session_factory() as s:
+        plant_id = (await s.execute(select(Plant.id))).scalars().first()
+        s.add(Project(plant_id=plant_id, name="Empty early number", code="0001",
+                      status="active", lop_enabled=True))
+        await s.commit()
+    r = await client.post(f"/api/v1/lop/projects/{lop_project.id}/lines", headers=pm_auth,
+                          json={"title": "Gauge concept", "department_id": lop_project.apqp_id,
+                                "due_date": "2026-11-20"})
+    assert r.status_code == 201, r.text
+    rows = (await client.get("/api/v1/lop/overview", headers=pm_auth)).json()["projects"]
+    codes = [x["code"] for x in rows]
+    assert codes[0] == "lop1" and rows[0]["open"] == 1
+    assert codes.index("0001") > 0 and rows[codes.index("0001")]["open"] == 0
