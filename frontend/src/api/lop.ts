@@ -42,6 +42,7 @@ export const lopOverviewKeys = {
   lines: (q: LopLinesQuery) => ['lop-overview', 'lines', q] as const,
   mine: ['lop-mine'] as const,
   myEscalations: ['lop-mine', 'escalations'] as const,
+  myDepartments: ['lop-mine', 'departments'] as const,
 }
 
 export const lopApi = {
@@ -50,6 +51,9 @@ export const lopApi = {
     (await client.get('/v1/lop/lines', { params: q })).data,
   mine: async (): Promise<LopLineInProject[]> => (await client.get('/v1/lop/mine')).data,
   myEscalations: async (): Promise<LopMyEscalation[]> => (await client.get('/v1/lop/escalations/mine')).data,
+  /** For a department manager: every open line of the departments they manage. */
+  myDepartments: async (): Promise<{ departments: { id: number; name: string }[]; lines: LopLineInProject[] }> =>
+    (await client.get('/v1/lop/departments/mine')).data,
   pdb: async (projectId: number, all: boolean): Promise<PdbResponse> =>
     (await client.get(`/v1/lop/projects/${projectId}/pdb`, all ? { params: { all: true } } : undefined)).data,
   createLine: async (projectId: number, body: LineCreate): Promise<LopLine> =>

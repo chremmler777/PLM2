@@ -124,6 +124,27 @@ async def mine(user: User = Depends(get_current_user), db: AsyncSession = Depend
     return out
 
 
+@router.get("/departments/mine")
+async def my_departments_lines(user: User = Depends(get_current_user),
+                               db: AsyncSession = Depends(get_db)):
+    """For a department manager (Christoph 2026-11-18: "he needs to see all
+    the tasks of his team as a manager"): every open LOP line of the
+    departments they manage, across all projects, whoever owns it. View
+    only: managing grants no write rights, a row opens the project's LOP.
+    {departments: []} = not a manager, the group hides."""
+    depts = await LopService.managed_departments(db, user)
+    if not depts:
+        return {"departments": [], "lines": []}
+    rows = await LopService.open_lines_of_departments(db, user, [d.id for d in depts])
+    ctx = await LopService.context(db, user, [ln for ln, _ in rows], can_manage=False)
+    lines = []
+    for line, project in rows:
+        d = LopService.line_dict(line, ctx)
+        d.update(project_code=project.code, project_name=project.name)
+        lines.append(d)
+    return {"departments": [{"id": d.id, "name": d.name} for d in depts], "lines": lines}
+
+
 @router.get("/overview")
 async def overview(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Control KPIs per project and department, for everyone logged in."""

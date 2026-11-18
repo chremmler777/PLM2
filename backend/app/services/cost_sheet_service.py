@@ -298,8 +298,15 @@ async def create_draft(db: AsyncSession, org_id: int, user_id: Optional[int],
     return draft
 
 
-# Departments that decide but never assess or book hours.
-NON_ROUTABLE_DEPARTMENTS = ("Management",)
+# Departments that never assess or book hours in a change, with the reason
+# shown when someone tries to route them. Management decides (OKs only).
+# Launch Manager (Christoph 2026-11-18): on the project team and in the
+# project LOP, no work in changes for now.
+NON_ROUTABLE_REASONS = {
+    "Management": "gives OKs and books no hours",
+    "Launch Manager": "works in the project LOP and has no task in changes",
+}
+NON_ROUTABLE_DEPARTMENTS = tuple(NON_ROUTABLE_REASONS)
 
 
 async def routable_department_ids(db: AsyncSession) -> list[int]:

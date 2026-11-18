@@ -49,7 +49,7 @@ export function pickableDepartments<T extends { id: number; is_active?: boolean 
  * backend cost_sheet_service.NON_ROUTABLE_DEPARTMENTS): never offered when a
  * department is added to the routing.
  */
-export const NON_ROUTABLE_DEPARTMENTS = ['Management']
+export const NON_ROUTABLE_DEPARTMENTS = ['Management', 'Launch Manager']
 
 /** May this department be added to a change's routing? Active and routable. */
 export function isRoutable(d: { name: string; is_active?: boolean | null }): boolean {

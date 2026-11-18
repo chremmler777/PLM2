@@ -3162,6 +3162,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: '{d} is never routed ({why}) but owns {n} open check item(s): make them questions or withdraw them, then proceed.',
   },
   'proceed.whyManagement': { de: 'gibt Freigaben, bucht keine Stunden', en: 'gives OKs, books no hours' },
+  'proceed.whyLaunchManager': { de: 'arbeitet in der Projekt-LOP, hat keine Aufgabe in Änderungen', en: 'works in the project LOP, has no task in changes' },
   'proceed.whyRetired': { de: 'stillgelegt', en: 'retired' },
   'proceed.routeAs': { de: '{d} routen: {l}', en: 'Route {d}: {l}' },
   'proceed.conditionsInfo': {

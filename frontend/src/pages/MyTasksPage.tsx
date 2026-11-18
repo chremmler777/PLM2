@@ -9,6 +9,7 @@ import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import EscalationsCard from '../components/EscalationsCard';
 import LateInMyDepartments from '../components/LateInMyDepartments';
+import LopInMyDepartments from '../components/lop/LopInMyDepartments';
 import { rasicColors, shownLetters } from '../lib/constants';
 import { formatCalendarDate, formatDate } from '../lib/format';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
@@ -1047,6 +1048,7 @@ export default function MyTasksPage() {
 
       {/* department managers only (migration 149): view only */}
       <LateInMyDepartments />
+      <LopInMyDepartments />
 
       <IntakeSection />
 

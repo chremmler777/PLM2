@@ -67,3 +67,19 @@ async def test_management_books_no_hours(session_factory, seed):
         names = set((await s.execute(select(Department.name).where(
             Department.id.in_(await routable_department_ids(s))))).scalars())
         assert "Toolshop" in names and "Management" not in names
+
+
+async def test_launch_manager_is_never_routed_and_says_why(client, session_factory, seed):
+    """Launch Manager (Christoph 2026-11-18) is on the project team and in the
+    project LOP; it takes no task letter in a change and no cost-sheet rate."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.cost_sheet_service import routable_department_ids
+    await _member_of(session_factory, seed, "Launch Manager")
+    async with session_factory() as s:
+        lm = (await s.execute(select(Department).where(
+            Department.name == "Launch Manager"))).scalar_one()
+        assert lm.id not in await routable_department_ids(s)
+        refusals = await ChangeRoutingService.unroutable_refusals(s, {lm.id: "C"})
+        assert refusals == ["Launch Manager works in the project LOP and has no task "
+                            "in changes: it is never routed"]
+        assert await ChangeRoutingService.unroutable_refusals(s, {lm.id: "I"}) == []
