@@ -211,7 +211,8 @@ export function ownerUnroutableLine(
   departments: { id: number; name: string; is_active?: boolean | null }[],
 ): string {
   const d = departments.find((x) => x.id === id)
-  const why = d?.is_active === false ? t('proceed.whyRetired') : t('proceed.whyManagement')
+  const why = d?.is_active === false ? t('proceed.whyRetired')
+    : d?.name === 'Launch Manager' ? t('proceed.whyLaunchManager') : t('proceed.whyManagement')
   return t('proceed.ownerUnroutable').replace('{d}', d?.name ?? `#${id}`)
     .replace('{why}', why).replace('{n}', String(n))
 }

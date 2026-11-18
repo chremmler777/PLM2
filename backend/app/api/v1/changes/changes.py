@@ -2676,6 +2676,115 @@ async def upload_attachment(
             "validation_issue_id": att.validation_issue_id}
 
 
+# Christoph 2026-11-17: the change presentation a Yes owes need not be made
+# twice. The slot offers the documents already on the change: the customer's
+# initial request (baseline), general documents, and the change presentation
+# another department already filed (the first one made is shared with all).
+# Picking one files a copy into the picker's own slot; the slot stays owed
+# until one is picked or a new deck is uploaded.
+# customer_file = what the intake / capture files (the request, often a mail)
+REUSABLE_KINDS = ("general", "customer_file", "customer_email", "change_ppt")
+
+
+async def _reusable_attachments(db, change, user) -> list:
+    from app.services.costing_position_service import CostingPositionService
+    hidden = await CostingPositionService.unreadable_attachment_ids(
+        db, change, user, change.attachments)
+    return [a for a in change.attachments
+            if a.kind in REUSABLE_KINDS and a.id not in hidden
+            and a.concern_id is None and a.costing_offer_id is None
+            and a.validation_issue_id is None
+            and a.stored_path and os.path.exists(a.stored_path)]
+
+
+@router.get("/{change_id}/attachments/reusable")
+async def reusable_attachments(
+    change_id: int, assessment_id: Optional[int] = None,
+    case_ref: Optional[str] = None,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Documents on the change that can stand as a change presentation in
+    the slot (assessment, case) asking. One row per file content; what the
+    slot already holds is left out."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    rows = await _reusable_attachments(db, change, current_user)
+    mine = {a.sha256 for a in rows
+            if a.kind == "change_ppt" and assessment_id is not None
+            and a.assessment_id == assessment_id
+            and (a.case_ref or None) == ((case_ref or "").strip() or None)}
+    dept_of = {x.id: x.department_id for x in change.assessments}
+    names: dict = {}
+    for did in {d for d in dept_of.values() if d is not None}:
+        dept = await db.get(Department, did)
+        names[did] = dept.name if dept else None
+    out, seen = [], set()
+    # the customer's request first, then decks already made, then the rest
+    rank = lambda a: (0 if a.phase == "baseline" and a.assessment_id is None
+                      else 1 if a.kind == "change_ppt" else 2, a.id)
+    for a in sorted(rows, key=rank):
+        if a.sha256 in mine or a.sha256 in seen:
+            continue
+        seen.add(a.sha256)
+        out.append({
+            "id": a.id, "filename": a.filename, "kind": a.kind, "phase": a.phase,
+            "size_bytes": a.size_bytes,
+            "source": ("initial" if a.phase == "baseline" and a.assessment_id is None
+                       else "change_ppt" if a.kind == "change_ppt" else "other"),
+            "department_name": names.get(dept_of.get(a.assessment_id)),
+            "uploaded_by_name": a.uploaded_by_name,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        })
+    return out
+
+
+class ReuseAttachmentIn(BaseModel):
+    assessment_id: int
+    case_ref: Optional[str] = None
+
+
+@router.post("/{change_id}/attachments/{attachment_id}/reuse",
+             status_code=status.HTTP_201_CREATED)
+async def reuse_attachment(
+    change_id: int, attachment_id: int, payload: ReuseAttachmentIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """File a document already on the change as the change presentation of
+    one assessment (or one of its cases). A copy, so the original and the
+    slot live and die on their own."""
+    import shutil
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    src = next((a for a in await _reusable_attachments(db, change, current_user)
+                if a.id == attachment_id), None)
+    if src is None:
+        raise HTTPException(status_code=404, detail="Document not found on this change")
+    uploads_dir = os.path.join(os.getcwd(), "uploads", "changes", str(change_id))
+    os.makedirs(uploads_dir, exist_ok=True)
+    safe_name = os.path.basename(src.filename or "attachment.bin")
+    stored_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}_{safe_name}")
+    shutil.copyfile(src.stored_path, stored_path)
+    try:
+        att = await ChangeService.add_attachment(
+            db, change, filename=safe_name, stored_path=stored_path,
+            content_type=src.content_type or "application/octet-stream",
+            size_bytes=src.size_bytes, sha256=src.sha256,
+            user_id=current_user.id, kind="change_ppt",
+            assessment_id=payload.assessment_id, actor=current_user,
+            case_ref=(payload.case_ref or "").strip()[:40] or None,
+            reused_from=src,
+        )
+    except ChangeError as e:
+        os.remove(stored_path)
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return {"id": att.id, "filename": att.filename, "size_bytes": att.size_bytes,
+            "kind": att.kind, "assessment_id": att.assessment_id,
+            "case_ref": att.case_ref, "reused_from_id": src.id}
+
+
 @router.get("/{change_id}/attachments/{attachment_id}/download")
 async def download_attachment(
     change_id: int, attachment_id: int,

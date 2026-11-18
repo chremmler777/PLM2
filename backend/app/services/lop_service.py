@@ -779,6 +779,31 @@ class LopService:
         return [(line, p) for line, p in rows]
 
     @staticmethod
+    async def managed_departments(session: AsyncSession, user: User) -> list[Department]:
+        """The active departments the user manages (wf_departments.manager_id)."""
+        return list((await session.execute(
+            select(Department).where(Department.manager_id == user.id,
+                                     Department.is_active.is_(True))
+            .order_by(Department.sort_order, Department.name))).scalars().all())
+
+    @staticmethod
+    async def open_lines_of_departments(session: AsyncSession, user: User,
+                                        department_ids: list[int]) -> list[tuple[LopLine, Project]]:
+        """Every open line of these departments across the LOP projects of the
+        user's organization, whoever owns it: late first comes from the caller."""
+        if not department_ids:
+            return []
+        rows = (await session.execute(
+            select(LopLine, Project).join(Project, Project.id == LopLine.project_id)
+            .join(Plant, Plant.id == Project.plant_id)
+            .where(LopLine.department_id.in_(department_ids),
+                   LopLine.status != "closed",
+                   Project.lop_enabled.is_(True),
+                   Plant.organization_id == user.organization_id)
+            .order_by(LopLine.due_date.is_(None), LopLine.due_date, LopLine.id))).all()
+        return [(line, p) for line, p in rows]
+
+    @staticmethod
     async def context(session: AsyncSession, user: User, lines: list[LopLine],
                       *, can_manage: bool) -> LineContext:
         ctx = LineContext(user_id=user.id, can_manage=can_manage, today=_today())

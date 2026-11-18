@@ -785,9 +785,9 @@ class MeetingService:
         """Why a department can own no check item: proceed routes an
         unrouted owner as C (A2-03), and Management (OKs only, no hours) or
         a retired department takes no task letter. None: it can."""
-        from app.services.cost_sheet_service import NON_ROUTABLE_DEPARTMENTS
-        if dept.name in NON_ROUTABLE_DEPARTMENTS:
-            return f"{dept.name} gives OKs and books no hours, so it is never routed"
+        from app.services.cost_sheet_service import NON_ROUTABLE_REASONS
+        if dept.name in NON_ROUTABLE_REASONS:
+            return f"{dept.name} {NON_ROUTABLE_REASONS[dept.name]}, so it is never routed"
         if not dept.is_active:
             return f"{dept.name} is retired, so it cannot be routed"
         return None

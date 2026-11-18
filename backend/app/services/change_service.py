@@ -8898,6 +8898,7 @@ class ChangeService:
         actor: Optional[User] = None,
         validation_issue_id: Optional[int] = None,
         case_ref: Optional[str] = None,
+        reused_from: Optional[ChangeAttachment] = None,
     ) -> ChangeAttachment:
         # Documents uploaded during capture/scoping are the baseline a decision
         # is made on; later ones are tracked separately as post_scoping changes.
@@ -8906,7 +8907,10 @@ class ChangeService:
             raise ChangeError(f"Invalid attachment kind '{kind}'")
         # The documents a checklist row owes take only the file types they
         # come in (the change presentation: PowerPoint or its PDF export).
-        exts = checklist.allowed_extensions(kind)
+        # A document picked from the change itself (Christoph 2026-11-17: the
+        # customer's request or a deck another department already made) is
+        # taken as it is, e.g. the request mail (.msg).
+        exts = None if reused_from is not None else checklist.allowed_extensions(kind)
         if exts and not filename.lower().endswith(exts):
             raise ChangeError(
                 f"{checklist.DOCUMENT_PHRASES[kind].capitalize()} must be a "
@@ -9028,13 +9032,17 @@ class ChangeService:
                 await session.flush()
         await ChangeService.append_changelog(
             session, change, "attachment_added",
-            f"Attached {filename} ({phase}, {kind})", user_id,
+            (f"Reused {filename} from the change's documents as {kind}"
+             if reused_from is not None
+             else f"Attached {filename} ({phase}, {kind})"), user_id,
             new_value={"filename": filename, "phase": phase, "kind": kind,
                        "responds_to_id": responds_to_id,
                        "concern_id": concern_id,
                        "assessment_id": assessment_id,
                        "costing_offer_id": costing_offer_id,
-                       "validation_issue_id": validation_issue_id},
+                       "validation_issue_id": validation_issue_id,
+                       **({"reused_from_id": reused_from.id}
+                          if reused_from is not None else {})},
         )
         if validation_issue_id is not None and kind == "customer_email":
             # A6-02: the customer's mail on a requested concession makes it

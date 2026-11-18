@@ -853,15 +853,15 @@ class ChangeRoutingService:
         (R/A/S/C): Management gives OKs and books no hours, a retired
         department takes no new work. Informed (I) is always fine. The same
         words as the routing-deviation add path."""
-        from app.services.cost_sheet_service import NON_ROUTABLE_DEPARTMENTS
+        from app.services.cost_sheet_service import NON_ROUTABLE_REASONS
         ids = [d for d, l in letters.items() if l in ASSESSMENT_LETTERS]
         if not ids:
             return []
         out = []
         for dept in (await session.execute(select(Department).where(
                 Department.id.in_(ids)).order_by(Department.name))).scalars():
-            if dept.name in NON_ROUTABLE_DEPARTMENTS:
-                out.append(f"{dept.name} gives OKs and books no hours: "
+            if dept.name in NON_ROUTABLE_REASONS:
+                out.append(f"{dept.name} {NON_ROUTABLE_REASONS[dept.name]}: "
                            "it is never routed")
             elif not dept.is_active:
                 out.append(f"{dept.name} is retired: it cannot be routed")
@@ -927,12 +927,12 @@ class ChangeRoutingService:
             # P4: Management gives OKs and books no hours (no cost-sheet
             # rate), and a retired department takes no new work: neither is
             # ever routed, whoever asks.
-            from app.services.cost_sheet_service import NON_ROUTABLE_DEPARTMENTS
+            from app.services.cost_sheet_service import NON_ROUTABLE_REASONS
             dept = await session.get(Department, department_id)
             if dept is None:
                 raise ValueError("Department not found")
-            if dept.name in NON_ROUTABLE_DEPARTMENTS:
-                raise ValueError(f"{dept.name} gives OKs and books no hours: "
+            if dept.name in NON_ROUTABLE_REASONS:
+                raise ValueError(f"{dept.name} {NON_ROUTABLE_REASONS[dept.name]}: "
                                  "it is never routed")
             if not dept.is_active:
                 raise ValueError(f"{dept.name} is retired: it cannot be routed")

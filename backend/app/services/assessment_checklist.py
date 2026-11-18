@@ -47,7 +47,8 @@ PPT_EXTENSIONS = (".ppt", ".pptx", ".pdf")
 # for the slots that sit outside a checklist row (the not-feasible deck, the
 # bucket's RFQ slot). The change presentation stays PowerPoint or its PDF
 # export: a Word file is not the deck the customer is shown.
-RFQ_EXTENSIONS = (".pdf", ".xlsx", ".xls", ".doc", ".docx", ".msg", ".eml")
+# Christoph 2026-11-17: a supplier quote also comes as a deck (PPT or PDF).
+RFQ_EXTENSIONS = (".pdf", ".ppt", ".pptx", ".xlsx", ".xls", ".doc", ".docx", ".msg", ".eml")
 
 # kind -> (label_de, label_en, allowed extensions)
 REQUIRED_DOCUMENTS = {
